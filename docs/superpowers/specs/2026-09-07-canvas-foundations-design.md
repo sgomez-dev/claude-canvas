@@ -429,6 +429,32 @@ Cases:
   `console.error` straight over the Ink render. Canvas-side errors go to a log
   file under `dataDir` and, where useful, into the TUI's own status line.
 
+### Never close a socket in the same tick as a final write
+
+Found during Task 6, 2026-09-07, and measured rather than assumed: writing a
+frame and then calling `end()` synchronously **discards the frame** on
+Windows/Bun when the peer still has unread inbound data queued. Closing under
+that condition produces an OS-level RST, and the RST drops the outbound write
+that was still buffered. Isolated outside project code at 33 failures in 40
+runs with an immediate close, against 0 in 60 with the close deferred by one
+tick.
+
+This is not a test artefact. It affects every send-then-close path in the
+design, and there are two:
+
+- The authentication rejection in the canvas server, which must deliver its
+  `error` frame before closing or the controller sees an unexplained
+  disconnect instead of "authentication failed".
+- **`requestClose` in the controller client**, which sends `{type:"close"}` and
+  then closes. Losing that frame means the canvas is never asked to exit — and
+  since a canvas must exit 0 by itself because nothing can remove a pane
+  otherwise, a dropped close message is precisely how a zombie pane appears.
+
+So: defer the close by a tick after a final write, and guard the connection
+against processing anything further in that window — the guard matters most on
+the rejection path, where the window must not become an opportunity to deliver
+a message that authentication just refused.
+
 ## Testing
 
 TDD throughout: tests before implementation.

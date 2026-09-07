@@ -51,3 +51,33 @@ test("throws on malformed JSON inside a well-formed frame", () => {
 test("handles a zero-length chunk", () => {
   expect(new FrameDecoder().push(new Uint8Array(0))).toEqual([]);
 });
+
+test("complete frame plus partial next, completed on a later push", () => {
+  const d = new FrameDecoder();
+  const frame1 = encodeFrame({ type: "ping" });
+  const frame2 = encodeFrame({ type: "pong" });
+  const combined = new Uint8Array(frame1.length + frame2.length);
+  combined.set(frame1, 0);
+  combined.set(frame2, frame1.length);
+
+  // Push first frame in full plus first 2 bytes of second frame
+  const partial = combined.slice(0, frame1.length + 2);
+  expect(d.push(partial)).toEqual([{ type: "ping" }]);
+
+  // Push remaining bytes of second frame
+  expect(d.push(combined.slice(frame1.length + 2))).toEqual([{ type: "pong" }]);
+});
+
+test("zero-length declared body throws on JSON.parse", () => {
+  const header = new Uint8Array(4);
+  new DataView(header.buffer).setUint32(0, 0, false);
+  expect(() => new FrameDecoder().push(header)).toThrow();
+});
+
+test("frame of exactly MAX_FRAME_BYTES is accepted, not rejected", () => {
+  const d = new FrameDecoder();
+  const header = new Uint8Array(4);
+  new DataView(header.buffer).setUint32(0, MAX_FRAME_BYTES, false);
+  // Should not throw on the header alone; should wait for more bytes
+  expect(d.push(header)).toEqual([]);
+});

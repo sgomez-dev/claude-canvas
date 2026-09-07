@@ -35,6 +35,7 @@
 | `canvas/test/harness/render.tsx` | Fake stdout/stdin, frame capture |
 | `canvas/src/runtime/paths.ts` | Cross-platform data directory resolution |
 | `canvas/src/runtime/validate.ts` | Identifier whitelist — the injection gate |
+| `canvas/src/runtime/token.ts` | Random token generation — leaf, so the transport need not import storage |
 | `canvas/src/runtime/protocol.ts` | Frame encode/decode, message types |
 | `canvas/src/runtime/registry.ts` | Per-canvas record files, liveness, reuse |
 | `canvas/src/runtime/server.ts` | Canvas-side TCP server + handshake |
@@ -683,10 +684,25 @@ git commit -m "feat: length-prefixed frame protocol with 16MB ceiling"
 ### Task 5: Registry
 
 **Files:**
-- Create: `canvas/src/runtime/registry.ts`, `canvas/src/runtime/registry.test.ts`
+- Create: `canvas/src/runtime/token.ts`, `canvas/src/runtime/registry.ts`, `canvas/src/runtime/registry.test.ts`
+
+`token.ts` is a deliberate leaf module rather than a function inside
+`registry.ts`. If `newToken` lived in the registry, `server.ts` would import
+the storage layer purely to obtain a random hex string, dragging in `paths.ts`
+and `validate.ts` with it — a layering inversion. The token belongs to the
+transport's authentication concern.
+
+```ts
+// canvas/src/runtime/token.ts
+export function newToken(): string {
+  const bytes = new Uint8Array(32);
+  crypto.getRandomValues(bytes);
+  return Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
+}
+```
 
 **Interfaces:**
-- Consumes: `recordPath`, `canvasesDir` (Task 2); `assertIdent` (Task 3).
+- Consumes: `recordPath`, `canvasesDir` (Task 2); `assertIdent` (Task 3); `newToken` from `./token`.
 - Produces:
 
 ```ts
@@ -781,18 +797,13 @@ Expected: FAIL — cannot resolve module `./registry`.
 import { mkdir, unlink, chmod, readdir } from "node:fs/promises";
 import { canvasesDir, recordPath } from "./paths";
 import { assertIdent } from "./validate";
+export { newToken } from "./token";
 
 export interface CanvasRecord {
   id: string; kind: string; scenario: string;
   port: number; token: string; pid: number;
   startedAt: string; host: string;
   wtSession?: string; lastError?: string;
-}
-
-export function newToken(): string {
-  const bytes = new Uint8Array(32);
-  crypto.getRandomValues(bytes);
-  return Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
 }
 
 export function isAlive(pid: number): boolean {
@@ -881,7 +892,7 @@ git commit -m "feat: per-canvas registry with liveness and token auth material"
 - Create: `canvas/src/runtime/server.ts`, `canvas/src/runtime/server.test.ts`
 
 **Interfaces:**
-- Consumes: `encodeFrame`, `FrameDecoder`, `ControllerMessage`, `CanvasMessage` (Task 4); `newToken` (Task 5).
+- Consumes: `encodeFrame`, `FrameDecoder`, `ControllerMessage`, `CanvasMessage` (Task 4); `newToken` from `./token` (Task 5) — never from `./registry`, which would invert the layering.
 - Produces:
 
 ```ts
@@ -1006,7 +1017,7 @@ Expected: FAIL — cannot resolve module `./server`.
 
 ```ts
 import { encodeFrame, FrameDecoder, type CanvasMessage, type ControllerMessage } from "./protocol";
-import { newToken } from "./registry";
+import { newToken } from "./token";
 import type { Socket } from "bun";
 
 export interface CanvasServer {
@@ -2481,7 +2492,12 @@ Only inside type positions, e.g. `JSX.Element` → `React.JSX.Element`. Ensure e
 - [ ] **Step 3: Confirm those 13 are gone and no others appeared**
 
 Run: `bun x tsc --noEmit 2>&1 | grep -c "error TS"`
-Expected: 100 (113 − 13).
+Expected: **97**.
+
+The arithmetic, since it is easy to get wrong: the repo starts at 113, Task 13
+deletes `src/api/` which removes its 3, leaving 110 when this task begins.
+Fixing these 13 leaves 97 for Task 16. None of the 13 `TS2503` errors live in
+`api/canvas-api.ts`, so they do not overlap with the 3 already gone.
 
 - [ ] **Step 4: Confirm rendering is unchanged**
 
@@ -2499,7 +2515,10 @@ git commit -m "fix: use React.JSX namespace for React 19"
 
 ### Task 16: The remaining type errors, file by file
 
-~98 errors, almost all `noUncheckedIndexedAccess` fallout (TS2532, TS18048, TS2345, TS2322). Not cosmetic: `Date | undefined` reaches `new Date()` and comparisons.
+**97 errors**, almost all `noUncheckedIndexedAccess` fallout (TS2532, TS18048, TS2345, TS2322). Not cosmetic: `Date | undefined` reaches `new Date()` and comparisons.
+
+(The spec says "~98". 97 is the exact figure: 113 total, minus the 3 in the
+deleted `src/api/`, minus the 13 `JSX` renames from Task 15.)
 
 **Files, in ascending order of error count** so the pattern is learned on small files first:
 

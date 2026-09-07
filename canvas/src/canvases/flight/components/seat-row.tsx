@@ -13,7 +13,7 @@ interface Props {
 }
 
 export function SeatRow({ row, seatmap, selectedSeat, cursorCol, focused }: Props) {
-  const parts: JSX.Element[] = [];
+  const parts: React.JSX.Element[] = [];
 
   // Row number
   parts.push(

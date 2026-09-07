@@ -396,7 +396,7 @@ export function MeetingPickerView({ id, config, enabled = false }: Props) {
 
   // Render time column
   const renderTimeColumn = () => {
-    const slots: JSX.Element[] = [];
+    const slots: React.JSX.Element[] = [];
     for (let slotIndex = 0; slotIndex < totalSlots; slotIndex++) {
       const height = slotHeights[slotIndex];
       const slotMinutes = slotIndex * slotGranularity;
@@ -404,7 +404,7 @@ export function MeetingPickerView({ id, config, enabled = false }: Props) {
       const minute = slotMinutes % 60;
       const showLabel = minute === 0;
 
-      const lines: JSX.Element[] = [];
+      const lines: React.JSX.Element[] = [];
       for (let line = 0; line < height; line++) {
         lines.push(
           <Text key={line} color="gray">
@@ -426,7 +426,7 @@ export function MeetingPickerView({ id, config, enabled = false }: Props) {
   // Render day column
   const renderDayColumn = (dayIndex: number) => {
     const day = weekDays[dayIndex];
-    const slots: JSX.Element[] = [];
+    const slots: React.JSX.Element[] = [];
 
     for (let slotIndex = 0; slotIndex < totalSlots; slotIndex++) {
       const height = slotHeights[slotIndex];
@@ -440,7 +440,7 @@ export function MeetingPickerView({ id, config, enabled = false }: Props) {
       const isCursor = cursorDay === dayIndex && cursorSlot === slotIndex;
       const isFree = !isBusy;
 
-      const lines: JSX.Element[] = [];
+      const lines: React.JSX.Element[] = [];
       for (let line = 0; line < height; line++) {
         let content = " ".repeat(columnWidth - 1);
         let bgColor: string | undefined;

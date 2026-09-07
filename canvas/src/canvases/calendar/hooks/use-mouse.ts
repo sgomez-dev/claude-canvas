@@ -71,9 +71,11 @@ function parseMouseEvent(data: string): MouseEvent | null {
   if (!match) return null;
 
   const [, btnStr, xStr, yStr, action] = match;
-  const btn = parseInt(btnStr, 10);
-  const x = parseInt(xStr, 10);
-  const y = parseInt(yStr, 10);
+  // The regex has exactly four capture groups and `match` already succeeded above,
+  // so all four are present.
+  const btn = parseInt(btnStr!, 10);
+  const x = parseInt(xStr!, 10);
+  const y = parseInt(yStr!, 10);
   const pressed = action === "M";
 
   // Decode button and modifiers from btn byte

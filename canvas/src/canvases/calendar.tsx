@@ -77,7 +77,7 @@ function getWeekDays(baseDate: Date): Date[] {
 
 function formatDayName(date: Date): string {
   const days = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
-  return days[date.getDay()];
+  return days[date.getDay()]!; // Date.getDay() always returns 0-6, within bounds of the 7-element days array.
 }
 
 function formatDayNumber(date: Date): string {
@@ -545,7 +545,8 @@ function CalendarDisplay({ config }: CalendarDisplayProps) {
     <Box flexDirection="column" width={termWidth} height={termHeight} paddingX={1}>
       {/* Title bar */}
       <Box marginBottom={1}>
-        <Text bold color="white">{formatMonthYear(weekDays[0])}</Text>
+        {/* getWeekDays always returns 7 entries, so index 0 exists. */}
+        <Text bold color="white">{formatMonthYear(weekDays[0]!)}</Text>
       </Box>
 
       {/* Day headers row */}

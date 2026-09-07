@@ -1,8 +1,26 @@
 import { test, expect } from "bun:test";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { emit, resolveWaitTimeout, listCanvases } from "./cli";
+import { unlink } from "node:fs/promises";
+import { emit, resolveWaitTimeout, listCanvases, runShow, runSpawn, type ActionIO } from "./cli";
 import { writeRecord, deleteRecord, newToken } from "./runtime/registry";
+import { configPath } from "./runtime/paths";
+
+// A fake ActionIO that records what would have gone to stdout and what exit
+// code would have been used, instead of ever calling the real process.exit
+// (which would tear down the test runner) or writing to the real stdout.
+function captureIO(): { io: ActionIO; lines: string[]; exits: number[] } {
+  const lines: string[] = [];
+  const exits: number[] = [];
+  return {
+    io: {
+      write: (s: string) => { lines.push(s); return true; },
+      exit: (code: number) => { exits.push(code); },
+    },
+    lines,
+    exits,
+  };
+}
 
 test("emit prints exactly one JSON object", () => {
   const lines: string[] = [];
@@ -55,5 +73,67 @@ test("list forwards live records from the registry", async () => {
     expect(result.canvases.map((c) => c.id)).toContain(id);
   } finally {
     await deleteRecord(id);
+  }
+});
+
+// Regression coverage for a review finding on this task: nothing previously
+// asserted that assertIdent is actually wired into the show/spawn action
+// bodies (as opposed to just existing as a helper elsewhere). These call the
+// real .action() logic via the runShow/runSpawn exports, not just a
+// standalone validator.
+test("show rejects an invalid kind and still exits 0 (never a non-zero exit on a pane)", async () => {
+  const { io, lines, exits } = captureIO();
+  // A valid --id is supplied so the kind check (which runs second) is the
+  // one that actually fires, rather than the default `${kind}-1` id
+  // inheriting the same bad characters and failing first.
+  await runShow("bad kind!", { id: "cli-test-show-badkind" }, io);
+  expect(exits).toEqual([0]);
+  expect(lines).toHaveLength(1);
+  const parsed = JSON.parse(lines[0] ?? "");
+  expect(parsed.status).toBe("error");
+  expect(parsed.message).toContain("Invalid kind");
+});
+
+test("show rejects an invalid --scenario and still exits 0", async () => {
+  const { io, lines, exits } = captureIO();
+  await runShow("document", { id: "cli-test-show-badscenario", scenario: "bad scenario!" }, io);
+  expect(exits).toEqual([0]);
+  const parsed = JSON.parse(lines[0] ?? "");
+  expect(parsed.status).toBe("error");
+  expect(parsed.message).toContain("Invalid scenario");
+});
+
+test("spawn rejects an invalid --id with exit 1 and an error status", async () => {
+  const { io, lines, exits } = captureIO();
+  await runSpawn("document", { id: "bad id!" }, io);
+  expect(exits).toEqual([1]);
+  const parsed = JSON.parse(lines[0] ?? "");
+  expect(parsed.status).toBe("error");
+  expect(parsed.message).toContain("Invalid id");
+});
+
+// Review finding: spawn used to write opts.config straight to configPath(id)
+// with no JSON.parse sanity check, then report {"status":"spawned"} even
+// though `show` would later crash trying to parse it back. Assert both that
+// spawn now reports the failure (exit 1, status "error") and, critically,
+// that it never wrote the bad config to disk first.
+test("spawn rejects malformed --config JSON before ever writing configPath, with exit 1", async () => {
+  const { io, lines, exits } = captureIO();
+  const id = "cli-test-spawn-badconfig";
+  try {
+    await runSpawn("document", { id, config: "{not valid json" }, io);
+    expect(exits).toEqual([1]);
+    const parsed = JSON.parse(lines[0] ?? "");
+    expect(parsed.status).toBe("error");
+    expect(parsed.message).toContain("Invalid --config");
+    expect(await Bun.file(configPath(id)).exists()).toBe(false);
+  } finally {
+    // Belt-and-braces: the assertion above already fails loudly if this file
+    // exists, but clean it up regardless in case a future regression writes it.
+    try {
+      await unlink(configPath(id));
+    } catch {
+      // already absent, which is the expected/passing case
+    }
   }
 });

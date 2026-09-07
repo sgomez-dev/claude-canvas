@@ -22,14 +22,33 @@ describe("rejects injection payloads", () => {
     "a|b",
     "a&b",
     "a\nb",
+    "calendar\n",         // trailing newline
     "",
     "x".repeat(65),
+    "Ａ",                 // full-width letter U+FF21
+    "‮",             // right-to-left override
+    "😀",                 // emoji (astral plane / surrogate pair)
   ];
   for (const value of bad) {
     test(JSON.stringify(value), () => {
       expect(() => assertIdent("id", value)).toThrow(InvalidIdentifierError);
     });
   }
+});
+
+describe("rejects non-string types", () => {
+  test("undefined", () => {
+    expect(() => assertIdent("id", undefined as any)).toThrow(InvalidIdentifierError);
+  });
+  test("null", () => {
+    expect(() => assertIdent("id", null as any)).toThrow(InvalidIdentifierError);
+  });
+  test("number", () => {
+    expect(() => assertIdent("id", 123 as any)).toThrow(InvalidIdentifierError);
+  });
+  test("boolean", () => {
+    expect(() => assertIdent("id", true as any)).toThrow(InvalidIdentifierError);
+  });
 });
 
 test("the error names the offending field and does not echo the payload", () => {

@@ -11,6 +11,6 @@ export class InvalidIdentifierError extends Error {
 }
 
 export function assertIdent(field: string, value: string): string {
-  if (!IDENT_RE.test(value)) throw new InvalidIdentifierError(field);
+  if (typeof value !== "string" || !IDENT_RE.test(value)) throw new InvalidIdentifierError(field);
   return value;
 }

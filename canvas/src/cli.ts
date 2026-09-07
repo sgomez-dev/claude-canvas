@@ -1,215 +1,139 @@
 #!/usr/bin/env bun
 import { program } from "commander";
-import { detectTerminal, spawnCanvas } from "./terminal";
+import { assertIdent } from "./runtime/validate";
+import { configPath } from "./runtime/paths";
+import { getValue, requestClose, waitForOutcome, DEFAULT_WAIT_MS } from "./runtime/client";
+import { listRecords, type CanvasRecord } from "./runtime/registry";
+import { detectHost } from "./host";
 
-// Set window title via ANSI escape codes
-function setWindowTitle(title: string) {
-  process.stdout.write(`\x1b]0;${title}\x07`);
+type Writer = (s: string) => boolean;
+
+// Every command prints exactly one JSON object on stdout. Diagnostics go to
+// stderr so they can never corrupt what Claude parses.
+export function emit(value: unknown, write: Writer = process.stdout.write.bind(process.stdout)): void {
+  write(`${JSON.stringify(value)}\n`);
 }
 
-program
-  .name("claude-canvas")
-  .description("Interactive terminal canvases for Claude")
-  .version("1.0.0");
+export function resolveWaitTimeout(seconds: string | undefined): number {
+  if (seconds === undefined) return DEFAULT_WAIT_MS;
+  const n = Number(seconds);
+  if (!Number.isFinite(n) || n <= 0) throw new Error(`Invalid --timeout: ${seconds}`);
+  return Math.round(n * 1000);
+}
+
+// Thin wrapper around listRecords so the "nothing has ever been registered"
+// path (canvasesDir() does not exist yet) can be exercised directly in
+// tests, without going through commander's process.exit-laden actions.
+// listRecords already handles the missing-directory case; this just gives
+// that first-run behavior a name to assert on from cli.test.ts.
+export async function listCanvases(): Promise<{ status: "ok"; canvases: CanvasRecord[] }> {
+  return { status: "ok", canvases: await listRecords() };
+}
+
+function fail(message: string): never {
+  process.stderr.write(`${message}\n`);
+  emit({ status: "error", message });
+  process.exit(1);
+}
+
+program.name("claude-canvas").version("1.0.0");
 
 program
-  .command("show [kind]")
-  .description("Show a canvas in the current terminal")
-  .option("--id <id>", "Canvas ID")
-  .option("--config <json>", "Canvas configuration (JSON)")
-  .option("--socket <path>", "Unix socket path for IPC")
-  .option("--scenario <name>", "Scenario name (e.g., display, meeting-picker)")
-  .action(async (kind = "demo", options) => {
-    const id = options.id || `${kind}-1`;
-    const config = options.config ? JSON.parse(options.config) : undefined;
-    const socketPath = options.socket;
-    const scenario = options.scenario || "display";
-
-    // Set window title
-    setWindowTitle(`canvas: ${kind}`);
-
-    // Dynamically import and render the canvas
+  .command("show <kind>")
+  .option("--id <id>")
+  .option("--scenario <name>")
+  .option("--config-file <path>")
+  .option("--offline", "render without opening a server (used by tests)")
+  .action(async (kind: string, opts) => {
+    const id = assertIdent("id", opts.id ?? `${kind}-1`);
+    assertIdent("kind", kind);
+    const scenario = assertIdent("scenario", opts.scenario ?? "display");
+    const config = opts.configFile ? await Bun.file(opts.configFile).json() : undefined;
+    process.stdout.write(`\x1b]0;canvas: ${kind}\x07`);
     const { renderCanvas } = await import("./canvases");
-    await renderCanvas(kind, id, config, { socketPath, scenario });
+    await renderCanvas(kind, id, config, { scenario, enabled: !opts.offline } as never);
+    // Always exit 0: a non-zero exit leaves an unremovable pane on Windows.
+    process.exit(0);
   });
 
 program
-  .command("spawn [kind]")
-  .description("Spawn a canvas in a new terminal window")
-  .option("--id <id>", "Canvas ID")
-  .option("--config <json>", "Canvas configuration (JSON)")
-  .option("--socket <path>", "Unix socket path for IPC")
-  .option("--scenario <name>", "Scenario name (e.g., display, meeting-picker)")
-  .action(async (kind = "demo", options) => {
-    const id = options.id || `${kind}-1`;
-    const result = await spawnCanvas(kind, id, options.config, {
-      socketPath: options.socket,
-      scenario: options.scenario,
-    });
-    console.log(`Spawned ${kind} canvas '${id}' via ${result.method}`);
-  });
-
-program
-  .command("env")
-  .description("Show detected terminal environment")
-  .action(() => {
-    const env = detectTerminal();
-    console.log("Terminal Environment:");
-    console.log(`  In tmux: ${env.inTmux}`);
-    console.log(`\nSummary: ${env.summary}`);
-  });
-
-program
-  .command("update <id>")
-  .description("Send updated config to a running canvas via IPC")
-  .option("--config <json>", "New canvas configuration (JSON)")
-  .action(async (id: string, options) => {
-    const { getSocketPath } = await import("./ipc/types");
-    const socketPath = getSocketPath(id);
-    const config = options.config ? JSON.parse(options.config) : {};
-
+  .command("spawn <kind>")
+  .option("--id <id>")
+  .option("--scenario <name>")
+  .option("--config <json>")
+  .action(async (kind: string, opts) => {
+    const id = assertIdent("id", opts.id ?? `${kind}-1`);
+    assertIdent("kind", kind);
+    const scenario = assertIdent("scenario", opts.scenario ?? "display");
+    const argv = [
+      process.execPath,
+      "run",
+      `${import.meta.dir}/cli.ts`,
+      "show",
+      kind,
+      "--id",
+      id,
+      "--scenario",
+      scenario,
+    ];
+    if (opts.config) {
+      // Config travels by file: Windows caps a command line near 32 KB, and
+      // Phase 3 screenshots would blow past it.
+      const path = configPath(id);
+      await Bun.write(path, opts.config);
+      argv.push("--config-file", path);
+    }
     try {
-      const socket = await Bun.connect({
-        unix: socketPath,
-        socket: {
-          data(socket, data) {
-            // Ignore responses
-          },
-          open(socket) {
-            const msg = JSON.stringify({ type: "update", config });
-            socket.write(msg + "\n");
-            socket.end();
-          },
-          close() {},
-          error(socket, error) {
-            console.error("Socket error:", error);
-          },
-        },
-      });
-      console.log(`Sent update to canvas '${id}'`);
-    } catch (err) {
-      console.error(`Failed to connect to canvas '${id}':`, err);
+      const host = detectHost();
+      const handle = await host.open({ argv, title: `canvas: ${kind}`, ratio: 0.67 });
+      emit({ status: "spawned", id, host: handle.host });
+    } catch (e) {
+      fail((e as Error).message);
     }
   });
 
 program
-  .command("selection <id>")
-  .description("Get the current selection from a running document canvas")
-  .action(async (id: string) => {
-    const { getSocketPath } = await import("./ipc/types");
-    const socketPath = getSocketPath(id);
-
-    try {
-      let resolved = false;
-      const result = await new Promise<string>((resolve, reject) => {
-        const timeout = setTimeout(() => {
-          if (!resolved) {
-            resolved = true;
-            reject(new Error("Timeout waiting for response"));
-          }
-        }, 2000);
-
-        Bun.connect({
-          unix: socketPath,
-          socket: {
-            data(socket, data) {
-              if (resolved) return;
-              clearTimeout(timeout);
-              resolved = true;
-              const response = JSON.parse(data.toString().trim());
-              if (response.type === "selection") {
-                resolve(JSON.stringify(response.data));
-              } else {
-                resolve(JSON.stringify(null));
-              }
-              socket.end();
-            },
-            open(socket) {
-              const msg = JSON.stringify({ type: "getSelection" });
-              socket.write(msg + "\n");
-            },
-            close() {
-              if (!resolved) {
-                resolved = true;
-                clearTimeout(timeout);
-                resolve(JSON.stringify(null));
-              }
-            },
-            error(socket, error) {
-              if (!resolved) {
-                resolved = true;
-                clearTimeout(timeout);
-                reject(error);
-              }
-            },
-          },
-        });
-      });
-      console.log(result);
-    } catch (err) {
-      console.error(`Failed to get selection from canvas '${id}':`, err);
-      process.exit(1);
-    }
+  .command("wait <id>")
+  .option("--timeout <seconds>")
+  .action(async (id: string, opts) => {
+    assertIdent("id", id);
+    const result = await waitForOutcome(id, resolveWaitTimeout(opts.timeout));
+    emit(result);
+    process.exit(result.status === "disconnected" || result.status === "error" ? 1 : 0);
   });
 
-program
-  .command("content <id>")
-  .description("Get the current content from a running document canvas")
-  .action(async (id: string) => {
-    const { getSocketPath } = await import("./ipc/types");
-    const socketPath = getSocketPath(id);
+program.command("get <id> <key>").action(async (id: string, key: string) => {
+  assertIdent("id", id);
+  assertIdent("key", key);
+  try {
+    emit({ status: "ok", key, data: await getValue(id, key) });
+  } catch (e) {
+    fail((e as Error).message);
+  }
+});
 
-    try {
-      let resolved = false;
-      const result = await new Promise<string>((resolve, reject) => {
-        const timeout = setTimeout(() => {
-          if (!resolved) {
-            resolved = true;
-            reject(new Error("Timeout waiting for response"));
-          }
-        }, 2000);
+program.command("close <id>").action(async (id: string) => {
+  assertIdent("id", id);
+  try {
+    // Ask, never kill. Killing leaves a zombie pane on Windows.
+    await requestClose(id);
+    emit({ status: "closing", id });
+  } catch (e) {
+    fail((e as Error).message);
+  }
+});
 
-        Bun.connect({
-          unix: socketPath,
-          socket: {
-            data(socket, data) {
-              if (resolved) return;
-              clearTimeout(timeout);
-              resolved = true;
-              const response = JSON.parse(data.toString().trim());
-              if (response.type === "content") {
-                resolve(JSON.stringify(response.data));
-              } else {
-                resolve(JSON.stringify(null));
-              }
-              socket.end();
-            },
-            open(socket) {
-              const msg = JSON.stringify({ type: "getContent" });
-              socket.write(msg + "\n");
-            },
-            close() {
-              if (!resolved) {
-                resolved = true;
-                clearTimeout(timeout);
-                resolve(JSON.stringify(null));
-              }
-            },
-            error(socket, error) {
-              if (!resolved) {
-                resolved = true;
-                clearTimeout(timeout);
-                reject(error);
-              }
-            },
-          },
-        });
-      });
-      console.log(result);
-    } catch (err) {
-      console.error(`Failed to get content from canvas '${id}':`, err);
-      process.exit(1);
-    }
-  });
+program.command("list").action(async () => {
+  emit(await listCanvases());
+});
 
-program.parse();
+program.command("env").action(() => {
+  try {
+    const host = detectHost();
+    emit({ status: "ok", host: host.name, capabilities: host.capabilities(process.env) });
+  } catch (e) {
+    emit({ status: "ok", host: null, message: (e as Error).message });
+  }
+});
+
+if (import.meta.main) program.parse();

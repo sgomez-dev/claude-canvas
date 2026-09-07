@@ -96,7 +96,8 @@ export function formatTime(isoString: string, timezone?: string): string {
 export function parseSeat(seat: string): { row: number; letter: string } | null {
   const match = seat.match(/^(\d+)([A-Z])$/);
   if (!match) return null;
-  return { row: parseInt(match[1], 10), letter: match[2] };
+  // The regex has exactly two capture groups and `match` succeeded, so both are present.
+  return { row: parseInt(match[1]!, 10), letter: match[2]! };
 }
 
 // Helper to build seat string from row and letter

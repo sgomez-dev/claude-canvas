@@ -23,7 +23,8 @@ export function SeatRow({ row, seatmap, selectedSeat, cursorCol, focused }: Prop
   );
 
   for (let col = 0; col < seatmap.seatsPerRow.length; col++) {
-    const letter = seatmap.seatsPerRow[col];
+    // col is bounded by the loop condition above, so it is always a valid index.
+    const letter = seatmap.seatsPerRow[col]!;
     const seat = buildSeat(row, letter);
     const isAisle = seatmap.aisleAfter.includes(letter);
 
@@ -36,7 +37,11 @@ export function SeatRow({ row, seatmap, selectedSeat, cursorCol, focused }: Prop
 
     // Determine display
     let char = "-";
-    let color = CYBER_COLORS.neonCyan;
+    // Explicit `string` annotation: without it, `color`'s type is inferred as the
+    // single literal type of CYBER_COLORS.neonCyan (a `const`-asserted property),
+    // which then rejects the other CYBER_COLORS values assigned below. This is a
+    // pre-existing widening issue, unrelated to noUncheckedIndexedAccess.
+    let color: string = CYBER_COLORS.neonCyan;
     let bgColor: string | undefined;
 
     if (isSelected) {

@@ -1,0 +1,22 @@
+// Bun Snapshot v1, https://bun.sh/docs/test/snapshots
+
+exports[`document display renders 1`] = `
+"    \x1B[1m\x1B[37mQuarterly Review\x1B[39m\x1B[22m
+
+    \x1B[32m╭────────────────────────────────────────────────────────────╮\x1B[39m
+    \x1B[32m│\x1B[39m                                                            \x1B[32m│\x1B[39m
+    \x1B[32m│\x1B[39m  \x1B[1m\x1B[36m#\x1B[39m\x1B[22m \x1B[1mHeading\x1B[22m                                                 \x1B[32m│\x1B[39m
+    \x1B[32m│\x1B[39m                                                            \x1B[32m│\x1B[39m
+    \x1B[32m│\x1B[39m  Some \x1B[33m\x1B[2m**\x1B[22m\x1B[1mbold\x1B[22m\x1B[2m**\x1B[22m\x1B[39m text.                                       \x1B[32m│\x1B[39m
+    \x1B[32m│\x1B[39m                                                            \x1B[32m│\x1B[39m
+    \x1B[32m│\x1B[39m  \x1B[1m\x1B[33m-\x1B[39m\x1B[22m one                                                     \x1B[32m│\x1B[39m
+    \x1B[32m│\x1B[39m  \x1B[1m\x1B[33m-\x1B[39m\x1B[22m two                                                     \x1B[32m│\x1B[39m
+    \x1B[32m│\x1B[39m                                                            \x1B[32m│\x1B[39m
+    \x1B[32m│\x1B[39m                                                            \x1B[32m│\x1B[39m
+    \x1B[32m│\x1B[39m                                                            \x1B[32m│\x1B[39m
+    \x1B[32m│\x1B[39m                                                            \x1B[32m│\x1B[39m
+    \x1B[32m│\x1B[39m                                                            \x1B[32m│\x1B[39m
+    \x1B[32m│\x1B[39m                                                            \x1B[32m│\x1B[39m
+    \x1B[32m╰────────────────────────────────────────────────────────────╯\x1B[39m
+    \x1B[90m\x1B[2m↑↓ scroll • Esc quit\x1B[22m\x1B[39m                                   \x1B[90m\x1B[2m7 lines\x1B[22m\x1B[39m"
+`;

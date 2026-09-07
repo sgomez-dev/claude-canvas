@@ -50,7 +50,7 @@ export function getWeekDays(baseDate: Date): Date[] {
 
 export function formatDayName(date: Date): string {
   const days = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
-  return days[date.getDay()];
+  return days[date.getDay()]!; // Date.getDay() always returns 0-6, within bounds of the 7-element days array.
 }
 
 export function formatDayNumber(date: Date): string {

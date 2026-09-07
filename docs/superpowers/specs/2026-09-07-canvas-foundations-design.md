@@ -539,3 +539,25 @@ A `bun.lock` is committed; without it CI is not reproducible. It was removed in
   since a re-render then produces an identical frame.
 
   No `Math.random()` exists in any canvas, so randomness needs no handling.
+
+  **Pinning the clock is only half of it — the timezone must be pinned too.**
+  Found by the Task 1 review, 2026-09-07. `setSystemTime` fixes the epoch
+  instant `Date` returns; it does not fix the timezone in which that instant
+  is *rendered*, and every one of these canvases renders local time:
+  `flight/components/cyberpunk-header.tsx:28` and `flight/types.ts:86-93` call
+  `toLocaleTimeString` with no `timeZone` option, `calendar/types.ts:99`
+  derives positions from `getHours()`/`getMinutes()`, and
+  `meeting-picker-view.tsx:591-595` formats both time and date. Left unpinned,
+  every snapshot diverges with no code change as soon as the process timezone
+  is not UTC — which is the normal case, since the development machine is in
+  CET/CEST and CI runs `ubuntu-latest` and `windows-latest`.
+
+  So the test preload pins `process.env.TZ = "UTC"` alongside `FORCE_COLOR`.
+  Verified: the pin in the preload beats an externally forced
+  `TZ=Asia/Tokyo`, and removing it reproducibly breaks 3 of 8 tests under that
+  same forced timezone — so the pin is demonstrably both effective and
+  load-bearing.
+
+  General lesson for later phases: a determinism check that runs the same
+  suite twice on one machine cannot detect a dependence on the environment.
+  Proving an environment pin works needs a negative control that fights it.

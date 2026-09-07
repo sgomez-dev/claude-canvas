@@ -22,6 +22,9 @@
 - **Frame ceiling is 16 MB.** Reject larger and close the connection.
 - **No new runtime dependencies.** One dev-only test harness is written in-repo rather than installed.
 - **`FORCE_COLOR=1` is pinned for tests**, never `0`.
+- **`TZ=UTC` is pinned for tests.** `setSystemTime` fixes the instant but not
+  the timezone it renders in, and all three canvases format local time. Without
+  this pin every snapshot diverges as soon as the process timezone is not UTC.
 - **Target platforms: `win32`, `darwin`, `linux`.** CI runs `ubuntu-latest` and `windows-latest`.
 
 ## File Structure

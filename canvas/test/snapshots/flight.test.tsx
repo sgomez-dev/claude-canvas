@@ -18,7 +18,7 @@ afterEach(() => {
 
 test("flight booking renders", async () => {
   const r = renderCanvas(
-    <FlightCanvas id="flight-1" config={flightConfig} socketPath={undefined} scenario="booking" />,
+    <FlightCanvas id="flight-1" config={flightConfig} enabled={false} scenario="booking" />,
     { columns: 70, rows: 18 }
   );
   expect(await r.settle()).toMatchSnapshot();
@@ -27,14 +27,14 @@ test("flight booking renders", async () => {
 
 test("flight booking is deterministic across renders", async () => {
   const first = renderCanvas(
-    <FlightCanvas id="flight-1" config={flightConfig} socketPath={undefined} scenario="booking" />,
+    <FlightCanvas id="flight-1" config={flightConfig} enabled={false} scenario="booking" />,
     { columns: 70, rows: 18 }
   );
   const a = await first.settle();
   first.dispose();
 
   const second = renderCanvas(
-    <FlightCanvas id="flight-1" config={flightConfig} socketPath={undefined} scenario="booking" />,
+    <FlightCanvas id="flight-1" config={flightConfig} enabled={false} scenario="booking" />,
     { columns: 70, rows: 18 }
   );
   const b = await second.settle();

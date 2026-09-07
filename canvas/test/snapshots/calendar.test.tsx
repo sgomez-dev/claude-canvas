@@ -18,7 +18,7 @@ afterEach(() => {
 
 test("calendar display renders", async () => {
   const r = renderCanvas(
-    <Calendar id="cal-1" config={calendarDisplayConfig} socketPath={undefined} scenario="display" />,
+    <Calendar id="cal-1" config={calendarDisplayConfig} enabled={false} scenario="display" />,
     { columns: 70, rows: 18 }
   );
   expect(await r.settle()).toMatchSnapshot();
@@ -27,14 +27,14 @@ test("calendar display renders", async () => {
 
 test("calendar display is deterministic across renders", async () => {
   const first = renderCanvas(
-    <Calendar id="cal-1" config={calendarDisplayConfig} socketPath={undefined} scenario="display" />,
+    <Calendar id="cal-1" config={calendarDisplayConfig} enabled={false} scenario="display" />,
     { columns: 70, rows: 18 }
   );
   const a = await first.settle();
   first.dispose();
 
   const second = renderCanvas(
-    <Calendar id="cal-1" config={calendarDisplayConfig} socketPath={undefined} scenario="display" />,
+    <Calendar id="cal-1" config={calendarDisplayConfig} enabled={false} scenario="display" />,
     { columns: 70, rows: 18 }
   );
   const b = await second.settle();
@@ -48,7 +48,7 @@ test("calendar meeting-picker renders", async () => {
     <Calendar
       id="cal-2"
       config={{ ...calendarDisplayConfig, ...meetingPickerConfig }}
-      socketPath={undefined}
+      enabled={false}
       scenario="meeting-picker"
     />,
     { columns: 70, rows: 18 }
@@ -62,7 +62,7 @@ test("calendar meeting-picker is deterministic across renders", async () => {
     <Calendar
       id="cal-2"
       config={{ ...calendarDisplayConfig, ...meetingPickerConfig }}
-      socketPath={undefined}
+      enabled={false}
       scenario="meeting-picker"
     />,
     { columns: 70, rows: 18 }
@@ -74,7 +74,7 @@ test("calendar meeting-picker is deterministic across renders", async () => {
     <Calendar
       id="cal-2"
       config={{ ...calendarDisplayConfig, ...meetingPickerConfig }}
-      socketPath={undefined}
+      enabled={false}
       scenario="meeting-picker"
     />,
     { columns: 70, rows: 18 }

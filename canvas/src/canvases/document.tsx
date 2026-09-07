@@ -152,7 +152,8 @@ export function Document({ id, config: initialConfig, enabled, scenario = "displ
     // Calculate character offset
     let offset = 0;
     for (let i = 0; i < clampedRow; i++) {
-      offset += lines[i].length + 1; // +1 for newline
+      // clampedRow <= lines.length - 1, so i < lines.length here.
+      offset += lines[i]!.length + 1; // +1 for newline
     }
 
     // Add column offset, clamped to line length
@@ -310,10 +311,13 @@ export function Document({ id, config: initialConfig, enabled, scenario = "displ
       }
       if (currentLine > 0) {
         let newPos = 0;
+        // currentLine is at most lines.length - 1 (it counts newlines seen in text),
+        // so l < currentLine - 1 keeps l within lines.length here.
         for (let l = 0; l < currentLine - 1; l++) {
-          newPos += lines[l].length + 1;
+          newPos += lines[l]!.length + 1;
         }
-        newPos += Math.min(colInLine, lines[currentLine - 1].length);
+        // currentLine - 1 >= 0 (guarded above) and < lines.length.
+        newPos += Math.min(colInLine, lines[currentLine - 1]!.length);
         setCursorPosition(newPos);
         ensureCursorVisible(newPos, text);
       }
@@ -335,10 +339,12 @@ export function Document({ id, config: initialConfig, enabled, scenario = "displ
       }
       if (currentLine < lines.length - 1) {
         let newPos = 0;
+        // currentLine < lines.length - 1 here, so l <= currentLine stays within lines.length.
         for (let l = 0; l <= currentLine; l++) {
-          newPos += lines[l].length + 1;
+          newPos += lines[l]!.length + 1;
         }
-        newPos += Math.min(colInLine, lines[currentLine + 1].length);
+        // currentLine < lines.length - 1 (guarded above), so currentLine + 1 < lines.length.
+        newPos += Math.min(colInLine, lines[currentLine + 1]!.length);
         setCursorPosition(Math.min(newPos, text.length));
         ensureCursorVisible(Math.min(newPos, text.length), text);
       }

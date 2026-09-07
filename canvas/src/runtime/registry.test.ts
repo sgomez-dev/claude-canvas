@@ -1,5 +1,6 @@
 import { test, expect, afterEach } from "bun:test";
 import { writeRecord, readRecord, listRecords, deleteRecord, newToken, isAlive, type CanvasRecord } from "./registry";
+import { InvalidIdentifierError } from "./validate";
 
 const ids: string[] = [];
 function rec(id: string, over: Partial<CanvasRecord> = {}): CanvasRecord {
@@ -41,9 +42,11 @@ test("listRecords omits dead canvases", async () => {
   expect(listed).not.toContain("t-zombie");
 });
 
-test("a lastError record survives even with no port", async () => {
-  await writeRecord(rec("t-err", { lastError: "bind failed" }));
-  expect((await readRecord("t-err"))?.lastError).toBe("bind failed");
+test("a lastError record survives with a dead pid and is not unlinked", async () => {
+  // pid 0x7FFFFFFE will not exist on any platform in practice.
+  await writeRecord(rec("t-err-dead", { pid: 0x7ffffffe, lastError: "bind failed" }));
+  expect(await readRecord("t-err-dead")).toEqual(expect.objectContaining({ lastError: "bind failed" }));
+  expect(await Bun.file((await import("./paths")).recordPath("t-err-dead")).exists()).toBe(true);
 });
 
 test("tokens are unique and long enough", () => {
@@ -57,5 +60,5 @@ test("isAlive is true for this process", () => {
 });
 
 test("rejects an invalid id", async () => {
-  await expect(readRecord("../escape")).rejects.toThrow();
+  await expect(readRecord("../escape")).rejects.toThrow(InvalidIdentifierError);
 });

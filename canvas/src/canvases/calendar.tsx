@@ -42,7 +42,7 @@ function isAllDayEvent(event: CalendarEvent): boolean {
 interface Props {
   id: string;
   config?: CalendarConfig;
-  socketPath?: string;
+  enabled?: boolean;
   scenario?: string;
 }
 
@@ -345,8 +345,12 @@ function AllDayEventsRow({ weekDays, events, columnWidth, timeColumnWidth }: All
   );
 }
 
-export function Calendar({ id, config, socketPath, scenario = "display" }: Props) {
-  // Route to meeting picker if that scenario is requested
+// Thin router: calls no hooks of its own, so switching scenarios never
+// changes which hooks run for a given mount (a rules-of-hooks violation the
+// previous single-component version had, harmless only because the scenario
+// never actually changes mid-mount). It delegates entirely to whichever
+// child owns the hooks for that scenario.
+export function Calendar({ id, config, enabled = false, scenario = "display" }: Props) {
   if (scenario === "meeting-picker" && config?.calendars) {
     const pickerConfig: MeetingPickerConfig = {
       calendars: config.calendars,
@@ -357,10 +361,17 @@ export function Calendar({ id, config, socketPath, scenario = "display" }: Props
       startHour: 6,
       endHour: 22,
     };
-    return <MeetingPickerView id={id} config={pickerConfig} socketPath={socketPath} />;
+    return <MeetingPickerView id={id} config={pickerConfig} enabled={enabled} />;
   }
 
-  // Default display scenario
+  return <CalendarDisplay config={config} />;
+}
+
+interface CalendarDisplayProps {
+  config?: CalendarConfig;
+}
+
+function CalendarDisplay({ config }: CalendarDisplayProps) {
   const { exit } = useApp();
   const { stdout } = useStdout();
   const [currentDate, setCurrentDate] = useState(new Date());

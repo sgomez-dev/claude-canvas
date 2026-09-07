@@ -3,7 +3,7 @@
 import React, { useState, useEffect, useCallback } from "react";
 import { Box, Text, useInput, useApp, useStdout } from "ink";
 import { useMouse, type MouseEvent } from "../hooks/use-mouse";
-import { useIPC } from "../hooks/use-ipc";
+import { useCanvasServer } from "../../../runtime/use-canvas-server";
 import type { MeetingPickerConfig, MeetingPickerResult, NamedCalendar } from "../../../scenarios/types";
 import {
   getWeekDays,
@@ -19,7 +19,7 @@ import {
 interface Props {
   id: string;
   config: MeetingPickerConfig;
-  socketPath?: string;
+  enabled?: boolean;
 }
 
 interface SlotInfo {
@@ -30,7 +30,7 @@ interface SlotInfo {
   endTime: Date;
 }
 
-export function MeetingPickerView({ id, config, socketPath }: Props) {
+export function MeetingPickerView({ id, config, enabled = false }: Props) {
   const { exit } = useApp();
   const { stdout } = useStdout();
   const [currentDate, setCurrentDate] = useState(new Date());
@@ -57,9 +57,11 @@ export function MeetingPickerView({ id, config, socketPath }: Props) {
     endHour = 22,
   } = config;
 
-  const ipc = useIPC({
-    socketPath,
+  const ipc = useCanvasServer({
+    id,
+    kind: "calendar",
     scenario: "meeting-picker",
+    enabled,
     onClose: () => exit(),
   });
 

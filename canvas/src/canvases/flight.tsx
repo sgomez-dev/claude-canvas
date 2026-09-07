@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect, useCallback } from "react";
 import { Box, Text, useInput, useApp, useStdout } from "ink";
-import { useIPC } from "./calendar/hooks/use-ipc";
+import { useCanvasServer } from "../runtime/use-canvas-server";
 import {
   type FlightConfig,
   type FlightResult,
@@ -26,14 +26,14 @@ import { StatusBar } from "./flight/components/status-bar";
 interface Props {
   id: string;
   config?: FlightConfig;
-  socketPath?: string;
+  enabled?: boolean;
   scenario?: string;
 }
 
 export function FlightCanvas({
   id,
   config: initialConfig,
-  socketPath,
+  enabled = false,
   scenario = "booking",
 }: Props) {
   const { exit } = useApp();
@@ -63,9 +63,11 @@ export function FlightCanvas({
   const spinnerChars = ["|", "/", "-", "\\"];
 
   // IPC connection
-  const ipc = useIPC({
-    socketPath,
+  const ipc = useCanvasServer({
+    id,
+    kind: "flight",
     scenario,
+    enabled,
     onClose: () => exit(),
     onUpdate: (newConfig) => {
       setConfig(newConfig as FlightConfig);

@@ -652,3 +652,122 @@ since every prompt written and report received is re-read each turn.
 
 Task 7: dispatched (sonnet), BASE 4b74dd0, carrying the send-then-close
 correction as a mandatory deviation rather than leaving it to be rediscovered.
+
+Session paused/resumed; interrupted mid-run WIP dropped unreviewed (b856d06).
+Task 7 re-dispatched (sonnet), BASE b856d06. DONE: commit d988c1a, 89 pass
+(78+11) across 11 files. Fixed requestClose deferral, empirically verified
+(3/3 fail unfixed, 5/5 pass fixed). Review dispatched, sonnet.
+
+Tasks 8-10: review Approved, 0 Critical/Important, 3 Minor (all brief-inherited,
+no code change: mouse-capability platform branch, unused PaneSpec.title,
+open() untested since it shells out). Import-cycle verified acyclic by tracing
+every import statement. wt semicolon guard confirmed unconditional with
+specific assertion. 106 pass (89+17) across 14 files, confirmed independently.
+Tasks 8-10: complete (commits d988c1a..fc5fec8, review clean).
+
+Task 11: review Approved, 0 Critical/Important. onError wiring to log file
+verified end-to-end (not just trusted). enabled:false confirmed structurally
+inert (early return before any side effect). Cleanup on unmount verified by
+reconnecting to the closed port, not just checking the registry file. One
+forward-looking note, no fix needed: the `ready` broadcast fires immediately
+after writeRecord, before any client could possibly have learned the port from
+the registry — so it's dead on arrival by construction, inherited from my own
+brief. Harmless because waitForOutcome discards ready and nothing in this plan
+(spawn/wait CLI commands) waits on it. Flag for any future phase that assumes
+ready is externally observable.
+Task 11: complete (commits fc5fec8..051d4d5, review clean).
+
+Task 12: review Approved-with-2-Important. (1) spawn never validates --config
+JSON before writing it to disk; if malformed, spawn reports "spawned" success
+but the actual pane crashes when show tries to parse it later -- reproducing
+the zombie-pane failure class this project has fought since Task 6/7. (2) no
+test coverage that assertIdent is actually wired into each CLI action; a
+regression dropping it would ship silently. Ruling 13: both enter a fix round
+-- (1) is a real robustness gap on the exact failure mode this plan exists to
+prevent; (2) protects the injection-closing whitelist the whole design depends
+on. Two Minors deferred (list-test not force-platform'd; dead terminal.ts left
+for Task 13's cleanup pass).
+
+Task 12: fix round 1/5 (2 addressed, 0 open; commits 8e1681b..5c50854). Both
+verified with evidence, not just presence: JSON.parse runs before the file
+write (traced line order), show's try/catch/finally guarantees exit 0 on
+every throw path, new tests assert the specific InvalidIdentifierError message
+per field and confirm the bad-config file was never written. 121 pass
+(112+9), reconciles.
+Task 12: complete (commits 051d4d5..5c50854, review clean).
+
+Task 13: implemented DONE, commits b82a9a6/af97d1b/b384c1b. 122 pass (121+1)
+across 17 files, snapshot diffs confirmed none at all three checkpoints.
+Node_modules incident during a scratch-worktree tsc diff: caught immediately
+by a failing bun test, fixed with bun install, re-verified identical -- no
+tracked files affected, confirmed by git status clean.
+
+Ruling 14: found and fixed a real gap in my own Task 13 brief before dispatching
+review -- it told the implementer to update document.test.tsx's socketPath prop
+to enabled (Step 3) but never gave the equivalent instruction for flight.test.tsx
+(Step 6) or calendar.test.tsx (Step 9), even though RenderOptions changed
+uniformly for all three canvases. Result: 9 new tsc errors (119 total, up from
+113), all in those two test files, all "socketPath does not exist on Props".
+These two files are NOT on Task 16's fix list (source files only), so left
+unfixed they would have silently survived Task 16's 97->0 sweep and broken
+Task 18's CI gate. Resumed the same implementer (full context, trivial
+mechanical fix mirroring the already-reviewed document.tsx pattern) rather than
+dispatching fresh, since this is a 2-line-per-file prop rename with no design
+judgment. Cost if wrong: none realistically -- worst case is redoing a 2-line
+edit.
+
+Task 13: fix round done (commit 8cd3166 addendum), independently re-verified
+by me: 122 pass, 0 fail, 110 tsc errors exactly. Review Approved. One Important
+finding (skills/SKILL.md still reference deleted src/api/) confirmed to be
+exactly Task 17's job, not a new gap -- same files, same grep check already in
+Task 17's brief. No fix round needed on Task 13. Two Minors deferred: enabled
+prop optionality inconsistent across the three canvases (behaviorally inert),
+CLAUDE.md structure section stale (already known, in Task 17's scope too).
+Task 13: complete (commits 5c50854..8cd3166, review clean).
+
+Task 14: review Approved, 0 Critical/Important, 3 Minor deferred. Independently
+verified: no code change for the duplicate-key claim was the RIGHT call --
+reviewer used git log --follow to prove document.tsx's and
+raw-markdown-renderer.tsx's list-rendering code predates every commit in this
+migration, refuting the report's own Task-13-caused-it hypothesis. Ran the
+snapshot test live with patchConsole:false (warnings not suppressed) and saw
+zero React key warnings. Mouse-fix regression verified genuinely fixed: write
+sink reads process.stdout.write live per-call, not an eager .bind(). 124 pass
+(122+2) across 18 files, 110 tsc errors unchanged, confirmed exactly.
+Task 14: complete (commits 8cd3166..645093c, review clean).
+
+Task 15: independently verified (110->97 tsc, 0 TS2503, 124 pass, no snapshot
+diffs). Review dispatched.
+
+Task 16 planning: measured fresh per-file counts myself rather than trusting
+the stale plan breakdown (Tasks 13-15 touched several of these files). Current:
+calendar/types.ts(1), flight/types.ts(2), calendar.tsx(2), use-mouse.ts(3),
+document.tsx(5), seat-row.tsx(6), seatmap-panel.tsx(6),
+meeting-picker-view.tsx(15), raw-markdown-renderer.tsx(20),
+markdown-renderer.tsx(37) = 97, reconciles exactly.
+
+Batching decision: 4 dispatches instead of 10, given explicit token-economy
+ask -- Batch A (6 small files, 19 errors), Batch B (seatmap-panel+
+meeting-picker-view, 21 errors), Batch C (raw-markdown-renderer alone, 20
+errors), Batch D (markdown-renderer alone, 37 errors, biggest/riskiest file).
+The two largest files stay isolated in their own dispatch+review despite the
+economy push, since they carry the most snapshot-regression risk and isolation
+keeps blame attribution clean if something breaks. Each batch still gets
+per-file commits + snapshot check after each file per the plan's own rule.
+
+Task 15: review Approved, zero findings. 13/13 fixes verified type-only,
+13 insertions/13 deletions, no collateral edits, React import already present
+in all 4 files (no conflict risk).
+Task 15: complete (commits 645093c..e2bffd8, review clean).
+
+Task 16 batch A: implemented, 6 commits (4140e77..12f9750). Interrupted mid
+report-write by a session pause -- code work was already committed and done,
+only the report file (gitignored) was incomplete. Verified myself: tsc 97->78
+exactly, 124 pass/0 fail, no snapshot diffs. NOT YET REVIEWED -- next step on
+resume is dispatching the task reviewer for this batch (base e2bffd8, head
+12f9750), not new implementation.
+
+Remaining Task 16 batches, not yet dispatched: B (seatmap-panel.tsx +
+meeting-picker-view.tsx, 21 errors, target 57), C (raw-markdown-renderer.tsx
+alone, 20 errors, target 37), D (markdown-renderer.tsx alone, 37 errors,
+target 0).

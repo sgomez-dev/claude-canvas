@@ -1,4 +1,4 @@
-import { test, expect, afterEach } from "bun:test";
+import { test, expect } from "bun:test";
 import { dataDir, recordPath, configPath, canvasesDir, logPath } from "./paths";
 import { homedir } from "node:os";
 
@@ -21,86 +21,135 @@ test("configPath and recordPath never collide", () => {
   expect(configPath("abc")).not.toBe(recordPath("abc"));
 });
 
-// Platform-specific tests
-let originalPlatformDescriptor: PropertyDescriptor | undefined;
-
-afterEach(() => {
-  if (originalPlatformDescriptor) {
-    Object.defineProperty(process, "platform", originalPlatformDescriptor);
-  }
-  delete process.env.LOCALAPPDATA;
-  delete process.env.XDG_STATE_HOME;
-});
-
+// Platform-specific tests with per-test capture-restore
 test("dataDir on win32 uses LOCALAPPDATA", () => {
-  originalPlatformDescriptor = Object.getOwnPropertyDescriptor(process, "platform");
-  Object.defineProperty(process, "platform", { value: "win32" });
-  process.env.LOCALAPPDATA = "C:\\Users\\TestUser\\AppData\\Local";
+  const originalPlatformDescriptor = Object.getOwnPropertyDescriptor(process, "platform");
+  const originalLOCALAPPDATA = process.env.LOCALAPPDATA;
 
-  const d = dataDir();
-  expect(d).toContain("AppData");
-  expect(d).toContain("Local");
-  expect(d).toContain("claude-canvas");
+  try {
+    Object.defineProperty(process, "platform", { value: "win32" });
+    process.env.LOCALAPPDATA = "D:\\test-marker-win32\\data";
+
+    const d = dataDir();
+    expect(d).toContain("test-marker-win32");
+    expect(d).not.toContain("AppData");
+    expect(d).toContain("claude-canvas");
+  } finally {
+    Object.defineProperty(process, "platform", originalPlatformDescriptor ?? { value: "win32" });
+    if (originalLOCALAPPDATA !== undefined) {
+      process.env.LOCALAPPDATA = originalLOCALAPPDATA;
+    } else {
+      delete process.env.LOCALAPPDATA;
+    }
+  }
 });
 
 test("dataDir on win32 falls back to AppData\\Local when LOCALAPPDATA missing", () => {
-  originalPlatformDescriptor = Object.getOwnPropertyDescriptor(process, "platform");
-  Object.defineProperty(process, "platform", { value: "win32" });
-  delete process.env.LOCALAPPDATA;
+  const originalPlatformDescriptor = Object.getOwnPropertyDescriptor(process, "platform");
+  const originalLOCALAPPDATA = process.env.LOCALAPPDATA;
 
-  const d = dataDir();
-  expect(d).toContain("AppData");
-  expect(d).toContain("Local");
-  expect(d).toContain("claude-canvas");
+  try {
+    Object.defineProperty(process, "platform", { value: "win32" });
+    delete process.env.LOCALAPPDATA;
+
+    const d = dataDir();
+    expect(d).toContain("AppData");
+    expect(d).toContain("Local");
+    expect(d).toContain("claude-canvas");
+  } finally {
+    Object.defineProperty(process, "platform", originalPlatformDescriptor ?? { value: "win32" });
+    if (originalLOCALAPPDATA !== undefined) {
+      process.env.LOCALAPPDATA = originalLOCALAPPDATA;
+    } else {
+      delete process.env.LOCALAPPDATA;
+    }
+  }
 });
 
 test("dataDir on darwin uses Library/Application Support", () => {
-  originalPlatformDescriptor = Object.getOwnPropertyDescriptor(process, "platform");
-  Object.defineProperty(process, "platform", { value: "darwin" });
+  const originalPlatformDescriptor = Object.getOwnPropertyDescriptor(process, "platform");
 
-  const d = dataDir();
-  expect(d).toContain("Library");
-  expect(d).toContain("Application Support");
-  expect(d).toContain("claude-canvas");
+  try {
+    Object.defineProperty(process, "platform", { value: "darwin" });
+
+    const d = dataDir();
+    expect(d).toContain("Library");
+    expect(d).toContain("Application Support");
+    expect(d).toContain("claude-canvas");
+  } finally {
+    Object.defineProperty(process, "platform", originalPlatformDescriptor ?? { value: "win32" });
+  }
 });
 
 test("dataDir on linux uses XDG_STATE_HOME", () => {
-  originalPlatformDescriptor = Object.getOwnPropertyDescriptor(process, "platform");
-  Object.defineProperty(process, "platform", { value: "linux" });
-  process.env.XDG_STATE_HOME = "/home/testuser/.local/state";
+  const originalPlatformDescriptor = Object.getOwnPropertyDescriptor(process, "platform");
+  const originalXDG_STATE_HOME = process.env.XDG_STATE_HOME;
 
-  const d = dataDir();
-  expect(d).toContain(".local");
-  expect(d).toContain("state");
-  expect(d).toContain("claude-canvas");
+  try {
+    Object.defineProperty(process, "platform", { value: "linux" });
+    process.env.XDG_STATE_HOME = "/test-marker-linux/state";
+
+    const d = dataDir();
+    expect(d).toContain("test-marker-linux");
+    expect(d).not.toContain(".local");
+    expect(d).toContain("claude-canvas");
+  } finally {
+    Object.defineProperty(process, "platform", originalPlatformDescriptor ?? { value: "win32" });
+    if (originalXDG_STATE_HOME !== undefined) {
+      process.env.XDG_STATE_HOME = originalXDG_STATE_HOME;
+    } else {
+      delete process.env.XDG_STATE_HOME;
+    }
+  }
 });
 
 test("dataDir on linux falls back to .local/state when XDG_STATE_HOME missing", () => {
-  originalPlatformDescriptor = Object.getOwnPropertyDescriptor(process, "platform");
-  Object.defineProperty(process, "platform", { value: "linux" });
-  delete process.env.XDG_STATE_HOME;
+  const originalPlatformDescriptor = Object.getOwnPropertyDescriptor(process, "platform");
+  const originalXDG_STATE_HOME = process.env.XDG_STATE_HOME;
 
-  const d = dataDir();
-  expect(d).toContain(".local");
-  expect(d).toContain("state");
-  expect(d).toContain("claude-canvas");
+  try {
+    Object.defineProperty(process, "platform", { value: "linux" });
+    delete process.env.XDG_STATE_HOME;
+
+    const d = dataDir();
+    expect(d).toContain(".local");
+    expect(d).toContain("state");
+    expect(d).toContain("claude-canvas");
+  } finally {
+    Object.defineProperty(process, "platform", originalPlatformDescriptor ?? { value: "win32" });
+    if (originalXDG_STATE_HOME !== undefined) {
+      process.env.XDG_STATE_HOME = originalXDG_STATE_HOME;
+    } else {
+      delete process.env.XDG_STATE_HOME;
+    }
+  }
 });
 
 test("canvasesDir returns path under dataDir", () => {
-  originalPlatformDescriptor = Object.getOwnPropertyDescriptor(process, "platform");
-  Object.defineProperty(process, "platform", { value: "darwin" });
+  const originalPlatformDescriptor = Object.getOwnPropertyDescriptor(process, "platform");
 
-  const c = canvasesDir();
-  expect(c).toContain("canvases");
-  expect(c).toContain("claude-canvas");
+  try {
+    Object.defineProperty(process, "platform", { value: "darwin" });
+
+    const c = canvasesDir();
+    expect(c).toContain("canvases");
+    expect(c).toContain("claude-canvas");
+  } finally {
+    Object.defineProperty(process, "platform", originalPlatformDescriptor ?? { value: "win32" });
+  }
 });
 
 test("logPath returns path under dataDir with .log extension", () => {
-  originalPlatformDescriptor = Object.getOwnPropertyDescriptor(process, "platform");
-  Object.defineProperty(process, "platform", { value: "linux" });
+  const originalPlatformDescriptor = Object.getOwnPropertyDescriptor(process, "platform");
 
-  const l = logPath("test-id");
-  expect(l).toContain("logs");
-  expect(l).toContain("test-id");
-  expect(l).toEndWith(".log");
+  try {
+    Object.defineProperty(process, "platform", { value: "linux" });
+
+    const l = logPath("test-id");
+    expect(l).toContain("logs");
+    expect(l).toContain("test-id");
+    expect(l).toEndWith(".log");
+  } finally {
+    Object.defineProperty(process, "platform", originalPlatformDescriptor ?? { value: "win32" });
+  }
 });

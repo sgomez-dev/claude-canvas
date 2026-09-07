@@ -43,7 +43,18 @@ export async function startCanvasServer(o: CanvasServerOptions): Promise<CanvasS
   // (see the `rejected` guard below), so the close no longer races it.
   const sendAndClose = (socket: Socket<undefined>, msg: CanvasMessage) => {
     send(socket, msg);
-    setTimeout(() => socket.end(), 0);
+    // Not wrapping this would let an uncaught throw here (e.g. the socket
+    // was independently destroyed between scheduling and firing) escape a
+    // bare timer callback, which crashes the process with a non-zero exit
+    // code. A canvas process must always exit 0 — a non-zero exit on
+    // Windows leaves a terminal pane nothing can close.
+    setTimeout(() => {
+      try {
+        socket.end();
+      } catch (e) {
+        o.onError?.(e as Error);
+      }
+    }, 0);
   };
 
   const server = Bun.listen<undefined>({
@@ -79,7 +90,15 @@ export async function startCanvasServer(o: CanvasServerOptions): Promise<CanvasS
             send(socket, { type: "hello-ok" });
             continue;
           }
-          o.onMessage(msg, (reply) => send(socket, reply));
+          // o.onMessage is caller-supplied; a throw here is otherwise
+          // uncaught inside a runtime-invoked socket callback, which is the
+          // same non-zero-exit hazard the deferred close above guards
+          // against.
+          try {
+            o.onMessage(msg, (reply) => send(socket, reply));
+          } catch (e) {
+            o.onError?.(e as Error);
+          }
         }
       },
       close(socket) {
@@ -99,7 +118,13 @@ export async function startCanvasServer(o: CanvasServerOptions): Promise<CanvasS
       for (const [socket, state] of conns) if (state.authed) send(socket, msg);
     },
     stop() {
-      for (const socket of conns.keys()) socket.end();
+      for (const socket of conns.keys()) {
+        try {
+          socket.end();
+        } catch (e) {
+          o.onError?.(e as Error);
+        }
+      }
       conns.clear();
       server.stop();
     },

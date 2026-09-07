@@ -121,6 +121,27 @@ Known now so the foundations do not have to be redone later:
   report what the terminal can do, not just how to open a pane. That is an
   additional field on the `CanvasHost` interface.
 
+### Debt Phase 1 knowingly leaves for Phase 3
+
+**`FrameDecoder` re-concatenates its whole buffer on every chunk.** Found by
+the Task 4 review, 2026-09-07, and deliberately left in place. Every `push`
+allocates a new buffer sized to everything received so far and copies the prior
+contents into it, and frame completion copies the remainder again. That is
+O(n²) in the number of chunks: a 16 MB frame arriving in 64 KB pieces costs
+roughly 2 GB of copying.
+
+It is not a correctness defect — the framing itself reviewed clean, including
+`DataView` offsets, aliasing, endianness, and ceiling-before-allocation — and
+it is invisible in Phase 1, whose payloads are kilobytes of calendar config and
+document text. The 16 MB ceiling exists for the screenshots described above,
+and screenshots are exactly the case that meets this cost.
+
+**Fix it before any screenshot work lands**, by buffering incoming chunks in a
+list and concatenating once, when a frame is known to be complete, rather than
+eagerly on arrival. Task 7's integration test already pushes a 4 MB payload
+through the decoder, so it is a usable canary: if that test is noticeably slow,
+this is why.
+
 ## Findings from the initial review
 
 Recorded for traceability. Items 1-4 come from reading the code; they were not

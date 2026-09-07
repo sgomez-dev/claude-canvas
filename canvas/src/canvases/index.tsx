@@ -17,8 +17,8 @@ function showCursor() {
 }
 
 export interface RenderOptions {
-  socketPath?: string;
   scenario?: string;
+  enabled: boolean;
 }
 
 export async function renderCanvas(
@@ -71,7 +71,7 @@ async function renderCalendar(
     <Calendar
       id={id}
       config={config}
-      socketPath={options?.socketPath}
+      enabled={options?.enabled ?? false}
       scenario={options?.scenario || "display"}
     />,
     {
@@ -90,7 +90,7 @@ async function renderDocument(
     <Document
       id={id}
       config={config}
-      socketPath={options?.socketPath}
+      enabled={options?.enabled ?? false}
       scenario={options?.scenario || "display"}
     />,
     {
@@ -109,7 +109,7 @@ async function renderFlight(
     <FlightCanvas
       id={id}
       config={config}
-      socketPath={options?.socketPath}
+      enabled={options?.enabled ?? false}
       scenario={options?.scenario || "booking"}
     />,
     {

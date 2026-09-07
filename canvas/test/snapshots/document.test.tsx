@@ -18,7 +18,7 @@ afterEach(() => {
 
 test("document display renders", async () => {
   const r = renderCanvas(
-    <Document id="doc-1" config={documentConfig} socketPath={undefined} scenario="display" />,
+    <Document id="doc-1" config={documentConfig} enabled={false} scenario="display" />,
     { columns: 70, rows: 18 }
   );
   expect(await r.settle()).toMatchSnapshot();
@@ -27,14 +27,14 @@ test("document display renders", async () => {
 
 test("document display is deterministic across renders", async () => {
   const first = renderCanvas(
-    <Document id="doc-1" config={documentConfig} socketPath={undefined} scenario="display" />,
+    <Document id="doc-1" config={documentConfig} enabled={false} scenario="display" />,
     { columns: 70, rows: 18 }
   );
   const a = await first.settle();
   first.dispose();
 
   const second = renderCanvas(
-    <Document id="doc-1" config={documentConfig} socketPath={undefined} scenario="display" />,
+    <Document id="doc-1" config={documentConfig} enabled={false} scenario="display" />,
     { columns: 70, rows: 18 }
   );
   const b = await second.settle();

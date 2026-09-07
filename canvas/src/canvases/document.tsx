@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect, useCallback, useRef } from "react";
 import { Box, Text, useInput, useApp, useStdout } from "ink";
-import { useIPCServer } from "./calendar/hooks/use-ipc-server";
+import { useCanvasServer } from "../runtime/use-canvas-server";
 import { useMouse } from "./calendar/hooks/use-mouse";
 import { RawMarkdownRenderer } from "./document/components/raw-markdown-renderer";
 import { EmailHeader } from "./document/components/email-header";
@@ -11,11 +11,11 @@ import type { DocumentConfig, EmailConfig } from "./document/types";
 interface Props {
   id: string;
   config?: DocumentConfig;
-  socketPath?: string;
+  enabled: boolean;
   scenario?: string;
 }
 
-export function Document({ id, config: initialConfig, socketPath, scenario = "display" }: Props) {
+export function Document({ id, config: initialConfig, enabled, scenario = "display" }: Props) {
   const { exit } = useApp();
   const { stdout } = useStdout();
 
@@ -42,28 +42,35 @@ export function Document({ id, config: initialConfig, socketPath, scenario = "di
   const [liveConfig, setLiveConfig] = useState<DocumentConfig | undefined>(initialConfig);
 
   // IPC for communicating with Claude (server mode for CLI)
-  const ipc = useIPCServer({
-    socketPath,
+  const ipc = useCanvasServer({
+    id,
+    kind: "document",
     scenario: scenario || "display",
+    enabled,
     onClose: () => exit(),
     onUpdate: (newConfig) => {
       setLiveConfig(newConfig as DocumentConfig);
     },
-    onGetSelection: () => {
-      if (selectionStart === null || selectionEnd === null) return null;
-      const start = Math.min(selectionStart, selectionEnd);
-      const end = Math.max(selectionStart, selectionEnd);
-      if (start === end) return null;
-      return {
-        selectedText: content.slice(start, end),
-        startOffset: start,
-        endOffset: end,
-      };
+    onGet: (key) => {
+      if (key === "selection") {
+        if (selectionStart === null || selectionEnd === null) return null;
+        const start = Math.min(selectionStart, selectionEnd);
+        const end = Math.max(selectionStart, selectionEnd);
+        if (start === end) return null;
+        return {
+          selectedText: content.slice(start, end),
+          startOffset: start,
+          endOffset: end,
+        };
+      }
+      if (key === "content") {
+        return { content, cursorPosition };
+      }
+      if (key === "config") {
+        return liveConfig;
+      }
+      return null;
     },
-    onGetContent: () => ({
-      content,
-      cursorPosition,
-    }),
   });
 
   // Check if this is an email preview scenario

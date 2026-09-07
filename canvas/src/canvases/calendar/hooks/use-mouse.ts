@@ -5,8 +5,28 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import { useStdin } from "ink";
 
 // SGR extended mouse mode escape sequences
-const MOUSE_ENABLE = "\x1b[?1003h\x1b[?1006h"; // Track all movements + SGR format
-const MOUSE_DISABLE = "\x1b[?1003l\x1b[?1006l";
+export const MOUSE_ENABLE = "\x1b[?1003h\x1b[?1006h"; // Track all movements + SGR format
+export const MOUSE_DISABLE = "\x1b[?1003l\x1b[?1006l";
+
+// Run `body`, guaranteeing MOUSE_DISABLE is written through `write` even if
+// `body` throws. Escapes are written through the injected sink rather than
+// the real process.stdout so tests (and any caller) can observe them without
+// leaking raw escape codes into a real terminal.
+export function withMouseTracking<T>(write: (data: string) => void, body: () => T): T {
+  write(MOUSE_ENABLE);
+  try {
+    return body();
+  } finally {
+    write(MOUSE_DISABLE);
+  }
+}
+
+// Stable default sink so it doesn't change identity across renders (a fresh
+// bound function each render would re-run the tracking effect every time).
+// Reads process.stdout.write live on each call rather than binding it once —
+// binding at module load would capture today's process.stdout.write and
+// silently bypass any later replacement of it (e.g. a test's stdout stub).
+const defaultWrite: (data: string) => void = (data) => process.stdout.write(data);
 
 export interface MousePosition {
   x: number; // 1-based column
@@ -37,6 +57,10 @@ export interface UseMouseOptions {
   onClick?: (event: MouseEvent) => void;
   onMove?: (event: MouseEvent) => void;
   onRelease?: (event: MouseEvent) => void;
+  // Write sink for the mouse-tracking escape sequences. Defaults to the real
+  // process.stdout so production behavior is unchanged; tests inject their
+  // own sink to keep escapes off the real terminal.
+  write?: (data: string) => void;
 }
 
 // Parse SGR mouse sequence: ESC[<btn;x;y(M|m)
@@ -76,7 +100,7 @@ function parseMouseEvent(data: string): MouseEvent | null {
 }
 
 export function useMouse(options: UseMouseOptions = {}): MouseState {
-  const { enabled = true, onClick, onMove, onRelease } = options;
+  const { enabled = true, onClick, onMove, onRelease, write = defaultWrite } = options;
   const { stdin, setRawMode } = useStdin();
   const [state, setState] = useState<MouseState>({
     position: null,
@@ -99,8 +123,14 @@ export function useMouse(options: UseMouseOptions = {}): MouseState {
     if (!enabled || !stdin) return;
 
     // Enable mouse tracking
-    process.stdout.write(MOUSE_ENABLE);
+    write(MOUSE_ENABLE);
     setRawMode(true);
+
+    // Safety net: if the process dies before the effect cleanup below runs
+    // (an uncaught error, a signal, exit() elsewhere in the tree), the
+    // terminal must not be left in SGR mouse mode.
+    const disableOnExit = () => write(MOUSE_DISABLE);
+    process.on("exit", disableOnExit);
 
     let buffer = "";
 
@@ -152,9 +182,10 @@ export function useMouse(options: UseMouseOptions = {}): MouseState {
 
     return () => {
       stdin.off("data", handleData);
-      process.stdout.write(MOUSE_DISABLE);
+      process.off("exit", disableOnExit);
+      write(MOUSE_DISABLE);
     };
-  }, [enabled, stdin, setRawMode]);
+  }, [enabled, stdin, setRawMode, write]);
 
   return state;
 }

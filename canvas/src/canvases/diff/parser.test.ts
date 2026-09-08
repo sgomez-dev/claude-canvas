@@ -93,6 +93,38 @@ const PLAIN_TWO_FILE_DIFF = `--- a/x.txt
 +BETA changed
 `;
 
+// Same real `diff -u` capture as PLAIN_TWO_FILE_DIFF, extended with a 3rd
+// file. Regression coverage for the `seenHeaderInCurrent` reset bug: reset
+// to `false` unconditionally on every new block would let a 3rd file's
+// header pair -- the very line that opens its own new block -- be treated
+// as "not yet seen" for that new block, so a hypothetical 4th file's pair
+// wouldn't split off it; more importantly, resetting to `false` regardless
+// of what started the block was also observed (before this fix) to
+// misattribute the 3rd file into the 2nd file's block under the 2nd file's
+// path in this exact shape. seenHeaderInCurrent must be initialized from
+// `isHeaderPair` for the line that started the new block, not hardcoded to
+// `false`.
+const PLAIN_THREE_FILE_DIFF = `--- a/x.txt
++++ b/x.txt
+@@ -1,3 +1,3 @@
+ line one
+-line two
++line TWO changed
+ line three
+--- a/y.txt
++++ b/y.txt
+@@ -1,2 +1,2 @@
+ alpha
+-beta
++BETA changed
+--- a/z.txt
++++ b/z.txt
+@@ -1,2 +1,2 @@
+-one
++ONE
+ two
+`;
+
 const BINARY_FILE = `diff --git a/image.png b/image.png
 index 1234567..89abcde 100644
 Binary files a/image.png and b/image.png differ
@@ -216,6 +248,37 @@ describe("parseUnifiedDiff", () => {
       { type: "context", content: "alpha", oldLineNo: 1, newLineNo: 1 },
       { type: "remove", content: "beta", oldLineNo: 2 },
       { type: "add", content: "BETA changed", newLineNo: 2 },
+    ]);
+  });
+
+  // Regression: a follow-up review found the first fix's `seenHeaderInCurrent
+  // = false` reset (on every new block) let a 3RD plain-diff file get
+  // swallowed into the 2nd file's block under the 2nd file's path/hunk id --
+  // same harm class as the original finding, just one file later. Fixed by
+  // resetting to `isHeaderPair` (true when the new block was itself opened
+  // by a header-pair line) instead of unconditionally `false`.
+  test("splits a plain diff -u multi-file diff with a THIRD file into separate files", () => {
+    const files = parseUnifiedDiff(PLAIN_THREE_FILE_DIFF);
+    expect(files).toHaveLength(3);
+
+    expect(files[0]!.oldPath).toBe("x.txt");
+    expect(files[0]!.hunks).toHaveLength(1);
+    expect(files[0]!.hunks[0]!.id).toBe("x.txt#0");
+
+    expect(files[1]!.oldPath).toBe("y.txt");
+    expect(files[1]!.hunks).toHaveLength(1);
+    expect(files[1]!.hunks[0]!.id).toBe("y.txt#0");
+
+    const z = files[2]!;
+    expect(z.oldPath).toBe("z.txt");
+    expect(z.newPath).toBe("z.txt");
+    expect(z.status).toBe("modified");
+    expect(z.hunks).toHaveLength(1);
+    expect(z.hunks[0]!.id).toBe("z.txt#0");
+    expect(z.hunks[0]!.lines).toEqual([
+      { type: "remove", content: "one", oldLineNo: 1 },
+      { type: "add", content: "ONE", newLineNo: 1 },
+      { type: "context", content: "two", oldLineNo: 2, newLineNo: 2 },
     ]);
   });
 

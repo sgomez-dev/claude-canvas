@@ -46,7 +46,15 @@ function splitIntoFileBlocks(text: string): string[] {
     if (startsNewBlock) {
       if (current.length > 0) blocks.push(current);
       current = [line];
-      seenHeaderInCurrent = false;
+      // The line that starts this new block IS itself the header pair when
+      // isHeaderPair is true (a plain diff's next file's `--- `/`+++ `
+      // line), so seenHeaderInCurrent must already be true for this new
+      // block -- resetting to false here would let a 3rd file's header
+      // pair be swallowed into the 2nd file's block (seenHeaderInCurrent
+      // would stay false until the 2nd file's OWN pair line is reached,
+      // which never comes since it was the line that just opened this
+      // block).
+      seenHeaderInCurrent = isHeaderPair;
     } else {
       current.push(line);
       if (isHeaderPair) seenHeaderInCurrent = true;

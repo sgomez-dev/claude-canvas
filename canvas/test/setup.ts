@@ -13,3 +13,19 @@ process.env.FORCE_COLOR = "1";
 // across dev machines (this project's is CET/CEST) and CI (ubuntu-latest,
 // windows-latest, macos-latest).
 process.env.TZ = "UTC";
+
+// Locale is the third environment-dependent input, and unlike TZ it CANNOT
+// be pinned from here. Bun ignores LANG/LC_ALL/LC_TIME when resolving
+// Intl's default locale -- measured on 2026-09-08: with LC_ALL set to each
+// of en_US.UTF-8, en_GB.UTF-8, es_ES.UTF-8 and C, `new
+// Intl.DateTimeFormat().resolvedOptions().locale` stayed "en-US" on macOS,
+// while the same expression follows the OS regional settings on Windows.
+// So a canvas that calls toLocaleTimeString()/toLocaleDateString() with no
+// locale argument (or with `[]`, which means the same thing) renders
+// differently per platform, and any snapshot containing that render is
+// reproducible only on the machine that captured it.
+//
+// The defense is an explicit locale at every call site, not an env var
+// here. If a snapshot ever diverges on a rendered clock or date, look for a
+// bare toLocaleTimeString()/toLocaleDateString() rather than trying to pin
+// a locale in this file -- that will not work.

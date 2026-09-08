@@ -609,11 +609,27 @@ export function MeetingPickerView({ id, config, enabled = false }: Props) {
                 const free = isSlotFree(cursorInfo.dayIndex, cursorInfo.slotIndex);
                 return (
                   <Text color={free ? "cyan" : "gray"}>
-                    {cursorInfo.startTime.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}
+                    {/* An explicit locale, not `[]`. `[]` means "whatever
+                        the runtime resolves", and Bun resolves it from the
+                        host: en-US on macOS and Linux (12-hour, "6:00 AM"),
+                        but the OS regional settings on Windows, which
+                        produced the 24-hour "6:00" this file's committed
+                        snapshot baseline was captured with. That made the
+                        baseline reproducible only on its author's machine
+                        and red on all three CI legs. LANG/LC_ALL do NOT fix
+                        it -- measured: Bun ignores them for Intl's default
+                        locale -- so an explicit locale at the call site is
+                        the only thing that makes the render deterministic.
+                        en-US matches the locale flight/types.ts and
+                        flight/components/cyberpunk-header.tsx already
+                        hardcode. Switching this canvas to 24-hour time is a
+                        one-line `hour12: false` if that is preferred; it is
+                        a product choice, not a correctness one. */}
+                    {cursorInfo.startTime.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" })}
                     {" - "}
-                    {cursorInfo.endTime.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}
+                    {cursorInfo.endTime.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" })}
                     {" "}
-                    {cursorInfo.day.toLocaleDateString([], { weekday: "short" })}
+                    {cursorInfo.day.toLocaleDateString("en-US", { weekday: "short" })}
                     {free ? "" : " (busy)"}
                   </Text>
                 );

@@ -19,7 +19,7 @@ class TestStdout extends EventEmitter {
 // error screen ("Raw mode is not supported on the current process.stdin") as a
 // 3443-character frame with a React stack trace, and NOTHING THROWS — the test
 // passes while snapshotting a stack trace.
-class TestStdin extends EventEmitter {
+export class TestStdin extends EventEmitter {
   isTTY = true;
   private pending: string | null = null;
   setEncoding(): void {}
@@ -45,6 +45,7 @@ export interface RenderResult {
   frame(): string;
   settle(): Promise<string>;
   dispose(): void;
+  stdin: TestStdin;
 }
 
 // bunfig.toml (repo root) preloads canvas/test/setup.ts, which pins
@@ -116,6 +117,7 @@ export function renderCanvas(
       instance.unmount();
       instance.cleanup();
     },
+    stdin,
   };
 }
 

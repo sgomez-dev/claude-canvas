@@ -1,0 +1,203 @@
+import React, { useEffect, useMemo, useRef, useState } from "react";
+import { Box, Text, useInput, useApp } from "ink";
+import { useCanvasServer } from "../runtime/use-canvas-server";
+import { parseUnifiedDiff, DiffParseError } from "./diff/parser";
+import type { DiffFile, DiffReviewConfig, DiffReviewResult, HunkDecision } from "./diff/types";
+
+export interface DiffProps {
+  id: string;
+  config?: DiffReviewConfig;
+  scenario?: string;
+  enabled: boolean;
+}
+
+interface FlatHunkRef {
+  fileIndex: number;
+  hunkIndex: number;
+}
+
+interface ParsedDiff {
+  files: DiffFile[];
+  error: string | null;
+}
+
+export function Diff({ id, config, scenario = "review", enabled }: DiffProps): React.JSX.Element {
+  const { exit } = useApp();
+
+  // Files and any parse error are derived from ONE memo so there is a single
+  // source of truth for "did parsing fail". Previously `parseError` was set
+  // via setState as a side effect INSIDE this memo's try/catch — a
+  // render-phase side effect that only happened to be safe because
+  // `config.diffText` never changes for the component's lifetime. Deriving
+  // both values together removes that fragile assumption entirely.
+  const { files, error } = useMemo<ParsedDiff>(() => {
+    if (!config?.diffText || config.diffText.trim().length === 0) {
+      return { files: [], error: null };
+    }
+    try {
+      return { files: parseUnifiedDiff(config.diffText), error: null };
+    } catch (e) {
+      return { files: [], error: e instanceof DiffParseError ? e.message : "Failed to parse diff." };
+    }
+  }, [config?.diffText]);
+
+  const flatHunks: FlatHunkRef[] = useMemo(() => {
+    const refs: FlatHunkRef[] = [];
+    files.forEach((f, fileIndex) => {
+      f.hunks.forEach((_h, hunkIndex) => refs.push({ fileIndex, hunkIndex }));
+    });
+    return refs;
+  }, [files]);
+
+  const [cursor, setCursor] = useState(0);
+  // Mirrors `cursor` synchronously into a ref on every render (NOT inside a
+  // useEffect, which would reintroduce the same one-render lag this is
+  // fixing). useInput's handler is re-registered in a passive effect that
+  // lags one render behind a state-driven re-render, so reading the
+  // closed-over `cursor` directly in the "a"/"r" branches can observe a
+  // stale value: press "j" then "a" fast enough and the approve/reject would
+  // land on the PREVIOUS hunk, not the one just highlighted. Reading from
+  // this ref always sees the latest committed cursor regardless of which
+  // render's useInput registration is currently active.
+  const cursorRef = useRef(cursor);
+  cursorRef.current = cursor;
+
+  const [decisions, setDecisions] = useState<Map<string, HunkDecision>>(new Map());
+  // Same stale-closure hazard as cursorRef above, for the submit branch's
+  // read of `decisions`.
+  const decisionsRef = useRef(decisions);
+  decisionsRef.current = decisions;
+
+  // Guards against a second outcome message (Enter-then-Enter, or
+  // Enter-then-Escape) firing in quick succession before the component has
+  // actually unmounted.
+  const submittedRef = useRef(false);
+
+  const ipc = useCanvasServer({
+    id,
+    kind: "diff",
+    scenario,
+    enabled,
+    onClose: () => {},
+  });
+
+  // Reports a parse failure to the controller exactly once, when `error`
+  // transitions from null to non-null. Gated on `ipc.isConnected`: the IPC
+  // server starts asynchronously (real filesystem I/O for the registry
+  // record), so an unconditional send on mount would race the server's
+  // startup and broadcast to zero connections, silently dropping the
+  // message forever (the same underlying reason the `ready` message is
+  // "broadcast the instant the server comes up" and not reliably
+  // observable). This effect re-runs when `isConnected` flips to true and
+  // sends then; `sentRef` keeps that to a single send even if this effect
+  // re-runs again afterward.
+  const sentRef = useRef(false);
+  useEffect(() => {
+    if (error && ipc.isConnected && !sentRef.current) {
+      sentRef.current = true;
+      ipc.sendError(error);
+    }
+  }, [error, ipc.isConnected, ipc.sendError]);
+
+  useInput((input, key) => {
+    // Escape must always work, in every state (parse error, empty diff,
+    // normal review) — checked first and unconditionally so the pane is
+    // never un-exitable by keyboard.
+    if (key.escape) {
+      if (submittedRef.current) return;
+      submittedRef.current = true;
+      ipc.sendCancelled("escape");
+      exit();
+      return;
+    }
+    if (flatHunks.length === 0) return;
+    if (key.upArrow || input === "k") {
+      setCursor((c) => Math.max(0, c - 1));
+    } else if (key.downArrow || input === "j") {
+      setCursor((c) => Math.min(flatHunks.length - 1, c + 1));
+    } else if (input === "a") {
+      const ref = flatHunks[cursorRef.current];
+      if (ref) {
+        const hunk = files[ref.fileIndex]!.hunks[ref.hunkIndex]!;
+        setDecisions((prev) => new Map(prev).set(hunk.id, "approved"));
+      }
+    } else if (input === "r") {
+      const ref = flatHunks[cursorRef.current];
+      if (ref) {
+        const hunk = files[ref.fileIndex]!.hunks[ref.hunkIndex]!;
+        setDecisions((prev) => new Map(prev).set(hunk.id, "rejected"));
+      }
+    } else if (key.return) {
+      if (submittedRef.current) return;
+      submittedRef.current = true;
+      const result: DiffReviewResult = {
+        decisions: flatHunks.map((ref) => {
+          const hunk = files[ref.fileIndex]!.hunks[ref.hunkIndex]!;
+          return { hunkId: hunk.id, decision: decisionsRef.current.get(hunk.id) ?? "rejected" };
+        }),
+      };
+      ipc.sendSelected(result);
+      exit();
+    }
+  });
+
+  if (error) {
+    return (
+      <Box flexDirection="column" borderStyle="round" borderColor="red" padding={1}>
+        <Text color="red">Failed to parse diff: {error}</Text>
+      </Box>
+    );
+  }
+
+  if (flatHunks.length === 0) {
+    return (
+      <Box borderStyle="round" padding={1}>
+        <Text dimColor>Nothing to review.</Text>
+      </Box>
+    );
+  }
+
+  const currentRef = flatHunks[cursor];
+  const currentFile = currentRef ? files[currentRef.fileIndex] : undefined;
+  const currentHunk = currentRef ? currentFile?.hunks[currentRef.hunkIndex] : undefined;
+
+  return (
+    <Box flexDirection="column">
+      <Box flexDirection="column" borderStyle="round" borderColor="cyan" paddingX={1}>
+        <Text bold>{config?.title ?? "Review Changes"}</Text>
+        {files.map((f, fileIndex) => {
+          const total = f.hunks.length;
+          const decided = f.hunks.filter((h) => decisions.has(h.id)).length;
+          const marker = f.binary ? "[binary]" : `${decided}/${total} decided`;
+          const isCurrentFile = currentRef?.fileIndex === fileIndex;
+          return (
+            <Text key={f.newPath} color={isCurrentFile ? "cyan" : undefined}>
+              {isCurrentFile ? "> " : "  "}
+              {f.newPath} ({f.status}) {marker}
+            </Text>
+          );
+        })}
+      </Box>
+      {currentHunk && currentFile ? (
+        <Box flexDirection="column" borderStyle="round" paddingX={1} marginTop={1}>
+          <Text dimColor>{currentHunk.header}</Text>
+          {currentHunk.lines.map((line, i) => (
+            <Text
+              key={i}
+              color={line.type === "add" ? "green" : line.type === "remove" ? "red" : undefined}
+            >
+              {line.type === "add" ? "+" : line.type === "remove" ? "-" : " "}
+              {line.content}
+            </Text>
+          ))}
+          <Text bold color={decisions.get(currentHunk.id) === "approved" ? "green" : decisions.get(currentHunk.id) === "rejected" ? "red" : "yellow"}>
+            [{decisions.get(currentHunk.id) ?? "undecided"}]
+          </Text>
+        </Box>
+      ) : null}
+      <Box marginTop={1}>
+        <Text dimColor>a: approve  r: reject  ↑/↓: navigate  Enter: submit  Esc: cancel</Text>
+      </Box>
+    </Box>
+  );
+}

@@ -7,6 +7,10 @@ import { Document } from "./document";
 import type { DocumentConfig } from "./document/types";
 import { FlightCanvas } from "./flight";
 import type { FlightConfig } from "./flight/types";
+import { Diff } from "./diff";
+import type { DiffReviewConfig } from "./diff/types";
+import { Picker } from "./picker";
+import type { PickerConfig } from "./picker/types";
 import { logPath } from "../runtime/paths";
 
 // Defense in depth: cli.ts already rejects an unknown kind before this ever
@@ -75,6 +79,18 @@ export async function renderCanvas(
         config as FlightConfig | undefined,
         options
       );
+    case "diff":
+      return renderDiff(
+        id,
+        config as DiffReviewConfig | undefined,
+        options
+      );
+    case "picker":
+      return renderPicker(
+        id,
+        config as PickerConfig | undefined,
+        options
+      );
     default:
       await logUnknownKind(id, kind);
       return;
@@ -130,6 +146,44 @@ async function renderFlight(
       config={config}
       enabled={options?.enabled ?? false}
       scenario={options?.scenario || "booking"}
+    />,
+    {
+      exitOnCtrlC: true,
+    }
+  );
+  await waitUntilExit();
+}
+
+async function renderDiff(
+  id: string,
+  config?: DiffReviewConfig,
+  options?: RenderOptions
+): Promise<void> {
+  const { waitUntilExit } = render(
+    <Diff
+      id={id}
+      config={config}
+      enabled={options?.enabled ?? false}
+      scenario={options?.scenario || "review"}
+    />,
+    {
+      exitOnCtrlC: true,
+    }
+  );
+  await waitUntilExit();
+}
+
+async function renderPicker(
+  id: string,
+  config?: PickerConfig,
+  options?: RenderOptions
+): Promise<void> {
+  const { waitUntilExit } = render(
+    <Picker
+      id={id}
+      config={config}
+      enabled={options?.enabled ?? false}
+      scenario={options?.scenario || "select"}
     />,
     {
       exitOnCtrlC: true,

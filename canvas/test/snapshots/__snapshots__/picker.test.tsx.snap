@@ -1,0 +1,31 @@
+// Bun Snapshot v1, https://bun.sh/docs/test/snapshots
+
+exports[`picker renders single-select mode 1`] = `
+"\x1B[36m╭──────────────────────────────────────────────────────────╮\x1B[39m
+\x1B[36m│\x1B[39m \x1B[1mPick one\x1B[22m                                                 \x1B[36m│\x1B[39m
+\x1B[36m│\x1B[39m \x1B[36m> Option A — the first one\x1B[39m                               \x1B[36m│\x1B[39m
+\x1B[36m│\x1B[39m   Option B                                               \x1B[36m│\x1B[39m
+\x1B[36m│\x1B[39m \x1B[2m  Option C (unavailable)\x1B[22m                                 \x1B[36m│\x1B[39m
+\x1B[36m│\x1B[39m                                                          \x1B[36m│\x1B[39m
+\x1B[36m│\x1B[39m \x1B[2m↑/↓: navigate  Enter: select  Esc: cancel\x1B[22m                \x1B[36m│\x1B[39m
+\x1B[36m╰──────────────────────────────────────────────────────────╯\x1B[39m"
+`;
+
+exports[`picker renders multi-select mode 1`] = `
+"\x1B[36m╭──────────────────────────────────────────────────────────╮\x1B[39m
+\x1B[36m│\x1B[39m \x1B[1mPick any\x1B[22m                                                 \x1B[36m│\x1B[39m
+\x1B[36m│\x1B[39m \x1B[36m> [ ] X\x1B[39m                                                  \x1B[36m│\x1B[39m
+\x1B[36m│\x1B[39m   [ ] Y                                                  \x1B[36m│\x1B[39m
+\x1B[36m│\x1B[39m \x1B[2m  [ ] Z (unavailable)\x1B[22m                                    \x1B[36m│\x1B[39m
+\x1B[36m│\x1B[39m                                                          \x1B[36m│\x1B[39m
+\x1B[36m│\x1B[39m \x1B[2m↑/↓: navigate  Space: toggle  Enter: submit  Esc: cancel\x1B[22m \x1B[36m│\x1B[39m
+\x1B[36m╰──────────────────────────────────────────────────────────╯\x1B[39m"
+`;
+
+exports[`picker renders an empty-options error state 1`] = `
+"\x1B[31m╭──────────────────────────────────────────────────────────╮\x1B[39m
+\x1B[31m│\x1B[39m                                                          \x1B[31m│\x1B[39m
+\x1B[31m│\x1B[39m \x1B[31mpicker config: 'options' must not be empty\x1B[39m               \x1B[31m│\x1B[39m
+\x1B[31m│\x1B[39m                                                          \x1B[31m│\x1B[39m
+\x1B[31m╰──────────────────────────────────────────────────────────╯\x1B[39m"
+`;

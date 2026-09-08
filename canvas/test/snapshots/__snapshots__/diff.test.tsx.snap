@@ -1,0 +1,53 @@
+// Bun Snapshot v1, https://bun.sh/docs/test/snapshots
+
+exports[`diff canvas renders a multi-file diff 1`] = `
+"\x1B[36m╭──────────────────────────────────────────────────────────────────────────────╮\x1B[39m
+\x1B[36m│\x1B[39m \x1B[1mReview\x1B[22m                                                                       \x1B[36m│\x1B[39m
+\x1B[36m│\x1B[39m \x1B[36m> a.txt (modified) 0/1 decided\x1B[39m                                               \x1B[36m│\x1B[39m
+\x1B[36m│\x1B[39m   b.txt (modified) 0/1 decided                                               \x1B[36m│\x1B[39m
+\x1B[36m╰──────────────────────────────────────────────────────────────────────────────╯\x1B[39m
+
+╭──────────────────────────────────────────────────────────────────────────────╮
+│ \x1B[2m@@ -1,2 +1,2 @@\x1B[22m                                                              │
+│ \x1B[31m-old a\x1B[39m                                                                       │
+│ \x1B[32m+new a\x1B[39m                                                                       │
+│  shared                                                                      │
+│ \x1B[1m\x1B[33m[undecided]\x1B[39m\x1B[22m                                                                  │
+╰──────────────────────────────────────────────────────────────────────────────╯
+
+\x1B[2ma: approve  r: reject  ↑/↓: navigate  Enter: submit  Esc: cancel\x1B[22m"
+`;
+
+exports[`diff canvas renders an empty-diff state 1`] = `
+"╭──────────────────────────────────────────────────────────────────────────────╮
+│                                                                              │
+│ \x1B[2mNothing to review.\x1B[22m                                                           │
+│                                                                              │
+╰──────────────────────────────────────────────────────────────────────────────╯"
+`;
+
+exports[`diff canvas renders a parse error state 1`] = `
+"\x1B[31m╭──────────────────────────────────────────────────────────────────────────────╮\x1B[39m
+\x1B[31m│\x1B[39m                                                                              \x1B[31m│\x1B[39m
+\x1B[31m│\x1B[39m \x1B[31mFailed to parse diff: Could not determine file path in block:\x1B[39m                \x1B[31m│\x1B[39m
+\x1B[31m│\x1B[39m \x1B[31mnot a diff\x1B[39m                                                                   \x1B[31m│\x1B[39m
+\x1B[31m│\x1B[39m                                                                              \x1B[31m│\x1B[39m
+\x1B[31m╰──────────────────────────────────────────────────────────────────────────────╯\x1B[39m"
+`;
+
+exports[`diff canvas renders after navigating and approving a hunk 1`] = `
+"\x1B[36m╭──────────────────────────────────────────────────────────────────────────────╮\x1B[39m
+\x1B[36m│\x1B[39m \x1B[1mReview\x1B[22m                                                                       \x1B[36m│\x1B[39m
+\x1B[36m│\x1B[39m   a.txt (modified) 0/1 decided                                               \x1B[36m│\x1B[39m
+\x1B[36m│\x1B[39m \x1B[36m> b.txt (modified) 1/1 decided\x1B[39m                                               \x1B[36m│\x1B[39m
+\x1B[36m╰──────────────────────────────────────────────────────────────────────────────╯\x1B[39m
+
+╭──────────────────────────────────────────────────────────────────────────────╮
+│ \x1B[2m@@ -1,1 +1,1 @@\x1B[22m                                                              │
+│ \x1B[31m-old b\x1B[39m                                                                       │
+│ \x1B[32m+new b\x1B[39m                                                                       │
+│ \x1B[1m\x1B[32m[approved]\x1B[39m\x1B[22m                                                                   │
+╰──────────────────────────────────────────────────────────────────────────────╯
+
+\x1B[2ma: approve  r: reject  ↑/↓: navigate  Enter: submit  Esc: cancel\x1B[22m"
+`;

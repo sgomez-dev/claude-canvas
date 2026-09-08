@@ -10,3 +10,11 @@ test("flight booking scenario is registered", () => {
   expect(scenario?.canvasKind).toBe("flight");
   expect(scenario?.name).toBe("booking");
 });
+
+test("diff:review is registered", () => {
+  expect(getScenario("diff", "review")).toBeDefined();
+});
+
+test("picker:select is registered", () => {
+  expect(getScenario("picker", "select")).toBeDefined();
+});

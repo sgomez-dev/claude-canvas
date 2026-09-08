@@ -8,6 +8,23 @@ import { detectHost } from "./host";
 
 type Writer = (s: string) => boolean;
 
+// `assertIdent` only validates identifier *shape* (charset, length); it says
+// nothing about whether a kind is one implemented by canvases/index.tsx. A
+// simple typo (e.g. "documnet") passes assertIdent and used to reach
+// renderCanvas's switch, whose default branch called process.exit(1) from
+// inside what can be a spawned pane — process.exit doesn't unwind, so the
+// pane's own exit-0 handling never ran, leaving an unremovable pane on
+// Windows. Checking membership here, before any pane is spawned or
+// renderCanvas is called, is what actually prevents that.
+const KNOWN_KINDS = new Set(["calendar", "document", "flight"]);
+
+function assertKnownKind(kind: string): string {
+  if (!KNOWN_KINDS.has(kind)) {
+    throw new Error(`Unknown canvas kind: ${kind}. Expected one of: calendar, document, flight.`);
+  }
+  return kind;
+}
+
 // Every command prints exactly one JSON object on stdout. Diagnostics go to
 // stderr so they can never corrupt what Claude parses.
 export function emit(value: unknown, write: Writer = process.stdout.write.bind(process.stdout)): void {
@@ -59,6 +76,7 @@ export async function runShow(kind: string, opts: ShowOpts, io: ActionIO = defau
   try {
     const id = assertIdent("id", opts.id ?? `${kind}-1`);
     assertIdent("kind", kind);
+    assertKnownKind(kind);
     const scenario = assertIdent("scenario", opts.scenario ?? "display");
     const config = opts.configFile ? await Bun.file(opts.configFile).json() : undefined;
     process.stdout.write(`\x1b]0;canvas: ${kind}\x07`);
@@ -86,6 +104,7 @@ export async function runSpawn(kind: string, opts: SpawnOpts, io: ActionIO = def
   try {
     const id = assertIdent("id", opts.id ?? `${kind}-1`);
     assertIdent("kind", kind);
+    assertKnownKind(kind);
     const scenario = assertIdent("scenario", opts.scenario ?? "display");
     const argv = [
       process.execPath,
@@ -147,16 +166,20 @@ program
   .command("wait <id>")
   .option("--timeout <seconds>")
   .action(async (id: string, opts) => {
-    assertIdent("id", id);
-    const result = await waitForOutcome(id, resolveWaitTimeout(opts.timeout));
-    emit(result);
-    process.exit(result.status === "disconnected" || result.status === "error" ? 1 : 0);
+    try {
+      assertIdent("id", id);
+      const result = await waitForOutcome(id, resolveWaitTimeout(opts.timeout));
+      emit(result);
+      process.exit(result.status === "disconnected" || result.status === "error" ? 1 : 0);
+    } catch (e) {
+      fail((e as Error).message);
+    }
   });
 
 program.command("get <id> <key>").action(async (id: string, key: string) => {
-  assertIdent("id", id);
-  assertIdent("key", key);
   try {
+    assertIdent("id", id);
+    assertIdent("key", key);
     emit({ status: "ok", key, data: await getValue(id, key) });
   } catch (e) {
     fail((e as Error).message);
@@ -164,8 +187,8 @@ program.command("get <id> <key>").action(async (id: string, key: string) => {
 });
 
 program.command("close <id>").action(async (id: string) => {
-  assertIdent("id", id);
   try {
+    assertIdent("id", id);
     // Ask, never kill. Killing leaves a zombie pane on Windows.
     await requestClose(id);
     emit({ status: "closing", id });
@@ -187,4 +210,7 @@ program.command("env").action(() => {
   }
 });
 
-if (import.meta.main) program.parse();
+// parseAsync (not parse) so a rejection from an async .action() handler is
+// actually caught by Commander instead of becoming an unhandled-rejection
+// crash outside its control.
+if (import.meta.main) program.parseAsync();

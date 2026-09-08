@@ -94,6 +94,36 @@ test("show rejects an invalid kind and still exits 0 (never a non-zero exit on a
   expect(parsed.message).toContain("Invalid kind");
 });
 
+// Critical finding from the final whole-branch review: assertIdent only
+// validates identifier *shape*, not membership in the set of implemented
+// canvas kinds. A typo like "documnet" used to sail past assertIdent and
+// reach renderCanvas's switch, whose default branch called process.exit(1)
+// from inside what can be a spawned pane — since process.exit doesn't
+// unwind, the pane's own exit-0 handling never ran, leaving an unremovable
+// pane on Windows. Both runShow and runSpawn must reject an unknown kind
+// before ever reaching the pane-spawning/rendering code.
+test("show rejects an unknown (but shape-valid) kind and still exits 0", async () => {
+  const { io, lines, exits } = captureIO();
+  await runShow("documnet", { id: "cli-test-show-unknownkind" }, io);
+  expect(exits).toEqual([0]);
+  expect(lines).toHaveLength(1);
+  const parsed = JSON.parse(lines[0] ?? "");
+  expect(parsed.status).toBe("error");
+  expect(parsed.message).toContain("Unknown canvas kind");
+});
+
+test("spawn rejects an unknown (but shape-valid) kind with exit 1, before ever calling the host", async () => {
+  const { io, lines, exits } = captureIO();
+  await runSpawn("documnet", { id: "cli-test-spawn-unknownkind" }, io);
+  expect(exits).toEqual([1]);
+  const parsed = JSON.parse(lines[0] ?? "");
+  expect(parsed.status).toBe("error");
+  // If the kind check didn't run first, this would instead fail with
+  // "No canvas host available..." (from detectHost()) in a CI environment
+  // with no tmux/Windows Terminal — proof the host is never reached.
+  expect(parsed.message).toContain("Unknown canvas kind");
+});
+
 test("show rejects an invalid --scenario and still exits 0", async () => {
   const { io, lines, exits } = captureIO();
   await runShow("document", { id: "cli-test-show-badscenario", scenario: "bad scenario!" }, io);

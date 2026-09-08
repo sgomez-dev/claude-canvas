@@ -1,10 +1,29 @@
 import React from "react";
 import { render } from "ink";
+import { appendFile, mkdir } from "node:fs/promises";
+import { dirname } from "node:path";
 import { Calendar, type CalendarConfig } from "./calendar";
 import { Document } from "./document";
 import type { DocumentConfig } from "./document/types";
 import { FlightCanvas } from "./flight";
 import type { FlightConfig } from "./flight/types";
+import { logPath } from "../runtime/paths";
+
+// Defense in depth: cli.ts already rejects an unknown kind before this ever
+// runs. But renderCanvas must never be crash-prone on its own, since
+// process.exit() here doesn't unwind — if this ran inside a spawned pane,
+// the pane's own exit-0 handling would never execute, leaving an
+// unremovable pane on Windows. So log (never console.* — it would write
+// over the Ink render) and return normally instead.
+async function logUnknownKind(id: string, kind: string): Promise<void> {
+  try {
+    const path = logPath(id);
+    await mkdir(dirname(path), { recursive: true });
+    await appendFile(path, `${new Date().toISOString()} unknown canvas kind: ${kind}\n`);
+  } catch {
+    // Logging must never take the canvas down.
+  }
+}
 
 // Clear screen and hide cursor
 function clearScreen() {
@@ -57,8 +76,8 @@ export async function renderCanvas(
         options
       );
     default:
-      console.error(`Unknown canvas kind: ${kind}`);
-      process.exit(1);
+      await logUnknownKind(id, kind);
+      return;
   }
 }
 

@@ -771,3 +771,119 @@ Remaining Task 16 batches, not yet dispatched: B (seatmap-panel.tsx +
 meeting-picker-view.tsx, 21 errors, target 57), C (raw-markdown-renderer.tsx
 alone, 20 errors, target 37), D (markdown-renderer.tsx alone, 37 errors,
 target 0).
+
+Task 16 batch A: review Approved, verified independently by the reviewer in a
+throwaway worktree (97->78 exact, per-file counts match exactly, 0 errors
+remaining in all 6 files). 18/19 fixes correctly use pattern 3 (non-null
+assertion + invariant comment), each invariant checked algebraically against
+surrounding guard/loop/regex logic.
+
+Ruling 15: the 4th technique in seat-row.tsx (widening `let color: string`,
+fixing 4 TS2322 literal-narrowing errors) is accepted, no fix round -- why:
+my "three patterns" framing undersold what Task 16 needs. TS2322 is one of the
+four error codes my own spec named as part of "the 97" (noUncheckedIndexedAccess
+fallout: TS2532/TS18048/TS2345/TS2322), and this specific TS2322 instance is a
+different root cause (const-literal narrowing) than an index-access issue, so
+none of guard/default/assert applies -- widening the specific literal to its
+general type is the correct fix, and it is NOT the forbidden pattern (that
+prohibition is against widening to `| undefined` to silence a noUncheckedIndexedAccess
+complaint specifically). Disclosed in the commit message, no `any`, no rule
+suppression. Cost if wrong: one commit needs a follow-up re-label, code stays
+correct either way.
+Batches B/C/D may hit the same TS2322-literal-narrowing shape; this ruling
+authorizes the same 4th technique there under the same conditions (never
+`| undefined`, never `any`, must be disclosed).
+Task 16 batch A: complete (commits e2bffd8..12f9750, review clean).
+
+PROCESS INCIDENT: node_modules/typescript was found empty (0 files) at both
+the root and canvas/ node_modules right before dispatching batch B -- tsc
+silently reported 0 errors instead of the expected 78, which would have been
+a dangerous false-clean signal to hand a reviewer. Likely residue from the
+Task 13 node_modules incident's bun install not fully restoring everything.
+Verified no tracked file was affected (bun.lock and git status both clean),
+reinstalled with `bun install --frozen-lockfile`, re-verified: 78 errors
+exactly, matching per-file counts (seatmap-panel.tsx 6, meeting-picker-view.tsx
+15, raw-markdown-renderer.tsx 20, markdown-renderer.tsx 37), 124 pass/0 fail.
+Lesson: a tsc run reporting 0 errors is itself a fact to verify, not
+automatically good news, when a nonzero baseline is expected.
+
+Task 16 batch B: review Approved, 0 Critical/Important. All 11 non-null
+assertions verified against actual control flow (not just trusted comments) --
+weekDays' 7-element invariant traced to getWeekDays' unconditional loop, every
+site's bound checked against its guard. The one pattern-4 literal-widening fix
+confirmed genuine (CYBER_COLORS as-const literal narrowing, not a disguised
+| undefined escape). 3 Minor deferred (pre-existing totalSlots/startHour-endHour
+unvalidated-integer assumption predating this batch, dead code in
+renderDayColumn, could-be-narrower color union). tsc 78->57 confirmed.
+Task 16 batch B: complete (commits 12f9750..0559959, review clean).
+
+Task 16 batch C: review Approved, 0 Critical/Important. 11 assertion sites
+(resolving 20 errors) all traced against real regex group syntax, loop bounds,
+or split() semantics -- zero unverifiable invariants. The one guard (vs
+assertion) for selectionStart/selectionEnd was the right call: undefined is
+real per the prop's declared optional type even though the sole current caller
+never omits it, so asserting it away would have been dishonest about a public
+component's contract.
+
+Coverage note for the final review, not a fix-now item: ~11 of the 20 fixes sit
+on code paths the current document snapshot fixture never exercises (the
+cursorPosition block is dead in read-only "display" scenario; the
+character-by-character selection/cursor render loop never activates since
+selectionStart/selectionEnd stay null in read-only mode). Correctness there
+rests on the reviewer's static analysis, not on a passing snapshot -- flagged
+as residual risk for whoever next touches this file's selection/cursor
+handling, not a defect of this batch.
+Task 16 batch C: complete (commits 0559959..46240c5, review clean).
+
+Task 16 batch D: review Approved, 0 Critical/Important. Dead-code claim
+independently re-confirmed via grep (document.tsx imports raw-markdown-renderer,
+a different file; markdown-renderer.tsx itself has zero external references).
+All 12 assertion sites traced against real code (loop guards, one non-optional
+regex group, one correctly-scoped Record-key case distinguishing direct-assign
+reads needing `!` from spread reads that don't). Flake confirmed pre-existing:
+commit touches only markdown-renderer.tsx, cannot have caused a client.test.ts
+timing race that Task 7's own review already documented and accepted (~1/45
+runs). One Minor: report undercounts one site's occurrence tally (5 vs stated
+4), narrative only, code verified correct regardless.
+Task 16 batch D: complete (commits 46240c5..2ad2fa0, review clean).
+
+*** TASK 16 COMPLETE: 113 -> 0 tsc errors project-wide, verified independently
+by me and by 4 separate reviewers across batches A/B/C/D. All 97 fixes stayed
+within the 3 authorized patterns plus the one narrow pattern-4 exception
+(Ruling 15), zero forbidden escape hatches (no `any`, no `| undefined`
+widening, no rule suppression) anywhere across ~113 total fixed errors. ***
+
+Recorded for the final whole-branch review, not action items now: (1) Task 16
+batch C found ~11/20 fixes on snapshot-fixture-dead paths (cursor/selection
+handling in raw-markdown-renderer.tsx); (2) batch D found the entire
+markdown-renderer.tsx file (12 fixes) is dead code with zero test coverage of
+any kind. Both are residual risk to flag, not defects to fix now -- correctness
+rests on reviewer static analysis, which held up in both cases.
+
+Task 17: review Needs fixes. One Important: 3 residual tmux-exclusive mentions
+left uncorrected -- canvas/skills/canvas/SKILL.md:48 ("tmux split"), :54
+("tmux split pane"), canvas/README.md:34 ("tmux split") -- contradicting the
+correctly-updated Requirements/Overview text a few lines away in the same
+files. Everything else (CLI surface, config examples, CLAUDE.md structure)
+verified accurate against real source, cross-checked line-by-line, not
+trusted on plausibility.
+
+Task 17: fix round 1/5 (1 addressed, 0 open; commits 81ca797..eed6a6e). Full
+tmux sweep across every required file confirmed clean by the re-reviewer;
+canvas/commands/canvas.md correctly untouched, still tmux-exclusive, deferred
+to final review as originally scoped.
+Task 17: complete (commits 2ad2fa0..eed6a6e, review clean).
+
+Task 18: review Approved, 0 Critical/Important, 1 Minor (stale TZ comment in
+setup.ts naming only 2 OSes, outside this task's scope). Matrix deviation
+(macos-latest added per Ruling 4) confirmed genuine and uniformly applied --
+all 3 OSes run identical steps, fail-fast:false so one leg's failure doesn't
+mask the others. --frozen-lockfile confirmed used, workflow runs from repo
+root (required for the FORCE_COLOR/TZ preload).
+Task 18: complete (commits eed6a6e..8a069ff, review clean).
+
+*** ALL 18 TASKS COMPLETE AND REVIEWED. Next per the SDD skill: dispatch the
+final whole-branch review (skill mandates the most capable available model
+for this specific step, not the session default) before finishing-a-
+development-branch. Asking the user about this given their explicit
+sonnet-always directive conflicts with that skill guidance. ***

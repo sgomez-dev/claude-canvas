@@ -1,6 +1,6 @@
 ---
 name: canvas
-description: Spawn interactive terminal canvases for calendars, documents, flight booking, and diff review
+description: Spawn interactive terminal canvases for calendars, documents, flight booking, diff review, and option pickers
 ---
 
 # Canvas Command
@@ -22,6 +22,7 @@ Ask what kind of canvas the user needs:
 - **Document** - View or edit markdown content
 - **Flight** - Compare flights and select seats
 - **Diff** - Review a unified diff hunk-by-hunk
+- **Picker** - Choose one or more options from a list
 
 ### Step 2: Gather Configuration
 
@@ -46,6 +47,11 @@ Based on the canvas type, collect the necessary configuration:
 **Diff:**
 - Unified diff text to review (`diff --git` or plain `diff -u` style)
 - Optional title
+
+**Picker:**
+- Options to choose from (id + label, optional description/disabled)
+- Single- or multi-select mode
+- Optional title/prompt
 
 ### Step 3: Spawn Canvas
 
@@ -73,6 +79,9 @@ bun run src/cli.ts spawn flight --config '{"flights": [...]}'
 
 # Diff review
 bun run src/cli.ts spawn diff --config '{"diffText": "diff --git a/... "}'
+
+# Option picker
+bun run src/cli.ts spawn picker --config '{"mode": "single", "options": [...]}'
 ```
 
 ### Step 4: Handle Results
@@ -87,7 +96,7 @@ bun run src/cli.ts wait cal-1
 `wait` prints one of:
 
 - `{"status":"selected","data":...}` — user made a selection (time slot,
-  text, flight+seat, diff hunk decisions)
+  text, flight+seat, diff hunk decisions, picker option ids)
 - `{"status":"cancelled"}` — user pressed Escape or quit
 - `{"status":"pending"}` — timed out, canvas still alive; call `wait` again
 - `{"status":"disconnected"}` — canvas died while waiting
@@ -112,3 +121,4 @@ Read these skills for detailed configuration options:
 - `document` - Markdown rendering and text selection
 - `flight` - Flight comparison and seatmaps
 - `diff` - Diff review (coming soon)
+- `picker` - Option picker (coming soon)

@@ -1,7 +1,9 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { Box, Text, useInput, useApp, useStdout } from "ink";
 import { useCanvasServer } from "../runtime/use-canvas-server";
-import type { PickerConfig, PickerOption, PickerResult } from "./picker/types";
+import { PickerView } from "./picker/view";
+import { validatePicker } from "./picker/validate";
+import type { PickerConfig, PickerResult } from "./picker/types";
 
 export interface PickerProps {
   id: string;
@@ -10,158 +12,63 @@ export interface PickerProps {
   enabled: boolean;
 }
 
-interface ValidatedPicker {
-  options: PickerOption[];
-  mode: "single" | "multi";
-  error: string | null;
-}
-
-// Rows this component spends on chrome rather than options: two border
-// rows, the title, a blank line and the footer hint. The prompt adds one
-// more when present.
-const CHROME_ROWS = 5;
-
-function firstEnabledIndex(options: PickerOption[]): number {
-  const idx = options.findIndex((o) => !o.disabled);
-  return idx === -1 ? 0 : idx;
-}
-
-export function Picker({ id, config: initialConfig, scenario = "select", enabled }: PickerProps): React.JSX.Element {
+/**
+ * The picker canvas shell.
+ *
+ * Owns everything that is not rendering: the live config, validation, the
+ * IPC server, Escape, and the single outcome. `PickerView` owns the list and
+ * its cursor. The split is what lets a composed canvas embed the view
+ * without inheriting a second IPC server or a second outcome.
+ */
+export function Picker({
+  id,
+  config: initialConfig,
+  scenario = "select",
+  enabled,
+}: PickerProps): React.JSX.Element {
   const { exit } = useApp();
   const { stdout } = useStdout();
 
   // Live config: replaced by an `update` pushed from the controller.
   const [config, setConfig] = useState<PickerConfig | undefined>(initialConfig);
+  // Bumped on every pushed config, and used as the view's React key.
+  //
+  // Remounting the view is how the interaction state gets reset, replacing
+  // the effect that used to clear the cursor and the checked set by hand. A
+  // pushed config is a new question, so every piece of state that referred
+  // to the old one has to go -- and "throw the component away" is both
+  // exhaustive and impossible to get half-right, which a hand-written reset
+  // is not.
+  const [generation, setGeneration] = useState(0);
 
-  // Options, mode, and any config error are derived from ONE memo so there
-  // is a single source of truth for "is this config usable at all" — see
-  // diff.tsx's combined `{files, error}` memo for the reference pattern.
-  // Previously `options`/`mode` were derived inline
-  // (`config?.options ?? []`, `config?.mode ?? "single"`) with no
-  // validation at all, and fed straight into the cursor's useState
-  // initializer and the render body: malformed `options` (not an array,
-  // elements missing id/label, duplicate ids), an empty `options` array,
-  // an unrecognized `mode` string, or every option disabled would each
-  // either throw inside Ink with no error surfaced to the controller, or
-  // render a canvas that could never be submitted (sometimes with Escape
-  // unreachable too). Validating the *raw* config here, before any
-  // indexing or useState initializer touches it, closes all of those gaps
-  // at once.
-  const { options, mode, error } = useMemo<ValidatedPicker>(() => {
-    const rawOptions: unknown = config?.options;
-    if (!Array.isArray(rawOptions)) {
-      return { options: [], mode: "single", error: "picker config: 'options' must be an array" };
-    }
-    for (let i = 0; i < rawOptions.length; i++) {
-      const o: unknown = rawOptions[i];
-      const id = o !== null && typeof o === "object" ? (o as { id?: unknown }).id : undefined;
-      const label = o !== null && typeof o === "object" ? (o as { label?: unknown }).label : undefined;
-      if (typeof id !== "string" || id.length === 0 || typeof label !== "string" || label.length === 0) {
-        return {
-          options: [],
-          mode: "single",
-          error: `picker config: options[${i}] is missing 'id' or 'label'`,
-        };
-      }
-    }
-    const candidateOptions = rawOptions as PickerOption[];
-    const seenIds = new Set<string>();
-    for (const opt of candidateOptions) {
-      if (seenIds.has(opt.id)) {
-        return {
-          options: [],
-          mode: "single",
-          error: `picker config: duplicate option id ${JSON.stringify(opt.id)}`,
-        };
-      }
-      seenIds.add(opt.id);
-    }
-    if (candidateOptions.length === 0) {
-      return { options: [], mode: "single", error: "picker config: 'options' must not be empty" };
-    }
-    // `mode` is required, both in PickerConfig and here. It used to be
-    // accepted as absent and silently defaulted to "single", so a config
-    // that meant multi-select but omitted the field opened a canvas the
-    // user could not multi-select in, with nothing reported anywhere. A
-    // required field that silently takes a default is worse than one that
-    // refuses: the caller cannot tell the two intents apart.
-    const rawMode: unknown = config?.mode;
-    if (rawMode !== "single" && rawMode !== "multi") {
-      return {
-        options: [],
-        mode: "single",
-        error: `picker config: 'mode' must be "single" or "multi", got ${JSON.stringify(rawMode)}`,
-      };
-    }
-    const validMode: "single" | "multi" = rawMode;
-    if (!candidateOptions.some((o) => !o.disabled)) {
-      return { options: [], mode: validMode, error: "picker config: all options are disabled" };
-    }
-    return { options: candidateOptions, mode: validMode, error: null };
-  }, [config?.options, config?.mode]);
+  const { options, mode, error } = useMemo(() => validatePicker(config), [config]);
 
-  // Cursor state and its ref always exist (hooks are unconditional every
-  // render — see diff.tsx's identical structure). When `error` is set,
-  // `options` is the empty-array fallback from the memo above, so
-  // `firstEnabledIndex` safely returns 0 rather than indexing into
-  // unvalidated data.
-  const [cursor, setCursor] = useState(() => firstEnabledIndex(options));
-  // Mirrors `cursor` synchronously into a ref on every render (NOT inside a
-  // useEffect, which would reintroduce the same one-render lag this is
-  // fixing). useInput's handler is re-registered in a passive effect that
-  // lags a state commit by roughly 2-4ms, so reading the closed-over
-  // `cursor` directly inside the useInput callback can observe a stale
-  // value: two keystrokes arriving within that window (e.g. move then
-  // select) could read the PREVIOUS cursor position. Reading from this ref
-  // always sees the latest committed cursor regardless of which render's
-  // useInput registration is currently active. See diff.tsx's `cursorRef`
-  // for the reference implementation of this pattern.
-  const cursorRef = useRef(cursor);
-  cursorRef.current = cursor;
-
-  const [checked, setChecked] = useState<Set<string>>(new Set());
-  // Same stale-closure hazard as cursorRef above, for multi-mode's toggle
-  // and submit reads of `checked`.
-  const checkedRef = useRef(checked);
-  checkedRef.current = checked;
-
-  // Guards against a second outcome message (Enter-then-Enter,
-  // Enter-then-Escape, etc.) firing before the component has actually
-  // unmounted. See diff.tsx's `submittedRef` for the reference pattern.
+  // Guards the outcome, not the input: `PickerView` may call onSubmit more
+  // than once (Enter-then-Enter within a tick), and Escape can race a
+  // submit. First outcome wins.
   const submittedRef = useRef(false);
 
+  const sentRef = useRef(false);
   const ipc = useCanvasServer({
     id,
     kind: "picker",
     scenario,
     enabled,
     onClose: () => {},
-    onUpdate: (next) => setConfig(next as PickerConfig),
+    onUpdate: (next) => {
+      setConfig(next as PickerConfig);
+      setGeneration((g) => g + 1);
+      // So a config error in the NEW config is reported too.
+      sentRef.current = false;
+    },
   });
 
-  // A pushed config is a new question, so the interaction state that
-  // referred to the old one is dropped rather than carried over: a cursor
-  // can point past the new content, and a selection or decision can name
-  // something that no longer exists. Skipped on the first run, where the
-  // state initializers already hold the right values.
-  const generation = useRef(0);
-  useEffect(() => {
-    if (generation.current++ === 0) return;
-    setCursor(firstEnabledIndex(options));
-    setChecked(new Set());
-    sentRef.current = false;
-  }, [options]);
-
-  // Reports a config validation failure to the controller exactly once,
-  // when `error` transitions from null to non-null. Gated on
-  // `ipc.isConnected` for the same reason as diff.tsx's own sendError
-  // effect: the IPC server starts asynchronously (real filesystem I/O for
-  // the registry record), so an unconditional send on mount would race the
-  // server's startup and broadcast to zero connections, silently dropping
-  // the message forever. This effect re-runs when `isConnected` flips to
-  // true and sends then; `sentRef` keeps that to a single send even if
-  // this effect re-runs again afterward.
-  const sentRef = useRef(false);
+  // Reports a config validation failure to the controller exactly once, when
+  // `error` transitions from null to non-null. Gated on `ipc.isConnected`
+  // because the IPC server starts asynchronously (real filesystem I/O for
+  // the registry record), so an unconditional send on mount would race its
+  // startup. Retained outcomes mean the controller still receives it even
+  // though it is sent before any controller can have connected.
   useEffect(() => {
     if (error && ipc.isConnected && !sentRef.current) {
       sentRef.current = true;
@@ -169,57 +76,23 @@ export function Picker({ id, config: initialConfig, scenario = "select", enabled
     }
   }, [error, ipc.isConnected, ipc.sendError]);
 
-  function moveCursor(delta: number) {
-    if (options.length === 0) return;
-    let next = cursorRef.current;
-    for (let attempts = 0; attempts < options.length; attempts++) {
-      next = (next + delta + options.length) % options.length;
-      if (!options[next]?.disabled) break;
-    }
-    setCursor(next);
-  }
-
-  function submit(ids: string[]) {
+  // Escape is the shell's, always active, and checked before anything else
+  // so the pane is never un-exitable by keyboard -- including from the
+  // config-error state, where no view is mounted at all.
+  useInput((_input, key) => {
+    if (!key.escape) return;
     if (submittedRef.current) return;
     submittedRef.current = true;
-    const result: PickerResult = { selectedIds: ids };
+    ipc.sendCancelled("escape");
+    exit();
+  });
+
+  function handleSubmit(result: PickerResult) {
+    if (submittedRef.current) return;
+    submittedRef.current = true;
     ipc.sendSelected(result);
     exit();
   }
-
-  useInput((input, key) => {
-    // Escape must always work, in every state (config error, normal
-    // selection) — checked first and unconditionally so the pane is never
-    // un-exitable by keyboard. Copies diff.tsx's exact ordering.
-    if (key.escape) {
-      if (submittedRef.current) return;
-      submittedRef.current = true;
-      ipc.sendCancelled("escape");
-      exit();
-      return;
-    }
-    if (options.length === 0) return;
-    if (key.upArrow || input === "k") {
-      moveCursor(-1);
-    } else if (key.downArrow || input === "j") {
-      moveCursor(1);
-    } else if (mode === "single" && key.return) {
-      const opt = options[cursorRef.current];
-      if (opt && !opt.disabled) submit([opt.id]);
-    } else if (mode === "multi" && input === " ") {
-      const opt = options[cursorRef.current];
-      if (opt && !opt.disabled) {
-        setChecked((prev) => {
-          const next = new Set(prev);
-          if (next.has(opt.id)) next.delete(opt.id);
-          else next.add(opt.id);
-          return next;
-        });
-      }
-    } else if (mode === "multi" && key.return) {
-      submit(Array.from(checkedRef.current));
-    }
-  });
 
   if (error) {
     return (
@@ -229,66 +102,16 @@ export function Picker({ id, config: initialConfig, scenario = "select", enabled
     );
   }
 
-  // A list longer than the pane used to render every option, overflowing the
-  // terminal and pushing the footer hint (and sometimes the cursor itself)
-  // out of view -- a picker over a file list or a branch list hits this
-  // immediately.
-  //
-  // The window is derived from the cursor rather than held in state: a
-  // separate scrollOffset would need an effect to keep it in sync with the
-  // cursor, which costs an extra render per keystroke and can desync from
-  // the cursorRef the input handler reads. Paging (rather than centring the
-  // cursor) means the list only moves when the cursor crosses a boundary,
-  // instead of shifting under the user on every keypress.
-  const visibleCount = Math.max(
-    1,
-    (stdout?.rows ?? 24) - CHROME_ROWS - (config?.prompt ? 1 : 0)
-  );
-  const windowStart =
-    options.length <= visibleCount ? 0 : Math.floor(cursor / visibleCount) * visibleCount;
-  const visibleOptions = options.slice(windowStart, windowStart + visibleCount);
-
   return (
-    <Box flexDirection="column" borderStyle="round" borderColor="cyan" paddingX={1}>
-      <Text bold>{config?.title ?? "Choose"}</Text>
-      {config?.prompt ? <Text dimColor>{config.prompt}</Text> : null}
-      {visibleOptions.map((opt, visibleIndex) => {
-        const i = windowStart + visibleIndex;
-        const isCursor = i === cursor;
-        const isChecked = mode === "multi" && checked.has(opt.id);
-        // Multi-mode gives the cursor its own gutter (`> `/`  `) ahead of
-        // the checkbox so cursor position is visible even with color
-        // stripped — previously the cursor was expressed solely via
-        // `color="cyan"` on the row, invisible in a no-color terminal.
-        // Single mode keeps its existing `> `/`  ` prefix unchanged.
-        const prefix =
-          mode === "multi"
-            ? `${isCursor ? "> " : "  "}${isChecked ? "[x] " : "[ ] "}`
-            : isCursor
-              ? "> "
-              : "  ";
-        return (
-          <Text
-            key={opt.id}
-            color={opt.disabled ? undefined : isCursor ? "cyan" : undefined}
-            dimColor={opt.disabled}
-          >
-            {prefix}
-            {opt.label}
-            {opt.description ? ` — ${opt.description}` : ""}
-          </Text>
-        );
-      })}
-      <Box marginTop={1}>
-        <Text dimColor>
-          {options.length > visibleCount
-            ? `${windowStart + 1}-${windowStart + visibleOptions.length} of ${options.length}  `
-            : ""}
-          {mode === "single"
-            ? "↑/↓: navigate  Enter: select  Esc: cancel"
-            : "↑/↓: navigate  Space: toggle  Enter: submit  Esc: cancel"}
-        </Text>
-      </Box>
-    </Box>
+    <PickerView
+      key={generation}
+      options={options}
+      mode={mode}
+      title={config?.title}
+      prompt={config?.prompt}
+      rows={stdout?.rows ?? 24}
+      focused
+      onSubmit={handleSubmit}
+    />
   );
 }

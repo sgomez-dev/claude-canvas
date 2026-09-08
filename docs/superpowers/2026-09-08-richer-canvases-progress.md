@@ -65,5 +65,69 @@ nothing about composability.
 
 ## Progress
 
-Nothing implemented yet. Next: the composition plan, per the spec's
-sequencing.
+### Sub-project 1: composition — COMPLETE
+
+Each of the four Phase 2 primitives is now a **canvas shell** plus a
+**view** plus a pure **validate** function:
+
+| Primitive | Shell | View | Validate |
+|---|---|---|---|
+| `picker` | 117 | 177 | 74 |
+| `table` | 99 | 128 | 58 |
+| `diff` | 108 | 225 | 26 |
+| `form` | 104 | 304 | 78 |
+
+The shell owns the live config, validation, the IPC server, Escape and the
+single outcome. The view owns rendering and local interaction and knows
+nothing about IPC, registry records or outcomes.
+
+**The guard held: 24 render snapshots, not one regenerated.** The JSX was
+moved by slicing the original files line by line rather than retyped, which
+is why. `bun test` 261 pass / 0 fail, `tsc --noEmit` clean, and the tmux
+smoke script 12 pass / 0 fail in a real pane -- run because this refactor
+moved Escape out of every view, so two `useInput` hooks are now live at
+once.
+
+**Ruling 5: Escape belongs to the shell, and the shell keeps it always
+active.** A view that swallowed Escape would make a composed canvas
+un-exitable through whichever region happened to be focused. Keeping it in
+the shell also means it still works from the config-error state, where no
+view is mounted at all -- which is the regression `diff`'s
+"Escape still cancels from the parse-error state" test was written for. Cost
+if wrong: two active input hooks instead of one, which Ink handles by
+design.
+
+**Ruling 6: reset by remounting the view, not by clearing state.** Each
+shell keys its view on a `generation` counter bumped on every pushed config.
+That replaced four hand-written reset effects. A pushed config is a new
+question, so *every* piece of state referring to the old one has to go, and
+"throw the component away" is exhaustive in a way a hand-written reset is
+not -- `form`'s values are keyed by field id and `diff`'s decisions by hunk
+id, so a missed reset silently misattributes an answer. Cost if wrong: a
+remount costs one extra render on an update, which happens only when a
+controller pushes one.
+
+**Ruling 7: prove the mechanism before building on it.** Byte-identical
+snapshots show the extraction broke nothing and say nothing about whether it
+*enabled* anything. `test/composition/focus.test.tsx` mounts two picker
+views in one pane, moves focus with Tab, and asserts only the focused one
+consumes keys -- plus that a view windows to the `rows` budget it is handed
+rather than the terminal height, which is how a region gets a slice of the
+pane. Confirmed load-bearing: with `{ isActive: focused }` removed from one
+view, two of those four tests fail because both views answer the same
+keystroke.
+
+### Found during the extraction, not fixed
+
+**`form` has no viewport.** It is the one primitive that never got one: a
+form with more fields than the pane has rows overflows, exactly as `picker`,
+`diff` and `table` did before Phase 2 gave them windows. Left alone here
+deliberately -- adding one changes a render, and this sub-project's entire
+guard was that no render changed. Recorded as the first item for whoever
+picks up sub-project 2, since a form region inside a dashboard makes it
+worse.
+
+### Next
+
+Sub-project 2: the `tree` view, the `dashboard` canvas, region validation,
+and refresh through `update`.

@@ -151,6 +151,15 @@ run_case calendar sm-mp meeting-picker \
   '"status":"selected"' \
   Enter
 
+# The dashboard: several primitive views in one pane, which is what Phase 3's
+# view/shell split was for. Its outcome carries which region answered, so a
+# controller can tell which of several questions was the one answered.
+DASH_CFG='{"title":"Smoke dashboard","regions":[{"id":"status","kind":"text","rows":4,"title":"git","config":{"text":"on branch main"}},{"id":"pick","kind":"picker","title":"Next","config":{"mode":"single","options":[{"id":"alpha","label":"Alpha"},{"id":"beta","label":"Beta"}]}}]}'
+
+run_case dashboard sm-dash display "$DASH_CFG" \
+  '{"status":"selected","data":{"regionId":"pick","result":{"selectedIds":["beta"]}}}' \
+  j Enter
+
 # The calendar's `display` scenario had no IPC server at all until
 # 2026-09-08: it wrote no registry record, so `close` answered "no canvas"
 # for a pane sitting right there.

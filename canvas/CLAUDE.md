@@ -49,6 +49,49 @@ closed -- `close` answers "no canvas <id>" for a pane sitting right there,
 against the lifecycle design that requires closing to be an IPC request.
 The calendar's `display` scenario was missing this until 2026-09-08.
 
+## Canvas anatomy: view, shell, validator
+
+Since Phase 3, a primitive canvas is **three** files, and the split is what
+makes composition possible:
+
+```
+canvases/<kind>.tsx           the canvas shell
+canvases/<kind>/view.tsx      the view
+canvases/<kind>/validate.ts   the validator
+```
+
+- **The shell** owns the live config, the IPC server, `Escape`, and the
+  single outcome. It mounts its own view with `focused` permanently true.
+- **The view** owns rendering and local interaction and knows nothing about
+  IPC, registry records or outcomes. It gates its keys on
+  `useInput(handler, { isActive: focused })`, and takes a `rows`/`budget`
+  prop for the height it may paint into — the terminal height standalone,
+  or a region's allotment inside a composed canvas.
+- **The validator** is a pure function both the shell and any composing
+  canvas call, so a bad region config is reported exactly as a bad canvas
+  config is.
+
+Three rules that are load-bearing rather than stylistic:
+
+1. **A view must never handle `Escape`.** It belongs to the shell, always
+   active. A view that swallowed it would make a composed canvas
+   un-exitable through whichever region happened to be focused, and it must
+   also work from the config-error state where no view is mounted at all.
+2. **A view must not guard its own double submit.** `onSubmit` may fire more
+   than once; the shell enforces first-outcome-wins, because the outcome is
+   the shell's to own.
+3. **Reset by remounting the view**, keyed on a `generation` counter the
+   shell bumps on every pushed config — not by clearing state by hand. A
+   pushed config is a new question, and `form`'s values are keyed by field
+   id while `diff`'s decisions are keyed by hunk id, so a missed reset
+   misattributes an answer silently.
+
+`dashboard` is the composed canvas: it allocates rows between regions, owns
+`Tab` as well as `Escape`, and tags its outcome with the `regionId` that
+produced it. Adding a region kind means adding a case to
+`dashboard/validate.ts`'s `validateRegionConfig` and one to
+`dashboard.tsx`'s `renderRegion`.
+
 ## Scenarios
 
 `--scenario` is validated against the registry, not just for identifier

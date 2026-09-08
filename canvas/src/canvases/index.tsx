@@ -15,6 +15,8 @@ import { Form } from "./form";
 import type { FormConfig } from "./form/types";
 import { Table } from "./table";
 import type { TableConfig } from "./table/types";
+import { Dashboard } from "./dashboard";
+import type { DashboardConfig } from "./dashboard/types";
 import { logPath } from "../runtime/paths";
 
 // Defense in depth: cli.ts already rejects an unknown kind before this ever
@@ -87,6 +89,12 @@ export async function renderCanvas(
       return renderDiff(
         id,
         config as DiffReviewConfig | undefined,
+        options
+      );
+    case "dashboard":
+      return renderDashboard(
+        id,
+        config as DashboardConfig | undefined,
         options
       );
     case "table":
@@ -234,6 +242,25 @@ async function renderTable(
 ): Promise<void> {
   const { waitUntilExit } = render(
     <Table
+      id={id}
+      config={config}
+      enabled={options?.enabled ?? false}
+      scenario={options?.scenario || "display"}
+    />,
+    {
+      exitOnCtrlC: true,
+    }
+  );
+  await waitUntilExit();
+}
+
+async function renderDashboard(
+  id: string,
+  config?: DashboardConfig,
+  options?: RenderOptions
+): Promise<void> {
+  const { waitUntilExit } = render(
+    <Dashboard
       id={id}
       config={config}
       enabled={options?.enabled ?? false}

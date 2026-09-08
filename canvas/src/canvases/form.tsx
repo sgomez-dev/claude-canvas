@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import { Box, Text, useInput, useApp } from "ink";
+import { Box, Text, useInput, useApp, useStdout } from "ink";
 import { useCanvasServer } from "../runtime/use-canvas-server";
 import { FormView } from "./form/view";
 import { validateForm } from "./form/validate";
@@ -26,6 +26,7 @@ export function Form({
   enabled,
 }: FormProps): React.JSX.Element {
   const { exit } = useApp();
+  const { stdout } = useStdout();
 
   // Live config: replaced by an `update` pushed from the controller.
   const [config, setConfig] = useState<FormConfig | undefined>(initialConfig);
@@ -97,6 +98,7 @@ export function Form({
       key={generation}
       fields={fields}
       title={config?.title}
+      budget={stdout?.rows ?? 24}
       focused
       onSubmit={handleSubmit}
     />

@@ -25,6 +25,7 @@ Ask what kind of canvas the user needs:
 - **Picker** - Choose one or more options from a list
 - **Form** - Fill in structured fields and submit them as one result
 - **Table** - Display tabular data, view-only
+- **Dashboard** - Several of the above in one pane, at a glance
 
 If you are unsure which scenario a kind supports, ask the CLI rather than
 guessing -- an unknown `--scenario` is rejected:
@@ -74,6 +75,13 @@ Based on the canvas type, collect the necessary configuration:
 - Columns (key + label, optional width)
 - Rows as objects of string values
 - Optional title
+
+**Dashboard:**
+- Which regions, and of what kind (`text`, `table`, `tree`, `picker`,
+  `form`, `diff`)
+- Each region's own config, plus an optional fixed `rows` height
+- Note that YOU gather the data (git status, test output, file tree); the
+  canvas only renders the config you build
 
 ### Step 3: Spawn Canvas
 

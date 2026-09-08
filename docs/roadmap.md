@@ -79,12 +79,17 @@ than be 600 bespoke lines like `flight` is today — and no composition
 mechanism exists yet, which is why the phase starts by building one rather
 than by building a canvas.
 
-Four sub-projects, sequenced: **composition** (extract each primitive's view
-from its canvas shell, add a focus contract), **dashboard** (the first
-composed canvas, plus a `tree` view), **image pipeline** (capability
-detection, PNG decode, half-blocks, Sixel, Kitty), **image canvas**. The
-first two are text-only and verifiable anywhere; the third is the one with a
-real verification gap.
+Four sub-projects, sequenced. **Composition** (done): each primitive is now
+a view plus a canvas shell plus a pure validator, with focus routed by Ink's
+`useInput({ isActive })`. **Dashboard** (done): the `dashboard` canvas
+composes `text`, `table`, `tree`, `picker`, `form` and `diff` regions in one
+pane and tags its outcome with the region that answered; `tree` is new, and
+`form` finally got the viewport it never had. **Image pipeline** (next):
+capability detection, PNG decode, half-blocks, Sixel, Kitty. **Image
+canvas** (last).
+
+The first two were text-only and verifiable anywhere; the third is the one
+with a real verification gap.
 
 The roadmap's fourth backlog item below — an interactive diff reviewer — was
 already delivered in Phase 2 as the `diff` primitive.

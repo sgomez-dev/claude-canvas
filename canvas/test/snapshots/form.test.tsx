@@ -128,3 +128,55 @@ test("an empty field with no placeholder still renders a visible input line", as
   expect(await r.settle()).toMatchSnapshot();
   r.dispose();
 });
+
+// A form with more fields than the pane has rows used to render all of them.
+// The overflow pushed the Submit button itself out of view, so the form
+// could be filled in and not submitted -- worse than picker's or table's
+// overflow, which only hid content.
+const LONG_CONFIG: FormConfig = {
+  title: "Twelve fields",
+  fields: Array.from({ length: 12 }, (_, i) => ({
+    id: `f${i + 1}`,
+    type: "text" as const,
+    label: `Field ${i + 1}`,
+  })),
+};
+
+test("form windows a field list longer than the pane, keeping Submit visible", async () => {
+  const r = renderCanvas(<Form id="form-7" config={LONG_CONFIG} enabled={false} />, {
+    columns: 60,
+    rows: 18,
+  });
+  const frame = await r.settle();
+  expect(frame).toContain("1-5 of 12");
+  expect(frame).toContain("[ Submit ]");
+  expect(frame).not.toContain("Field 12");
+  expect(await r.settle()).toMatchSnapshot();
+  r.dispose();
+});
+
+test("tabbing past the window pages the fields, and Submit is still reachable", async () => {
+  const r = renderCanvas(<Form id="form-8" config={LONG_CONFIG} enabled={false} />, {
+    columns: 60,
+    rows: 18,
+  });
+  await r.settle();
+
+  // Five fields fit, so the sixth Tab crosses the boundary.
+  for (let i = 0; i < 5; i++) {
+    r.stdin.write("\t");
+    await r.settle();
+  }
+  expect(await r.settle()).toContain("6-10 of 12");
+
+  // Tab to the Submit position: it belongs to the last page, so the window
+  // lands on the final fields rather than leaving Submit off screen.
+  for (let i = 0; i < 7; i++) {
+    r.stdin.write("\t");
+    await r.settle();
+  }
+  const frame = await r.settle();
+  expect(frame).toContain("> [ Submit ]");
+  expect(frame).toContain("8-12 of 12");
+  r.dispose();
+});

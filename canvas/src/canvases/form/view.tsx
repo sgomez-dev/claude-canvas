@@ -5,9 +5,18 @@ import type { FormField, FormResult } from "./types";
 export interface FormViewProps {
   fields: FormField[];
   title?: string;
+  /** Total rows this view may paint into; it subtracts its own chrome. */
+  budget: number;
   focused: boolean;
   onSubmit(result: FormResult): void;
 }
+
+// Rows this view spends on chrome rather than fields: two border rows, the
+// title, the blank line before Submit, Submit itself, the blank line after
+// it, and the hint.
+const CHROME_ROWS = 7;
+// Every field paints a label row and a value row.
+const ROWS_PER_FIELD = 2;
 
 type FieldState = string | boolean; // number fields store their raw digit string here too
 
@@ -58,13 +67,11 @@ function clampNumber(raw: string, min: number | undefined, max: number | undefin
  * required field keeps the form open and marks the field, and only a
  * complete form calls onSubmit at all.
  *
- * Known gap, unchanged by this extraction: the form has no viewport. A form
- * with more fields than the pane has rows overflows, exactly as picker,
- * diff and table did before they were given windows.
  */
 export function FormView({
   fields,
   title,
+  budget,
   focused,
   onSubmit,
 }: FormViewProps): React.JSX.Element {
@@ -225,10 +232,31 @@ export function FormView({
     }
   }, { isActive: focused });
 
+  // A form with more fields than the pane has rows used to render all of
+  // them, overflowing exactly as picker, diff and table did before they were
+  // given windows -- and worse than those, because the overflow pushed the
+  // Submit button itself out of view, leaving a form that could be filled in
+  // and not submitted.
+  //
+  // Windowed on the focus index, paging rather than centring, for the same
+  // reason as every other view: the list moves only when focus crosses a
+  // boundary instead of shifting under the user on every Tab. The Submit
+  // position (focusIndex === fields.length) belongs to the last page.
+  const visibleFields = Math.max(1, Math.floor((budget - CHROME_ROWS) / ROWS_PER_FIELD));
+  const windowStart =
+    fields.length <= visibleFields
+      ? 0
+      : Math.min(
+          Math.floor(Math.min(focusIndex, fields.length - 1) / visibleFields) * visibleFields,
+          fields.length - visibleFields
+        );
+  const windowFields = fields.slice(windowStart, windowStart + visibleFields);
+
   return (
     <Box flexDirection="column" borderStyle="round" borderColor="cyan" paddingX={1}>
       <Text bold>{title ?? "Fill in the form"}</Text>
-      {fields.map((f, i) => {
+      {windowFields.map((f, visibleIndex) => {
+        const i = windowStart + visibleIndex;
         const isFocused = i === focusIndex;
         const hasError = errors.has(f.id);
         const value = values[f.id] ?? initialValue(f);
@@ -297,7 +325,12 @@ export function FormView({
         </Text>
       </Box>
       <Box marginTop={1}>
-        <Text dimColor>Tab/Shift+Tab: move  Enter: submit (on the button)  Esc: cancel</Text>
+        <Text dimColor>
+          {fields.length > visibleFields
+            ? `${windowStart + 1}-${windowStart + windowFields.length} of ${fields.length}  `
+            : ""}
+          Tab/Shift+Tab: move  Enter: submit (on the button)  Esc: cancel
+        </Text>
       </Box>
     </Box>
   );

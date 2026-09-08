@@ -17,6 +17,7 @@ Canvas provides spawnable terminal displays -- four generic primitives (`picker`
 | `picker` | Choose one or more options from a list |
 | `form` | Fill in structured fields and submit them as one result |
 | `table` | Display tabular data, view-only |
+| `dashboard` | Several of the above composed into one pane |
 
 ## Installation
 
@@ -84,6 +85,7 @@ Every command prints one JSON object on stdout. `wait` returns one of
 - `picker` - Single/multi-select option picker
 - `form` - Structured fields with validation
 - `table` - Tabular display, view-only
+- `dashboard` - Several views in one pane, with a region-tagged outcome
 
 ## Requirements
 

@@ -86,3 +86,24 @@ exports[`an empty field with no placeholder still renders a visible input line 1
 \x1B[36m│\x1B[39m \x1B[2m cancel\x1B[22m                                                  \x1B[36m│\x1B[39m
 \x1B[36m╰──────────────────────────────────────────────────────────╯\x1B[39m"
 `;
+
+exports[`form windows a field list longer than the pane, keeping Submit visible 1`] = `
+"\x1B[36m╭──────────────────────────────────────────────────────────╮\x1B[39m
+\x1B[36m│\x1B[39m \x1B[1mTwelve fields\x1B[22m                                            \x1B[36m│\x1B[39m
+\x1B[36m│\x1B[39m \x1B[36m> Field 1\x1B[39m                                                \x1B[36m│\x1B[39m
+\x1B[36m│\x1B[39m   \x1B[2m▏\x1B[22m                                                      \x1B[36m│\x1B[39m
+\x1B[36m│\x1B[39m   Field 2                                                \x1B[36m│\x1B[39m
+\x1B[36m│\x1B[39m   \x1B[2m—\x1B[22m                                                      \x1B[36m│\x1B[39m
+\x1B[36m│\x1B[39m   Field 3                                                \x1B[36m│\x1B[39m
+\x1B[36m│\x1B[39m   \x1B[2m—\x1B[22m                                                      \x1B[36m│\x1B[39m
+\x1B[36m│\x1B[39m   Field 4                                                \x1B[36m│\x1B[39m
+\x1B[36m│\x1B[39m   \x1B[2m—\x1B[22m                                                      \x1B[36m│\x1B[39m
+\x1B[36m│\x1B[39m   Field 5                                                \x1B[36m│\x1B[39m
+\x1B[36m│\x1B[39m   \x1B[2m—\x1B[22m                                                      \x1B[36m│\x1B[39m
+\x1B[36m│\x1B[39m                                                          \x1B[36m│\x1B[39m
+\x1B[36m│\x1B[39m   [ Submit ]                                             \x1B[36m│\x1B[39m
+\x1B[36m│\x1B[39m                                                          \x1B[36m│\x1B[39m
+\x1B[36m│\x1B[39m \x1B[2m1-5 of 12  Tab/Shift+Tab: move  Enter: submit (on the \x1B[22m   \x1B[36m│\x1B[39m
+\x1B[36m│\x1B[39m \x1B[2mbutton)  Esc: cancel\x1B[22m                                     \x1B[36m│\x1B[39m
+\x1B[36m╰──────────────────────────────────────────────────────────╯\x1B[39m"
+`;

@@ -149,7 +149,77 @@ guard was that no render changed. Recorded as the first item for whoever
 picks up sub-project 2, since a form region inside a dashboard makes it
 worse.
 
+### Sub-project 2: dashboard — COMPLETE
+
+New: `tree` (view + validator + types), `dashboard` (canvas + validator +
+types), the `dashboard:display` scenario, and a viewport for `form`.
+
+`form` was the item sub-project 1 recorded and did not fix. It is fixed
+here, and it was the worst of the four overflows: `picker`, `diff` and
+`table` overflowing hid content, while `form` overflowing pushed the
+**Submit button** off screen, leaving a form that could be filled in and not
+submitted. Windowed on the focus index, with the Submit position belonging
+to the last page so it is always reachable. Existing snapshots unchanged --
+the fixtures are short enough not to window.
+
+`tree` is the one region kind no existing primitive covered: a `text` region
+renders a tree badly (no folding, no navigation) and `picker` flattens away
+the structure that makes a tree worth showing. Folds with the arrow keys,
+and folding a leaf walks up to its parent instead, which is what makes the
+left arrow usable for climbing out.
+
+**Ruling 9: region configs are validated by the region kind's own
+validator.** `validateRegionConfig` dispatches to `validatePicker`,
+`validateTable`, `validateForm`, `validateTree` and `parseDiffConfig` -- the
+five functions sub-project 1 extracted. Re-implementing those checks in the
+dashboard would have meant six validators drifting away from the six they
+duplicate, and a region error that read differently from the identical
+canvas error. This is the concrete payoff of that extraction, and the test
+`a region's own config is validated by that kind's validator` pins it. Cost
+if wrong: a region config is validated twice, once by the dashboard and once
+by the view it mounts.
+
+**Ruling 10: the dashboard renders a config and gathers nothing.** As ruled
+in the pre-flight. Refresh is the `update` verb, which makes the dashboard
+that Phase 2 work's first real consumer -- covered by `a pushed config
+refreshes the regions in place`.
+
+**Ruling 11: an outcome carries the region that produced it.** Without
+`regionId` a controller receiving `{"selectedIds":["a.ts"]}` from a
+dashboard with two pickers could not tell which question was answered.
+First-outcome-wins is unchanged, so only one region can ever answer. Cost if
+wrong: one extra field on every composed result.
+
+**Ruling 12: rows are allocated, never dropped.** A region with explicit
+`rows` gets it, the rest share what is left, and nothing goes below three
+rows even if the total then overflows. Dropping a region instead would hide
+content the caller asked for, and a region too short to draw its own border
+is worse than a pane that scrolls.
+
+Verified: 293 tests / 0 fail, `tsc` clean, and the smoke script 13 pass / 0
+fail in a real tmux pane -- the dashboard case drives a two-region config
+and asserts the outcome carries `regionId`.
+
+### Found in sub-project 2, not fixed
+
+**Each region repeats its own footer hint, and one of them is wrong.** A
+picker region's footer says "Esc: cancel" while Escape actually closes the
+whole dashboard. Three regions means three hint lines competing with the
+dashboard's own. The fix is an optional `hint` prop on each view, defaulting
+to true so standalone renders are untouched, with the dashboard suppressing
+them and naming the focused region's keys in its own footer. Left for
+whoever picks this up: it is wrong information rather than wrong behaviour,
+and the dashboard is legible without it.
+
+**A region's chrome overhead is not obvious from the config.** A `table`
+region given `rows: 7` shows one data row, because the view spends six on
+its own border, header and footer. Documented in the dashboard skill; a
+better answer would be for a region to render without its own border and let
+the dashboard draw the separators, which is a layout change this phase's
+non-goals rule out.
+
 ### Next
 
-Sub-project 2: the `tree` view, the `dashboard` canvas, region validation,
-and refresh through `update`.
+Sub-project 3: the image pipeline -- capability detection, the PNG decoder,
+half-blocks, Sixel, Kitty, and the tmux passthrough. The only sub-project
+with a verification gap, and the one needing the human check in WezTerm.

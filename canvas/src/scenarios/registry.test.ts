@@ -26,3 +26,7 @@ test("form:fill is registered", () => {
 test("table:display is registered", () => {
   expect(getScenario("table", "display")).toBeDefined();
 });
+
+test("dashboard:display is registered", () => {
+  expect(getScenario("dashboard", "display")).toBeDefined();
+});

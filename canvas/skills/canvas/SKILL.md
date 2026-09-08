@@ -40,6 +40,7 @@ Canvas provides interactive terminal displays (TUIs) that Claude can spawn and c
 | `picker` | Choose one or more options from a list | `select` |
 | `form` | Fill in structured fields and submit them as one result | `fill` |
 | `table` | Display tabular data, view-only | `display` |
+| `dashboard` | Several of the above composed into one pane | `display` |
 
 ## Quick Start
 
@@ -62,7 +63,7 @@ bun run src/cli.ts spawn [kind] --scenario [name] --config '[json]'
 ```
 
 **Parameters:**
-- `kind`: Canvas type (calendar, document, flight, diff, picker, form, table)
+- `kind`: Canvas type (calendar, document, flight, diff, picker, form, table, dashboard)
 - `--scenario`: Interaction mode (e.g., display, meeting-picker, edit)
 - `--config`: JSON configuration for the canvas
 - `--id`: Optional canvas instance ID for IPC
@@ -113,6 +114,7 @@ domain canvases are demos of the same machinery.
 | accept or refuse parts of a code change | `diff` |
 | give several related answers at once | `form` |
 | read a set of rows | `table` |
+| see several of those at once, or choose in context | `dashboard` |
 
 Prefer a primitive over asking in prose whenever the choice is already
 enumerable: the result comes back as an exact id or a typed value rather
@@ -162,3 +164,4 @@ reachable, so a `wait` issued immediately after it will not answer
 | `picker` | Single/multi-select option picker |
 | `form` | Structured fields with validation |
 | `table` | Tabular display, view-only |
+| `dashboard` | Several views in one pane, with a region-tagged outcome |

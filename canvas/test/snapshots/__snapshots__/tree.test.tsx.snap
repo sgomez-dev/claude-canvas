@@ -1,0 +1,16 @@
+// Bun Snapshot v1, https://bun.sh/docs/test/snapshots
+
+exports[`tree renders nesting, badges and a collapsed branch 1`] = `
+"\x1B[36m╭────────────────────────────────────────────────╮\x1B[39m
+\x1B[36m│\x1B[39m \x1B[1mChanged files\x1B[22m                                  \x1B[36m│\x1B[39m
+\x1B[36m│\x1B[39m \x1B[36m> ▾ src/\x1B[39m                                       \x1B[36m│\x1B[39m
+\x1B[36m│\x1B[39m       cli.ts M                                 \x1B[36m│\x1B[39m
+\x1B[36m│\x1B[39m     ▾ canvases/                                \x1B[36m│\x1B[39m
+\x1B[36m│\x1B[39m         picker.tsx                             \x1B[36m│\x1B[39m
+\x1B[36m│\x1B[39m         table.tsx +12 -3                       \x1B[36m│\x1B[39m
+\x1B[36m│\x1B[39m   ▸ docs/                                      \x1B[36m│\x1B[39m
+\x1B[36m│\x1B[39m     README.md M                                \x1B[36m│\x1B[39m
+\x1B[36m│\x1B[39m                                                \x1B[36m│\x1B[39m
+\x1B[36m│\x1B[39m \x1B[2m↑/↓: move  ←/→: fold  Enter: pick  Esc: cancel\x1B[22m \x1B[36m│\x1B[39m
+\x1B[36m╰────────────────────────────────────────────────╯\x1B[39m"
+`;

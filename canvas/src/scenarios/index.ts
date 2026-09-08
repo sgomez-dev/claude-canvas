@@ -8,3 +8,4 @@ export * from "./diff/review";
 export * from "./picker/select";
 export * from "./form/fill";
 export * from "./table/display";
+export * from "./dashboard/display";

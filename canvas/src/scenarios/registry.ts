@@ -11,6 +11,7 @@ import { diffReviewScenario } from "./diff/review";
 import { pickerSelectScenario } from "./picker/select";
 import { formFillScenario } from "./form/fill";
 import { tableDisplayScenario } from "./table/display";
+import { dashboardDisplayScenario } from "./dashboard/display";
 
 // Registry of all scenarios keyed by "canvasKind:scenarioName"
 const registry = new Map<string, ScenarioDefinition>();
@@ -38,6 +39,9 @@ registry.set("form:fill", formFillScenario);
 
 // Register table scenarios
 registry.set("table:display", tableDisplayScenario);
+
+// Register dashboard scenarios
+registry.set("dashboard:display", dashboardDisplayScenario);
 
 export function getScenario(
   canvasKind: string,

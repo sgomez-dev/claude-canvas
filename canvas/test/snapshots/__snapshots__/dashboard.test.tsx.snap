@@ -1,0 +1,35 @@
+// Bun Snapshot v1, https://bun.sh/docs/test/snapshots
+
+exports[`dashboard renders several region kinds in one pane 1`] = `
+"\x1B[1mclaude-canvas\x1B[22m
+╭──────────────────────────────────────────────────────────╮
+│ \x1B[1mgit\x1B[22m                                                      │
+│ On branch main. 3 files changed.                         │
+╰──────────────────────────────────────────────────────────╯
+\x1B[36m╭──────────────────────────────────────────────────────────╮\x1B[39m
+\x1B[36m│\x1B[39m \x1B[1mTests\x1B[22m                                                    \x1B[36m│\x1B[39m
+\x1B[36m│\x1B[39m \x1B[1mSuite          Result   \x1B[22m                                 \x1B[36m│\x1B[39m
+\x1B[36m│\x1B[39m protocol       15 ok                                     \x1B[36m│\x1B[39m
+\x1B[36m│\x1B[39m                                                          \x1B[36m│\x1B[39m
+\x1B[36m│\x1B[39m \x1B[2mrows 1-1 of 2  ↑/↓/PgUp/PgDn: scroll  Esc: close\x1B[22m         \x1B[36m│\x1B[39m
+\x1B[36m╰──────────────────────────────────────────────────────────╯\x1B[39m
+\x1B[36m╭──────────────────────────────────────────────────────────╮\x1B[39m
+\x1B[36m│\x1B[39m \x1B[1mNext\x1B[22m                                                     \x1B[36m│\x1B[39m
+\x1B[36m│\x1B[39m \x1B[36m> Sixel encoder\x1B[39m                                          \x1B[36m│\x1B[39m
+\x1B[36m│\x1B[39m   PNG decoder                                            \x1B[36m│\x1B[39m
+\x1B[36m│\x1B[39m                                                          \x1B[36m│\x1B[39m
+\x1B[36m│\x1B[39m \x1B[2m↑/↓: navigate  Enter: select  Esc: cancel\x1B[22m                \x1B[36m│\x1B[39m
+\x1B[36m╰──────────────────────────────────────────────────────────╯\x1B[39m
+
+\x1B[2mTab: region  Esc: close\x1B[22m"
+`;
+
+exports[`dashboard renders a config error for an unknown region kind 1`] = `
+"\x1B[31m╭──────────────────────────────────────────────────────────╮\x1B[39m
+\x1B[31m│\x1B[39m                                                          \x1B[31m│\x1B[39m
+\x1B[31m│\x1B[39m \x1B[31mdashboard config: region "x" has unsupported kind \x1B[39m       \x1B[31m│\x1B[39m
+\x1B[31m│\x1B[39m \x1B[31m"chart". Expected one of: table, picker, form, diff, \x1B[39m    \x1B[31m│\x1B[39m
+\x1B[31m│\x1B[39m \x1B[31mtree, text.\x1B[39m                                              \x1B[31m│\x1B[39m
+\x1B[31m│\x1B[39m                                                          \x1B[31m│\x1B[39m
+\x1B[31m╰──────────────────────────────────────────────────────────╯\x1B[39m"
+`;

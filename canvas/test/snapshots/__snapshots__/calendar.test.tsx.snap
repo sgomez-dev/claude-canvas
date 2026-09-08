@@ -39,5 +39,5 @@ exports[`calendar meeting-picker renders 1`] = `
  \x1B[90m     \x1B[2m┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄\x1B[22m\x1B[39m
  \x1B[90m     \x1B[2m┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄\x1B[22m\x1B[39m
  \x1B[90m  9pm\x1B[2m────────────────────────────────────────────────────────────────\x1B[22m\x1B[39m
- \x1B[36m6:00 AM - 6:30 AM Mon\x1B[90mer select • n/p week • t today • q cancel\x1B[2m┄┄┄┄┄┄┄\x1B[22m\x1B[39m"
+ \x1B[36m06:00 - 06:30 Mon\x1B[90m/Enter select • n/p week • t today • q cancel\x1B[2m┄┄┄┄┄┄┄\x1B[22m\x1B[39m"
 `;

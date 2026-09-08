@@ -3,6 +3,7 @@
 import React from "react";
 import { Box, Text } from "ink";
 import { CYBER_COLORS } from "../types";
+import { formatTime } from "../../format";
 
 interface Props {
   title: string;
@@ -25,10 +26,7 @@ export function CyberpunkHeader({ title, width }: Props) {
           {title}
         </Text>
         <Text color={CYBER_COLORS.dim}>
-          {new Date().toLocaleTimeString("en-US", {
-            hour: "2-digit",
-            minute: "2-digit",
-          })}
+          {formatTime(new Date())}
         </Text>
       </Box>
 

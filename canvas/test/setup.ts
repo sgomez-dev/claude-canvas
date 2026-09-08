@@ -29,3 +29,12 @@ process.env.TZ = "UTC";
 // here. If a snapshot ever diverges on a rendered clock or date, look for a
 // bare toLocaleTimeString()/toLocaleDateString() rather than trying to pin
 // a locale in this file -- that will not work.
+
+// The one locale-dependent render left after canvases/format.ts made the
+// clock locale-independent: the short weekday, which is "Mon" in en-GB,
+// "lun" in es-ES, "Mo" in de-DE and "月" in ja-JP. Production reads
+// CANVAS_LOCALE as unset and formats in the host's own locale, which is what
+// a person at that terminal should see; snapshots pin it here so a baseline
+// captured on one machine reproduces on another. en-GB chosen only because
+// it is what the existing baselines were captured under.
+process.env.CANVAS_LOCALE = "en-GB";

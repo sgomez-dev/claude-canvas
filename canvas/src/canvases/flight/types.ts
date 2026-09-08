@@ -1,3 +1,5 @@
+import { formatTime as formatDisplayTime } from "../format";
+
 // Flight Booking Canvas - Type Definitions
 
 export interface Airport {
@@ -82,14 +84,12 @@ export function formatDuration(minutes: number): string {
   return `${hours}h ${mins}m`;
 }
 
-// Helper to format time from ISO string
+// Helper to format time from ISO string. Delegates to the shared formatter
+// so every canvas shows the same 24-hour local clock; this used to hardcode
+// en-US 12-hour, which was both a different format from the calendar and a
+// locale forced on the reader.
 export function formatTime(isoString: string, timezone?: string): string {
-  const date = new Date(isoString);
-  return date.toLocaleTimeString("en-US", {
-    hour: "numeric",
-    minute: "2-digit",
-    hour12: true,
-  });
+  return formatDisplayTime(new Date(isoString));
 }
 
 // Helper to parse seat string into row and letter

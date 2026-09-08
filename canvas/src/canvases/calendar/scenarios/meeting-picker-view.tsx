@@ -4,6 +4,7 @@ import React, { useState, useEffect, useCallback } from "react";
 import { Box, Text, useInput, useApp, useStdout } from "ink";
 import { useMouse, type MouseEvent } from "../hooks/use-mouse";
 import { useCanvasServer } from "../../../runtime/use-canvas-server";
+import { formatTime, formatWeekday } from "../../format";
 import type { MeetingPickerConfig, MeetingPickerResult, NamedCalendar } from "../../../scenarios/types";
 import {
   getWeekDays,
@@ -609,27 +610,15 @@ export function MeetingPickerView({ id, config, enabled = false }: Props) {
                 const free = isSlotFree(cursorInfo.dayIndex, cursorInfo.slotIndex);
                 return (
                   <Text color={free ? "cyan" : "gray"}>
-                    {/* An explicit locale, not `[]`. `[]` means "whatever
-                        the runtime resolves", and Bun resolves it from the
-                        host: en-US on macOS and Linux (12-hour, "6:00 AM"),
-                        but the OS regional settings on Windows, which
-                        produced the 24-hour "6:00" this file's committed
-                        snapshot baseline was captured with. That made the
-                        baseline reproducible only on its author's machine
-                        and red on all three CI legs. LANG/LC_ALL do NOT fix
-                        it -- measured: Bun ignores them for Intl's default
-                        locale -- so an explicit locale at the call site is
-                        the only thing that makes the render deterministic.
-                        en-US matches the locale flight/types.ts and
-                        flight/components/cyberpunk-header.tsx already
-                        hardcode. Switching this canvas to 24-hour time is a
-                        one-line `hour12: false` if that is preferred; it is
-                        a product choice, not a correctness one. */}
-                    {cursorInfo.startTime.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" })}
+                    {/* Local wall-clock, 24-hour, via the shared formatter
+                        in canvases/format.ts. See that file for why the
+                        clock is locale-independent while the weekday needs
+                        a test-only pin. */}
+                    {formatTime(cursorInfo.startTime)}
                     {" - "}
-                    {cursorInfo.endTime.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" })}
+                    {formatTime(cursorInfo.endTime)}
                     {" "}
-                    {cursorInfo.day.toLocaleDateString("en-US", { weekday: "short" })}
+                    {formatWeekday(cursorInfo.day)}
                     {free ? "" : " (busy)"}
                   </Text>
                 );

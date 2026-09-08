@@ -2,7 +2,7 @@
 
 exports[`flight booking renders 1`] = `
 "\x1B[35m====================================================================\x1B[39m
-\x1B[1m\x1B[36m// FLIGHT_BOOKING_TERMINAL //\x1B[39m\x1B[22m                               \x1B[90m09:30 AM\x1B[39m
+\x1B[1m\x1B[36m// FLIGHT_BOOKING_TERMINAL //\x1B[39m\x1B[22m                                  \x1B[90m09:30\x1B[39m
 \x1B[35m====================================================================\x1B[39m
 \x1B[36m┌──────────────────────┐\x1B[39m \x1B[90m┌───────────────────────────────────────┐\x1B[39m
 \x1B[36m│\x1B[39m \x1B[1m\x1B[35m[ FLIGHTS ]\x1B[39m\x1B[22m          \x1B[36m│\x1B[39m \x1B[90m│\x1B[39m \x1B[1m\x1B[35m[ ROUTE ]\x1B[39m\x1B[22m                             \x1B[90m│\x1B[39m
@@ -11,7 +11,7 @@ exports[`flight booking renders 1`] = `
 \x1B[36m│\x1B[39m \x1B[46m \x1B[30m  SFO -> DEN\x1B[39m       \x1B[49m \x1B[36m│\x1B[39m \x1B[90m└─San Francisco─────────────────Denver──┘\x1B[39m
 \x1B[36m│\x1B[39m \x1B[46m \x1B[30m  3h 30m nonstop\x1B[39m   \x1B[49m \x1B[36m│\x1B[39m \x1B[90m┌───────────────────────────────────────┐\x1B[39m
 \x1B[36m│\x1B[39m                      \x1B[36m│\x1B[39m \x1B[90m│\x1B[39m \x1B[1m\x1B[35m[ FLIGHT INFO ]\x1B[39m\x1B[22m                       \x1B[90m│\x1B[39m
-\x1B[36m│\x1B[39m                      \x1B[36m│\x1B[39m \x1B[90m│\x1B[39m \x1B[1m\x1B[36m8:00 AM PST\x1B[39m\x1B[22m    \x1B[90mA\x1B[1m\x1B[36m11:30 AM MST\x1B[39m\x1B[22m   \x1B[90mD\x1B[1m\x1B[36m3h \x1B[22m\x1B[90mTI\x1B[39m \x1B[90m│\x1B[39m
+\x1B[36m│\x1B[39m                      \x1B[36m│\x1B[39m \x1B[90m│\x1B[39m \x1B[1m\x1B[36m08:00 PST\x1B[39m\x1B[22m      \x1B[90mA\x1B[1m\x1B[36m11:30 MST\x1B[39m\x1B[22m      \x1B[90mD\x1B[1m\x1B[36m3h \x1B[22m\x1B[90mTI\x1B[39m \x1B[90m│\x1B[39m
 \x1B[36m│\x1B[39m                      \x1B[36m│\x1B[39m \x1B[90m│\x1B[39m                                \x1B[90mO\x1B[1m\x1B[36m30m\x1B[39m\x1B[22m   \x1B[90m│\x1B[39m
 \x1B[36m│\x1B[39m                      \x1B[36m│\x1B[39m \x1B[90m│\x1B[39m \x1B[37m---\x1B[90mCRAFT\x1B[39m        \x1B[90mCL\x1B[37mEconomy\x1B[39m        \x1B[90mPR\x1B[1m\x1B[32m$\x1B[22m\x1B[90mC\x1B[39m \x1B[90m│\x1B[39m
 \x1B[36m│\x1B[39m                      \x1B[36m│\x1B[39m \x1B[90m│\x1B[39m \x1B[90mUnited Airlines UA 123\x1B[39m           \x1B[90mE\x1B[39m \x1B[1m\x1B[32m3\x1B[39m\x1B[22m  \x1B[90m│\x1B[39m

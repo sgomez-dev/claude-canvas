@@ -18695,12 +18695,19 @@ var init_devtools_window_polyfill = __esm(() => {
   ];
 });
 
+// scripts/devtools-stub.ts
+function connectToDevTools() {}
+var devtools_stub_default;
+var init_devtools_stub = __esm(() => {
+  devtools_stub_default = { connectToDevTools };
+});
+
 // node_modules/.bun/ink@6.8.0+03aa47d54245a271/node_modules/ink/build/devtools.js
-import devtools from "react-devtools-core";
 var init_devtools = __esm(() => {
   init_devtools_window_polyfill();
-  devtools.initialize();
-  devtools.connectToDevTools();
+  init_devtools_stub();
+  devtools_stub_default.initialize();
+  devtools_stub_default.connectToDevTools();
 });
 
 // node_modules/.bun/ink@6.8.0+03aa47d54245a271/node_modules/ink/build/reconciler.js

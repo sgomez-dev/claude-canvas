@@ -37,5 +37,12 @@ jobs:
       - name: Bundle is current
         run: bun run build:check
 
+      # Proves the shipped bundle needs no node_modules, which is the only
+      # reason it exists: a plugin install is a git clone, and anything that
+      # imports ink at runtime cannot render there. Run in a directory
+      # holding nothing but the bundle.
+      - name: Bundle runs with no dependencies
+        run: bun run scripts/check-standalone.ts
+
       - name: Test
         run: bun test

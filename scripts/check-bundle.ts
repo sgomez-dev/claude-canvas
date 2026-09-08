@@ -24,10 +24,16 @@ if (!(await committed.exists())) {
   console.error(`${BUNDLE} is missing. Run: bun run build`);
   process.exit(1);
 }
+// Read before rebuilding: the build writes over BUNDLE in place.
+const committedText = await committed.text();
 
-await $`bun build canvas/src/cli.ts --target=bun --external react-devtools-core --outfile ${TMP}`.quiet();
+// Rebuild through the same script the committed bundle came from, so the
+// comparison cannot drift because the two used different flags.
+await $`bun run scripts/build.ts`.quiet();
+const fresh = await Bun.file(BUNDLE).text();
+await Bun.write(TMP, fresh);
 
-const [a, b] = await Promise.all([committed.text(), Bun.file(TMP).text()]);
+const [a, b] = [committedText, fresh];
 if (a !== b) {
   console.error(
     `${BUNDLE} is stale: it does not match a fresh build of canvas/src/cli.ts.\n` +

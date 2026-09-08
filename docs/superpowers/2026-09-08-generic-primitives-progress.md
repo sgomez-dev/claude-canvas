@@ -196,6 +196,22 @@ connected at that instant, and retains nothing. Three consequences:
   writing its record, so an immediate `wait` can answer `no canvas <id>`
   even when nothing is wrong. `openConnection` has no retry.
 
+**Confirmed empirically 2026-09-08, not just by reading the code.** The
+smoke test spawned a picker, sent Enter before starting `wait`, and then
+called `wait`:
+
+```
+spawn -> {"status":"spawned","id":"sm-race","host":"tmux"}
+      record visible after 1s
+wait (issued after the user chose) -> {"status":"error","message":"no canvas sm-race"}
+```
+
+The user made a choice, the canvas exited, and there is no artefact anywhere
+from which the choice can be recovered. Measured startup window: the
+registry record became visible 0-1 s after `spawn` returned across five
+spawns, so the "wait too early" variant is a real window, not a theoretical
+one.
+
 Sketch of the fix, for whoever takes it: persist the outcome into the
 registry record before exiting and have `waitForOutcome` consume it there,
 mirroring the `lastError` precedent that `readRecord` already honours ahead
@@ -269,12 +285,11 @@ that was the truncation above -- and not urgent at these numbers, but the
 new `socket-writer.ts` deliberately avoids the same pattern on the outbound
 side by queueing views rather than one growing buffer.
 
-**9. `tmux split-window` has still never been executed on a real machine.**
-Phase 1 recorded this as analysis-only and judged it safe; it remains so.
-No tmux on this pass's machine either, so every test here runs the IPC layer
-with no terminal at all -- which is exactly what the TCP transport was
-chosen to make possible, but it means the pane-opening path is the one thing
-in this repository with no execution behind it.
+**9. CLOSED 2026-09-08: `tmux split-window` now has execution behind it.**
+Phase 1 recorded the pane-opening path as analysis-only and judged it safe.
+tmux 3.7c was installed and all four primitives were driven end to end in a
+real pane -- real `split-window`, real Ink render, real IPC, real CLI. See
+the smoke test section below. The path works; the judgement was correct.
 
 ---
 
@@ -298,6 +313,47 @@ five approved.
 The one success criterion the spec itself scoped out remains out: "making
 Claude actually choose to open these unprompted" is a prompting concern, and
 the four new SKILL.md files are the whole of what this pass can do about it.
+
+---
+
+## End-to-end smoke test (2026-09-08, tmux 3.7c, Bun 1.4.2)
+
+The first execution of the pane-opening path on any real machine. Each
+primitive was spawned into a real tmux pane, its rendered frame captured
+with `capture-pane`, driven with `send-keys`, and its outcome read back
+through the CLI's own `wait`. `wait` was started before the keys were sent,
+which is the ordering the canvas skill now tells Claude to use.
+
+| Primitive | Keys sent | `wait` returned |
+|---|---|---|
+| `picker` | `j` `Enter` | `{"status":"selected","data":{"selectedIds":["beta"]}}` |
+| `table` | `Escape` | `{"status":"cancelled","reason":"escape"}` |
+| `form` | `h` `i` `Tab` `Space` `Tab` `Enter` | `{"status":"selected","data":{"values":{"who":"hi","ok":true}}}` |
+| `diff` | `a` `Enter` | `{"status":"selected","data":{"decisions":[{"hunkId":"x.txt#0","decision":"approved"}]}}` |
+
+4 pass, 0 fail. Every frame rendered legibly at 120 columns, `spawn`
+reported `"host":"tmux"`, and every pane closed itself by exiting 0 -- no
+orphaned panes, which is the failure class the whole lifecycle design exists
+to prevent.
+
+### Found by the smoke test, not fixed
+
+**An empty text/textarea/number field renders no input line at all.** The
+form pane showed:
+
+```
+> Who *
+  Confirmed
+  [ ]
+```
+
+The focused `Who` field has a label and nothing beneath it, because an empty
+value with no `placeholder` renders an empty `<Text>` that collapses to
+nothing. The user is typing into a field with no visible extent. A
+`placeholder` masks it, so the snapshot fixtures -- which give the textarea
+one -- never showed it. A one-line fix (render a rule or a cursor block when
+the value is empty) but it changes what the form looks like, so it is left
+for the owner rather than decided here.
 
 *** PHASE 2 IMPLEMENTATION COMPLETE. Not reviewed by a second pass: this
 ledger and the code in commits 158e74a..ddd263a are one agent's work with no

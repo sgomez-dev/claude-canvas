@@ -94,6 +94,11 @@ Recorded here because Phase 2 uncovered them and Phase 3 depends on them:
 - **Verify Sixel in Windows Terminal** before committing to a graphics
   protocol, as already noted below.
 
+The pane-opening path is no longer unverified: tmux 3.7c was installed on
+2026-09-08 and all four primitives were driven end to end in a real pane
+(spawn, render, keys, outcome through `wait`). 4 pass, 0 fail. Windows
+Terminal's `split-pane` remains analysis-only.
+
 ### Phase 4 — Publishing
 
 Depends on 1 and 2 being real. Docs, versioning, marketplace, contributions.

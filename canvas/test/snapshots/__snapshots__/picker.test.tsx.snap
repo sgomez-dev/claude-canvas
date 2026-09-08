@@ -29,3 +29,28 @@ exports[`picker renders an empty-options error state 1`] = `
 \x1B[31m│\x1B[39m                                                          \x1B[31m│\x1B[39m
 \x1B[31m╰──────────────────────────────────────────────────────────╯\x1B[39m"
 `;
+
+exports[`picker renders a config error when mode is missing 1`] = `
+"\x1B[31m╭──────────────────────────────────────────────────────────╮\x1B[39m
+\x1B[31m│\x1B[39m                                                          \x1B[31m│\x1B[39m
+\x1B[31m│\x1B[39m \x1B[31mpicker config: 'mode' must be "single" or "multi", got \x1B[39m  \x1B[31m│\x1B[39m
+\x1B[31m│\x1B[39m \x1B[31mundefined\x1B[39m                                                \x1B[31m│\x1B[39m
+\x1B[31m│\x1B[39m                                                          \x1B[31m│\x1B[39m
+\x1B[31m╰──────────────────────────────────────────────────────────╯\x1B[39m"
+`;
+
+exports[`picker windows a list longer than the pane 1`] = `
+"\x1B[36m╭──────────────────────────────────────╮\x1B[39m
+\x1B[36m│\x1B[39m \x1B[1mMany\x1B[22m                                 \x1B[36m│\x1B[39m
+\x1B[36m│\x1B[39m \x1B[36m> Option 0\x1B[39m                           \x1B[36m│\x1B[39m
+\x1B[36m│\x1B[39m   Option 1                           \x1B[36m│\x1B[39m
+\x1B[36m│\x1B[39m   Option 2                           \x1B[36m│\x1B[39m
+\x1B[36m│\x1B[39m   Option 3                           \x1B[36m│\x1B[39m
+\x1B[36m│\x1B[39m   Option 4                           \x1B[36m│\x1B[39m
+\x1B[36m│\x1B[39m   Option 5                           \x1B[36m│\x1B[39m
+\x1B[36m│\x1B[39m   Option 6                           \x1B[36m│\x1B[39m
+\x1B[36m│\x1B[39m                                      \x1B[36m│\x1B[39m
+\x1B[36m│\x1B[39m \x1B[2m1-7 of 25  ↑/↓: navigate  Enter: \x1B[22m    \x1B[36m│\x1B[39m
+\x1B[36m│\x1B[39m \x1B[2mselect  Esc: cancel\x1B[22m                  \x1B[36m│\x1B[39m
+\x1B[36m╰──────────────────────────────────────╯\x1B[39m"
+`;

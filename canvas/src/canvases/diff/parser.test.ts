@@ -320,3 +320,43 @@ describe("parseUnifiedDiff", () => {
     expect(parseUnifiedDiff("")).toEqual([]);
   });
 });
+
+// Hunk ids are `${newPath}#${index}`, so two blocks sharing a newPath mint
+// colliding ids and their decisions overwrite each other in the review's
+// Map -- the wrong hunk would be applied. git never emits this; two
+// concatenated diffs do.
+test("rejects a diff in which the same file appears twice", () => {
+  const text = `diff --git a/x.txt b/x.txt
+--- a/x.txt
++++ b/x.txt
+@@ -1 +1 @@
+-a
++b
+diff --git a/x.txt b/x.txt
+--- a/x.txt
++++ b/x.txt
+@@ -5 +5 @@
+-c
++d
+`;
+  expect(() => parseUnifiedDiff(text)).toThrow(/appears twice/);
+});
+
+test("two different files with hunks at the same index still get distinct ids", () => {
+  const text = `diff --git a/x.txt b/x.txt
+--- a/x.txt
++++ b/x.txt
+@@ -1 +1 @@
+-a
++b
+diff --git a/y.txt b/y.txt
+--- a/y.txt
++++ b/y.txt
+@@ -1 +1 @@
+-c
++d
+`;
+  const ids = parseUnifiedDiff(text).flatMap((f) => f.hunks.map((h) => h.id));
+  expect(ids).toEqual(["x.txt#0", "y.txt#0"]);
+  expect(new Set(ids).size).toBe(ids.length);
+});

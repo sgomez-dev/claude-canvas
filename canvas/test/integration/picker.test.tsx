@@ -192,3 +192,58 @@ test("navigating with a disabled option in the middle skips over it", async () =
   conn.close();
   r.dispose();
 });
+
+// A list longer than the pane used to render every option, overflowing the
+// terminal. 25 options in a 12-row terminal leaves room for 7 at a time.
+const LONG_CONFIG = {
+  mode: "single" as const,
+  options: Array.from({ length: 25 }, (_, i) => ({
+    id: `opt-${i + 1}`,
+    label: `Option ${i + 1}`,
+  })),
+};
+
+test("a list longer than the pane shows one window at a time", async () => {
+  const id = "picker-it-long-1";
+  ids.push(id);
+  const r = renderCanvas(<Picker id={id} config={LONG_CONFIG} enabled={true} />, {
+    columns: 40,
+    rows: 12,
+  });
+  let frame = await r.settle();
+  expect(frame).toContain("1-7 of 25");
+
+  // Seven moves puts the cursor on index 7, the first option of the next
+  // window, so the window advances.
+  for (let i = 0; i < 7; i++) {
+    r.stdin.write("j");
+    frame = await r.settle();
+  }
+  expect(frame).toContain("8-14 of 25");
+  r.dispose();
+});
+
+// Guards the index arithmetic the window introduces: the id sent must be
+// the cursor's option, not the one at the same position within the window.
+test("selecting from a later window returns that option's id, not the window offset's", async () => {
+  const id = "picker-it-long-2";
+  ids.push(id);
+  const r = renderCanvas(<Picker id={id} config={LONG_CONFIG} enabled={true} />, {
+    columns: 40,
+    rows: 12,
+  });
+  await r.settle();
+  await new Promise((res) => setTimeout(res, 50));
+
+  const conn = await openConnection(id);
+  for (let i = 0; i < 9; i++) {
+    r.stdin.write("j");
+    await r.settle();
+  }
+  r.stdin.write("\r");
+  await r.settle();
+
+  expect(await conn.next(2000)).toEqual({ type: "selected", data: { selectedIds: ["opt-10"] } });
+  conn.close();
+  r.dispose();
+});

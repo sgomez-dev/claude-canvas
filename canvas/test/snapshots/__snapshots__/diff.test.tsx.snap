@@ -15,7 +15,7 @@ exports[`diff canvas renders a multi-file diff 1`] = `
 │ \x1B[1m\x1B[33m[undecided]\x1B[39m\x1B[22m                                                                  │
 ╰──────────────────────────────────────────────────────────────────────────────╯
 
-\x1B[2ma: approve  r: reject  ↑/↓: navigate  Enter: submit  Esc: cancel\x1B[22m"
+\x1B[2ma/r: approve/reject  ↑/↓: hunk  PgUp/PgDn: scroll  Enter: submit  Esc: cancel\x1B[22m"
 `;
 
 exports[`diff canvas renders an empty-diff state 1`] = `
@@ -49,5 +49,43 @@ exports[`diff canvas renders after navigating and approving a hunk 1`] = `
 │ \x1B[1m\x1B[32m[approved]\x1B[39m\x1B[22m                                                                   │
 ╰──────────────────────────────────────────────────────────────────────────────╯
 
-\x1B[2ma: approve  r: reject  ↑/↓: navigate  Enter: submit  Esc: cancel\x1B[22m"
+\x1B[2ma/r: approve/reject  ↑/↓: hunk  PgUp/PgDn: scroll  Enter: submit  Esc: cancel\x1B[22m"
+`;
+
+exports[`diff canvas lists a binary-only diff instead of claiming nothing to review 1`] = `
+"\x1B[36m╭──────────────────────────────────────────────────────────────────────────────╮\x1B[39m
+\x1B[36m│\x1B[39m \x1B[1mAssets\x1B[22m                                                                       \x1B[36m│\x1B[39m
+\x1B[36m│\x1B[39m   logo.png (modified) [binary]                                               \x1B[36m│\x1B[39m
+\x1B[36m╰──────────────────────────────────────────────────────────────────────────────╯\x1B[39m
+
+╭──────────────────────────────────────────────────────────────────────────────╮
+│ \x1B[2mNo reviewable hunks — every file above is binary or empty. Enter submits an \x1B[22m │
+│ \x1B[2mempty decision list.\x1B[22m                                                         │
+╰──────────────────────────────────────────────────────────────────────────────╯
+
+\x1B[2mEnter: submit  Esc: cancel\x1B[22m"
+`;
+
+exports[`diff canvas windows a hunk longer than the pane 1`] = `
+"\x1B[36m╭──────────────────────────────────────────────────────────────────────────────╮\x1B[39m
+\x1B[36m│\x1B[39m \x1B[1mReview Changes\x1B[22m                                                               \x1B[36m│\x1B[39m
+\x1B[36m│\x1B[39m \x1B[36m> big.txt (modified) 0/1 decided\x1B[39m                                             \x1B[36m│\x1B[39m
+\x1B[36m╰──────────────────────────────────────────────────────────────────────────────╯\x1B[39m
+
+╭──────────────────────────────────────────────────────────────────────────────╮
+│ \x1B[2m@@ -1,40 +1,40 @@  [lines 1-10 of 40]\x1B[22m                                        │
+│  line 1                                                                      │
+│  line 2                                                                      │
+│  line 3                                                                      │
+│  line 4                                                                      │
+│  line 5                                                                      │
+│  line 6                                                                      │
+│  line 7                                                                      │
+│  line 8                                                                      │
+│  line 9                                                                      │
+│  line 10                                                                     │
+│ \x1B[1m\x1B[33m[undecided]\x1B[39m\x1B[22m                                                                  │
+╰──────────────────────────────────────────────────────────────────────────────╯
+
+\x1B[2ma/r: approve/reject  ↑/↓: hunk  PgUp/PgDn: scroll  Enter: submit  Esc: cancel\x1B[22m"
 `;

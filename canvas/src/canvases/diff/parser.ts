@@ -200,5 +200,28 @@ function parseFileBlock(block: string): DiffFile {
 
 export function parseUnifiedDiff(text: string): DiffFile[] {
   const blocks = splitIntoFileBlocks(text);
-  return blocks.map((block) => parseFileBlock(block));
+  const files = blocks.map((block) => parseFileBlock(block));
+  // Hunk ids are `${newPath}#${index}`, so two file blocks sharing a
+  // newPath would mint colliding ids: their decisions would overwrite each
+  // other in the review's Map and the wrong hunk would be applied. React
+  // would also see duplicate keys for the file rows.
+  //
+  // git never emits the same file twice in one diff; the way this input
+  // arises is two diffs concatenated (e.g. one per commit), and there is no
+  // correct interpretation of "approve hunk 0 of x" when x appears twice
+  // with different content. Rejecting it is the honest answer -- silently
+  // conflating decisions across two versions of a file would be worse than
+  // refusing to review it.
+  const seen = new Set<string>();
+  for (const file of files) {
+    if (seen.has(file.newPath)) {
+      throw new DiffParseError(
+        `The same file appears twice in this diff: ${file.newPath}. ` +
+          `Hunk decisions could not be attributed unambiguously. ` +
+          `If you concatenated several diffs, review them one at a time.`
+      );
+    }
+    seen.add(file.newPath);
+  }
+  return files;
 }

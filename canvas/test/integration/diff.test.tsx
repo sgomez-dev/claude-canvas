@@ -357,3 +357,29 @@ test("Enter twice in quick succession only sends one outcome message", async () 
   conn.close();
   r.dispose();
 });
+
+// A binary-only diff has no hunks to approve. Escape would report
+// `cancelled`, which is indistinguishable from the user bailing out; an
+// empty decision list says "reviewed, nothing to apply".
+test("Enter on a binary-only diff submits an empty decision list", async () => {
+  const id = "diff-it-binary";
+  ids.push(id);
+  const diffText = `diff --git a/logo.png b/logo.png
+index 1111111..2222222 100644
+Binary files a/logo.png and b/logo.png differ
+`;
+  const r = renderCanvas(<Diff id={id} config={{ diffText }} enabled={true} />, {
+    columns: 80,
+    rows: 16,
+  });
+  await r.settle();
+  await new Promise((res) => setTimeout(res, 50));
+
+  const conn = await openConnection(id);
+  r.stdin.write("\r");
+  await r.settle();
+
+  expect(await conn.next(2000)).toEqual({ type: "selected", data: { decisions: [] } });
+  conn.close();
+  r.dispose();
+});

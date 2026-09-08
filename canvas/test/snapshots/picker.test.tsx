@@ -65,3 +65,39 @@ test("picker is deterministic across renders", async () => {
   b.dispose();
   expect(second).toBe(first);
 });
+
+// `mode` is required. It used to be accepted as absent and silently
+// defaulted to "single", so a config that meant multi-select but omitted
+// the field opened a single-select canvas with nothing reported anywhere.
+test("picker renders a config error when mode is missing", async () => {
+  const r = renderCanvas(
+    // Cast: the point of the test is the runtime guard for a config that
+    // does not satisfy PickerConfig, which is exactly what arrives from a
+    // JSON --config-file that the type system never saw.
+    <Picker
+      id="picker-6"
+      config={{ options: [{ id: "a", label: "A" }] } as never}
+      enabled={false}
+    />,
+    { columns: 60, rows: 10 }
+  );
+  expect(await r.settle()).toMatchSnapshot();
+  r.dispose();
+});
+
+test("picker windows a list longer than the pane", async () => {
+  const r = renderCanvas(
+    <Picker
+      id="picker-7"
+      config={{
+        title: "Many",
+        mode: "single",
+        options: Array.from({ length: 25 }, (_, i) => ({ id: `o${i}`, label: `Option ${i}` })),
+      }}
+      enabled={false}
+    />,
+    { columns: 40, rows: 12 }
+  );
+  expect(await r.settle()).toMatchSnapshot();
+  r.dispose();
+});

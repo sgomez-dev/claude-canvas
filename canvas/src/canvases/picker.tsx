@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import { Box, Text, useInput, useApp } from "ink";
+import { Box, Text, useInput, useApp, useStdout } from "ink";
 import { useCanvasServer } from "../runtime/use-canvas-server";
 import type { PickerConfig, PickerOption, PickerResult } from "./picker/types";
 
@@ -16,6 +16,11 @@ interface ValidatedPicker {
   error: string | null;
 }
 
+// Rows this component spends on chrome rather than options: two border
+// rows, the title, a blank line and the footer hint. The prompt adds one
+// more when present.
+const CHROME_ROWS = 5;
+
 function firstEnabledIndex(options: PickerOption[]): number {
   const idx = options.findIndex((o) => !o.disabled);
   return idx === -1 ? 0 : idx;
@@ -23,6 +28,7 @@ function firstEnabledIndex(options: PickerOption[]): number {
 
 export function Picker({ id, config, scenario = "select", enabled }: PickerProps): React.JSX.Element {
   const { exit } = useApp();
+  const { stdout } = useStdout();
 
   // Options, mode, and any config error are derived from ONE memo so there
   // is a single source of truth for "is this config usable at all" — see
@@ -70,15 +76,21 @@ export function Picker({ id, config, scenario = "select", enabled }: PickerProps
     if (candidateOptions.length === 0) {
       return { options: [], mode: "single", error: "picker config: 'options' must not be empty" };
     }
+    // `mode` is required, both in PickerConfig and here. It used to be
+    // accepted as absent and silently defaulted to "single", so a config
+    // that meant multi-select but omitted the field opened a canvas the
+    // user could not multi-select in, with nothing reported anywhere. A
+    // required field that silently takes a default is worse than one that
+    // refuses: the caller cannot tell the two intents apart.
     const rawMode: unknown = config?.mode;
-    if (rawMode !== undefined && rawMode !== "single" && rawMode !== "multi") {
+    if (rawMode !== "single" && rawMode !== "multi") {
       return {
         options: [],
         mode: "single",
         error: `picker config: 'mode' must be "single" or "multi", got ${JSON.stringify(rawMode)}`,
       };
     }
-    const validMode: "single" | "multi" = rawMode === "multi" ? "multi" : "single";
+    const validMode: "single" | "multi" = rawMode;
     if (!candidateOptions.some((o) => !o.disabled)) {
       return { options: [], mode: validMode, error: "picker config: all options are disabled" };
     }
@@ -200,11 +212,31 @@ export function Picker({ id, config, scenario = "select", enabled }: PickerProps
     );
   }
 
+  // A list longer than the pane used to render every option, overflowing the
+  // terminal and pushing the footer hint (and sometimes the cursor itself)
+  // out of view -- a picker over a file list or a branch list hits this
+  // immediately.
+  //
+  // The window is derived from the cursor rather than held in state: a
+  // separate scrollOffset would need an effect to keep it in sync with the
+  // cursor, which costs an extra render per keystroke and can desync from
+  // the cursorRef the input handler reads. Paging (rather than centring the
+  // cursor) means the list only moves when the cursor crosses a boundary,
+  // instead of shifting under the user on every keypress.
+  const visibleCount = Math.max(
+    1,
+    (stdout?.rows ?? 24) - CHROME_ROWS - (config?.prompt ? 1 : 0)
+  );
+  const windowStart =
+    options.length <= visibleCount ? 0 : Math.floor(cursor / visibleCount) * visibleCount;
+  const visibleOptions = options.slice(windowStart, windowStart + visibleCount);
+
   return (
     <Box flexDirection="column" borderStyle="round" borderColor="cyan" paddingX={1}>
       <Text bold>{config?.title ?? "Choose"}</Text>
       {config?.prompt ? <Text dimColor>{config.prompt}</Text> : null}
-      {options.map((opt, i) => {
+      {visibleOptions.map((opt, visibleIndex) => {
+        const i = windowStart + visibleIndex;
         const isCursor = i === cursor;
         const isChecked = mode === "multi" && checked.has(opt.id);
         // Multi-mode gives the cursor its own gutter (`> `/`  `) ahead of
@@ -232,6 +264,9 @@ export function Picker({ id, config, scenario = "select", enabled }: PickerProps
       })}
       <Box marginTop={1}>
         <Text dimColor>
+          {options.length > visibleCount
+            ? `${windowStart + 1}-${windowStart + visibleOptions.length} of ${options.length}  `
+            : ""}
           {mode === "single"
             ? "↑/↓: navigate  Enter: select  Esc: cancel"
             : "↑/↓: navigate  Space: toggle  Enter: submit  Esc: cancel"}

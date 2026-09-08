@@ -2,7 +2,17 @@ import { test, expect } from "bun:test";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { unlink } from "node:fs/promises";
-import { emit, resolveWaitTimeout, listCanvases, runShow, runSpawn, type ActionIO } from "./cli";
+import {
+  emit,
+  resolveWaitTimeout,
+  listCanvases,
+  runShow,
+  runSpawn,
+  resolveScenario,
+  KIND_DEFAULT_SCENARIO,
+  type ActionIO,
+} from "./cli";
+import { getScenario, listScenarios } from "./scenarios/registry";
 import { writeRecord, deleteRecord, newToken } from "./runtime/registry";
 import { configPath } from "./runtime/paths";
 
@@ -174,4 +184,59 @@ test("spawn rejects malformed --config JSON before ever writing configPath, with
       // already absent, which is the expected/passing case
     }
   }
+});
+
+// --- scenario resolution -------------------------------------------------
+
+// Every kind used to default to "display". So `spawn flight` ran with
+// scenario "display" -- not a scenario flight has -- and only worked
+// because flight.tsx ignores the string; the registry record then recorded
+// a scenario that does not exist.
+test("each kind defaults to a scenario it actually has, not to display", () => {
+  for (const [kind, expected] of KIND_DEFAULT_SCENARIO) {
+    expect(resolveScenario(kind, undefined)).toBe(expected);
+  }
+});
+
+// The invariant that keeps the CLI's defaults and the registry from
+// drifting apart, which is exactly how flight ended up defaulting to a
+// nonexistent scenario.
+test("every kind's default scenario is registered, and every registered kind is known", () => {
+  for (const [kind, scenario] of KIND_DEFAULT_SCENARIO) {
+    expect(getScenario(kind, scenario)).toBeDefined();
+  }
+  for (const s of listScenarios()) {
+    expect(KIND_DEFAULT_SCENARIO.has(s.canvasKind)).toBe(true);
+  }
+});
+
+test("a shape-valid but nonexistent scenario is rejected, naming the real ones", () => {
+  expect(() => resolveScenario("calendar", "meting-picker")).toThrow(
+    /Unknown scenario for calendar: meting-picker.*display, meeting-picker/
+  );
+  expect(() => resolveScenario("flight", "display")).toThrow(/Expected one of: booking/);
+});
+
+test("an explicitly requested valid scenario is returned unchanged", () => {
+  expect(resolveScenario("calendar", "meeting-picker")).toBe("meeting-picker");
+  expect(resolveScenario("document", "email-preview")).toBe("email-preview");
+});
+
+test("scenario shape is still validated before the registry is consulted", () => {
+  expect(() => resolveScenario("calendar", "bad scenario!")).toThrow(/Invalid scenario/);
+});
+
+test("spawn rejects an unknown scenario with exit 1, before ever calling the host", async () => {
+  const { io, lines, exits } = captureIO();
+  await runSpawn("calendar", { id: "cli-test-badscenario", scenario: "nope" }, io);
+  expect(exits).toEqual([1]);
+  expect(JSON.parse(lines[0]!).status).toBe("error");
+  expect(JSON.parse(lines[0]!).message).toContain("Unknown scenario for calendar");
+});
+
+test("show rejects an unknown scenario and still exits 0 (never a non-zero exit on a pane)", async () => {
+  const { io, lines, exits } = captureIO();
+  await runShow("calendar", { id: "cli-test-badscenario2", scenario: "nope" }, io);
+  expect(exits).toEqual([0]);
+  expect(JSON.parse(lines[0]!).status).toBe("error");
 });

@@ -45,6 +45,10 @@ bun run src/cli.ts spawn document --scenario edit --config '{"content": "# Hello
 
 # Block for the user's selection (returns within ~55s no matter what)
 bun run src/cli.ts wait cal-1
+
+# Discover what scenarios exist, and whether each returns a result
+bun run src/cli.ts scenarios
+bun run src/cli.ts scenarios diff
 ```
 
 Every command prints one JSON object on stdout. `wait` returns one of

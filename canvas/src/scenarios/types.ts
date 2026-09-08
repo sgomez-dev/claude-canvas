@@ -1,19 +1,29 @@
 // Scenario System Types
 
+/**
+ * What a scenario lets the user do. Consumed by the `scenarios` CLI verb,
+ * which is how a controller discovers whether to expect a result at all: a
+ * "view-only" scenario has no `selected` outcome, so its `wait` ending in
+ * `cancelled` is success rather than failure.
+ */
 export type InteractionMode = "view-only" | "selection" | "multi-select";
-export type CloseOn = "selection" | "escape" | "command" | "never";
 
-export interface ScenarioDefinition<
-  TConfig = unknown,
-  TResult = unknown
-> {
+/**
+ * A scenario is the (kind, name) pair the CLI accepts after `--scenario`,
+ * plus enough metadata to describe it.
+ *
+ * This used to also carry `closeOn`, `autoCloseDelay` and `defaultConfig`,
+ * and two generic parameters that existed only to type the last of them.
+ * All were removed: nothing read any of them, every canvas hardcodes its
+ * own closing behaviour and its own defaults, and a field that describes
+ * behaviour without causing it is worse than no field -- it reads as a
+ * contract to whoever finds it next.
+ */
+export interface ScenarioDefinition {
   name: string;
   description: string;
   canvasKind: string;
   interactionMode: InteractionMode;
-  closeOn: CloseOn;
-  autoCloseDelay?: number; // ms after selection before auto-close
-  defaultConfig: Partial<TConfig>;
 }
 
 // A calendar event as it arrives in a --config payload: times are ISO

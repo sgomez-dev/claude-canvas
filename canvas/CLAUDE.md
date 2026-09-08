@@ -27,7 +27,8 @@ A new kind must be registered in **three** places, not one. Miss the first
 and `spawn` rejects a correctly-spelled kind at the validation gate built to
 catch typos.
 
-1. Add the kind to `KNOWN_KINDS` in `src/cli.ts`
+1. Add the kind to `KIND_DEFAULT_SCENARIO` in `src/cli.ts`, mapped to the
+   scenario it should use when `--scenario` is omitted
 2. Create the component in `src/canvases/` and add a `case` to
    `renderCanvas`'s switch in `src/canvases/index.tsx`
 3. Register its scenarios in `src/scenarios/registry.ts` (and re-export from
@@ -36,11 +37,32 @@ catch typos.
 5. Update the main canvas skill, `README.md` and `commands/canvas.md`
 6. Add a render snapshot and a real-socket IPC test
 
-Note that the scenario registry currently has **no runtime consumer**:
-`getScenario` is called only from its own test, and `interactionMode` /
-`closeOn` / `autoCloseDelay` are read by nothing. Registering a scenario is
-bookkeeping today, not behaviour -- `--scenario` is validated for
-identifier shape only, never against the registry. See the Phase 2 ledger.
+A test in `cli.test.ts` pins the invariant between steps 1 and 3 -- every
+kind's default scenario must be registered, and every registered kind must
+be known to the CLI. That invariant is what a bare kind list lacked: every
+kind used to default to `"display"`, so `spawn flight` ran with a scenario
+flight does not have.
+
+**Every canvas must call `useCanvasServer` when `enabled`.** A canvas
+without a server writes no registry record, so it cannot be listed, read or
+closed -- `close` answers "no canvas <id>" for a pane sitting right there,
+against the lifecycle design that requires closing to be an IPC request.
+The calendar's `display` scenario was missing this until 2026-09-08.
+
+## Scenarios
+
+`--scenario` is validated against the registry, not just for identifier
+shape. `getScenario(kind, name)` backs that check and `listScenarios(kind)`
+backs the `scenarios` CLI verb, which reports each scenario's
+`interactionMode` so a controller knows whether to expect a result at all.
+
+`ScenarioDefinition` carries only what something reads: `name`,
+`description`, `canvasKind`, `interactionMode`. It used to also carry
+`closeOn`, `autoCloseDelay` and `defaultConfig` (plus two generic
+parameters that existed only to type the last one); nothing read any of
+them, every canvas hardcodes its own closing behaviour and defaults, and a
+field that describes behaviour without causing it reads as a contract to
+whoever finds it next.
 
 ## IPC Protocol
 

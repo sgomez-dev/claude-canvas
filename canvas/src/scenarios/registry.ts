@@ -46,6 +46,11 @@ export function getScenario(
   return registry.get(`${canvasKind}:${scenarioName}`);
 }
 
+/**
+ * Every scenario, or every scenario for one kind. Surfaced by the
+ * `scenarios` CLI verb -- this had no caller at all for two phases, which
+ * is how the registry came to hold entries nothing ever read.
+ */
 export function listScenarios(canvasKind?: string): ScenarioDefinition[] {
   const scenarios: ScenarioDefinition[] = [];
   for (const [key, scenario] of registry) {

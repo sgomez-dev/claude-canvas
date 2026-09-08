@@ -77,20 +77,34 @@ than be 600 bespoke lines like `flight` is today. See the backlog below.
 
 Recorded here because Phase 2 uncovered them and Phase 3 depends on them:
 
-- **Close gap 1 from the Phase 2 ledger first.** Every primitive's result can
-  be lost to a timing race today, and no amount of new canvases improves on
-  that.
-- **Decide what the scenario registry is.** It has no runtime consumer at all
-  — `getScenario` is called only from its own test, and `interactionMode` /
-  `closeOn` / `autoCloseDelay` are read by nothing. Either the CLI starts
-  validating `--scenario` against it and honouring those fields, or it goes.
-  Phase 3's "compose primitives" premise needs an answer either way.
-- **`--scenario` is unvalidated.** `calendar.tsx:354` falls through to a
-  read-only view when the scenario name is right but the config lacks
-  `calendars`, with nothing reported. Composition will multiply this.
-- **Delete `markdown-renderer.tsx`** (781 dead lines, ~10% of the codebase)
-  and de-duplicate the document/calendar types before writing canvases that
-  import them.
+**Done as of 2026-09-08** — six of the Phase 2 ledger's nine gaps are
+closed, which is what these entry conditions were asking for:
+
+- Outcomes are retained and persisted, so a result can no longer be lost to
+  a timing race (3d7dab5). `spawn` also waits for reachability.
+- The scenario registry is real: `--scenario` is validated against it, a
+  `scenarios` verb reports each scenario's `interactionMode`, and the fields
+  nothing read were deleted (this commit). Two defects fell out — every kind
+  defaulted to `"display"`, and the calendar's `display` scenario had no IPC
+  server at all.
+- `markdown-renderer.tsx` and the duplicated types are gone: 885 deletions
+  (c9b3c9e). That exposed `DocumentConfig.diffs` as a documented feature
+  nothing implemented; removed, pointing at the `diff` canvas instead.
+- `FrameDecoder` is linear rather than quadratic (8f42921), which was the
+  stated precondition for screenshot work.
+- The pane-opening path has execution behind it (b9b3ae8), via
+  `canvas/scripts/smoke.sh`.
+
+**Still open before Phase 3:**
+
+- **The `update` message has no CLI verb**, so live server-push — the
+  capability that decided the TCP transport — cannot be invoked at all.
+  Phase 3's richer canvases are the first thing that would want it.
+- **`table` measures column width in UTF-16 code units**, so CJK and emoji
+  misalign. `Intl.Segmenter` is built into Bun and needs no dependency.
+- **The calendar meeting-picker overflows vertically at 70x18**, overlapping
+  its own help bar. A Phase 1 layout defect, unrelated to the clock fixes
+  that touched those lines.
 - **Verify Sixel in Windows Terminal** before committing to a graphics
   protocol, as already noted below.
 

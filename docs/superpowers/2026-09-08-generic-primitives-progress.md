@@ -171,148 +171,162 @@ primitive earns its keep cannot cause that. Each file therefore leads with
 
 ---
 
-## Known gaps, deliberately not closed in this pass
+## Known gaps
 
-**1. Outcomes are not buffered. This is the most consequential open defect.**
+Nine were recorded when this ledger was first written. Six are closed; the
+status of each is below, newest work first. **A reader picking this up
+should start with the three still open.**
 
-A canvas sends `selected`/`cancelled`/`error` by broadcasting to whoever is
-connected at that instant, and retains nothing. Three consequences:
+### CLOSED 1 -- Outcomes are not buffered (commit 3d7dab5)
 
-- An outcome produced before the controller's `wait` connects is broadcast
-  to zero connections and lost. The canvas then exits and its record is
-  deleted, so the follow-up `wait` answers `no canvas <id>` and the user's
-  choice is unrecoverable. `calendar` and `flight` implement no `onGet`, so
-  there is no fallback path either.
-- A **config error is effectively never observable by Claude.** `diff`,
-  `picker`, `form` and `table` all gate `sendError` on `ipc.isConnected`,
-  which reports that the canvas's own server came up -- not that a
-  controller attached. A controller can only learn the port from the
-  registry record, which the server writes as it starts. So the error is
-  always already broadcast by the time `wait` connects. This is why none of
-  the four has an end-to-end test for its `sendError` path; the omission was
-  inherited, and `test/integration/form.test.tsx` now states it explicitly
-  rather than leaving it to be rediscovered.
-- `spawn` returns as soon as the pane opens, which can precede the canvas
-  writing its record, so an immediate `wait` can answer `no canvas <id>`
-  even when nothing is wrong. `openConnection` has no retry.
+Was recorded as the most consequential open defect in the project, and
+confirmed in a real tmux pane: a canvas broadcast its outcome to whoever was
+connected at that instant and retained nothing, so a user who chose before
+`wait` connected had the choice broadcast to zero connections, the canvas
+exited, its record was deleted, and `wait` answered `no canvas <id>`. A
+config error was effectively never observable by Claude for the same reason.
 
-**Confirmed empirically 2026-09-08, not just by reading the code.** The
-smoke test spawned a picker, sent Enter before starting `wait`, and then
-called `wait`:
+Fixed as sketched: the outcome is written synchronously into the registry
+record before it is broadcast and before the canvas exits; `readRecord`
+returns an outcome-bearing record even when the pid is dead, mirroring the
+`lastError` precedent; the hook no longer deletes a record whose outcome is
+unread; and `waitForOutcome` reads the record first, consumes it, and
+re-checks after a failed connect or a mid-wait disconnect. `onAuthenticated`
+(added in dc70a08 to de-flake a test) is what replays a retained outcome --
+and `ready` -- to a controller that attaches later, which also makes `ready`
+observable for the first time.
 
-```
-spawn -> {"status":"spawned","id":"sm-race","host":"tmux"}
-      record visible after 1s
-wait (issued after the user chose) -> {"status":"error","message":"no canvas sm-race"}
-```
+**Ruling 9: the first outcome wins.** A canvas has one answer. Letting a
+later call overwrite it would let a controller read whichever of two
+contradictory outcomes it happened to see, and the persisted copy could
+disagree with the broadcast one. Concretely: a diff that fails to parse
+reports the parse error, and a subsequent Escape does not replace it with
+`cancelled`. Cost if wrong: a canvas that wants to revise its answer cannot,
+which no canvas does.
 
-The user made a choice, the canvas exited, and there is no artefact anywhere
-from which the choice can be recovered. Measured startup window: the
-registry record became visible 0-1 s after `spawn` returned across five
-spawns, so the "wait too early" variant is a real window, not a theoretical
-one.
+**Ruling 10: `spawn` waits for reachability instead of returning when the
+pane opens.** 10 s, against a measured 0-1 s window. A `spawn` that reports
+success for a canvas nothing can reach is a lie the controller then trips
+over. Cost if wrong: a false negative on a machine where a cold Bun start
+exceeds 10 s, reported as an error naming the log file.
 
-Sketch of the fix, for whoever takes it: persist the outcome into the
-registry record before exiting and have `waitForOutcome` consume it there,
-mirroring the `lastError` precedent that `readRecord` already honours ahead
-of its liveness check. That makes the documented `spawn` → `wait` flow
-correct regardless of timing, and makes `sendError` testable. Out of scope
-here because it changes the record shape, the client's wait semantics and
-the record lifecycle at once, and it was not in the agreed scope for this
-pass.
+Contract change for anyone writing a controller: **the first frame received
+is not necessarily the outcome.** `ready` arrives first. `waitForOutcome`
+skips non-outcome frames; tests use the new `nextOutcome` helper.
 
-**2. The scenario registry has no runtime consumer.** `getScenario` is
-called only from its own test; `registerScenario` and `listScenarios` are
-called from nowhere; `interactionMode`, `closeOn` and `autoCloseDelay` are
-read by nothing -- each primitive hardcodes its own behaviour. So Phase 1's
-finding #3 ("the flight canvas is not in the registry") was closed by adding
-an entry with no functional effect, and `registry.test.ts` asserts the
-presence of entries nothing reads.
+### CLOSED 2 -- The scenario registry had no runtime consumer (this commit)
 
-Consequence today: `--scenario` is validated for identifier shape only,
-never against the registry. `calendar.tsx:354` reads
-`scenario === "meeting-picker" && config?.calendars`, so a typo'd scenario
-name, or a correct one with a config missing `calendars`, silently falls
-through to the read-only view -- the user sees a calendar they cannot pick
-from, and `wait` answers `pending` 55 s later with no indication anything
-was wrong. Phase 2 registered four more scenarios into the same dead
-registry because the spec told it to follow the `flight:booking` pattern.
+`getScenario` was called only from its own test, `registerScenario` and
+`listScenarios` from nowhere, and `interactionMode` / `closeOn` /
+`autoCloseDelay` / `defaultConfig` were read by nothing.
 
-Decide before Phase 3 whether the registry becomes real (the CLI validates
-`--scenario` against it and reads `closeOn`/`autoCloseDelay`) or is deleted.
-Registering more scenarios into it is bookkeeping either way.
+**Ruling 11: make the registry real rather than delete it.** Two consumers,
+both of which pay for themselves:
 
-**3. `markdown-renderer.tsx` is 781 lines of dead code**, the largest file
-in the repository and roughly a tenth of it. Nothing imports it; `document.tsx`
-uses `raw-markdown-renderer.tsx`. Phase 1 spent commit 2ad2fa0 fixing its
-`noUncheckedIndexedAccess` violations. The final whole-branch review already
-recommended deleting it. Still here.
+- `--scenario` is validated against it. A shape-valid but nonexistent name
+  used to pass straight through to a canvas that compared the string and
+  silently rendered something else -- `--scenario meting-picker` got a
+  read-only calendar, with nothing reported and `wait` answering `pending`
+  55 s later.
+- A new `scenarios [kind]` verb reports each scenario's `interactionMode`,
+  which is how a controller learns whether to expect a result at all: a
+  view-only scenario has no `selected` outcome, so its `wait` ending in
+  `cancelled` is success.
 
-**4. Duplicated type definitions.** `DocumentConfig`, `DocumentDiff` and
-`DocumentSelection` are defined identically in `scenarios/types.ts` and
-`canvases/document/types.ts`; `CalendarEvent` in three places
-(`calendar.tsx`, `calendar/types.ts`, `scenarios/types.ts`). The components
-import the `canvases/` copies, so the `scenarios/types.ts` ones are unused
-duplicates waiting to diverge.
+`closeOn`, `autoCloseDelay` and `defaultConfig` were deleted instead, along
+with the two generic parameters that existed only to type the last one.
+Nothing read them, every canvas hardcodes its own closing behaviour and
+defaults, and a field that describes behaviour without causing it reads as a
+contract to whoever finds it next. Cost if wrong: reinstating one is a
+three-line change.
 
-**5. The `update` message is unreachable.** `protocol.ts` defines it,
-`use-canvas-server.ts` exposes `onUpdate`, and `document.tsx` implements it
--- but **the CLI has no `update` verb** (`show`, `spawn`, `wait`, `get`,
-`close`, `list`, `env`). The roadmap chose TCP over files-plus-polling
-specifically because polling "gives up server-push to the canvas — which
-live `update` needs"; the feature that decided the transport has no way to
-be invoked. Neither `diff`, `picker`, `form` nor `table` implements
-`onUpdate`, which costs nothing until the verb exists.
+Two defects fell out of doing this, both fixed here:
 
-**6. `table` measures column width in UTF-16 code units**, so CJK and emoji
-cells misalign their row. The fix needs a display-width measure; this
-phase's constraint is no new runtime dependencies, and reaching into Ink's
-transitive `string-width` is worse than the misalignment. Documented in
-`skills/table/SKILL.md`.
+- **Every kind defaulted to `"display"`.** So `spawn flight` ran with
+  scenario `"display"`, which flight does not have, and only worked because
+  flight.tsx ignores the string -- the registry record then recorded a
+  scenario that does not exist. `KIND_DEFAULT_SCENARIO` maps each kind to
+  its own default, and a test pins the invariant that every default is
+  registered and every registered kind is known, which is the drift that
+  caused this.
+- **The calendar's `display` scenario had no IPC server at all.** It never
+  called `useCanvasServer`, so it wrote no registry record and could not be
+  listed, read or closed: `close` answered "no canvas <id>" for a pane
+  sitting right there, against the lifecycle design that requires closing to
+  be an IPC request. It now has one, and `isMeetingPickerConfig` -- the type
+  guard kept in c9b3c9e for exactly this -- replaces the inline
+  `config?.calendars` truth test, so a meeting-picker request with a bad
+  config reports an error instead of silently rendering a calendar the user
+  cannot pick from.
 
-**7. The calendar meeting-picker's help bar overlaps its readout at 70×18.**
-Both the pre- and post-fix baselines of `calendar meeting-picker renders`
-show the cyan time text overwriting the start of the grey hint line -- a
-vertical overflow artifact, present before this pass and unrelated to the
-locale fix. Left alone: the fix is a layout change to a Phase 1 canvas, and
-the snapshot's job here was to become deterministic.
+### CLOSED 3 and 4 -- Dead code and duplicated types (commit c9b3c9e)
 
-**8. `FrameDecoder` still re-concatenates its whole buffer per chunk**,
-Phase 1's documented Phase 3 deferral. Measured during this pass, so the
-figure is now real rather than estimated: a 4 MB frame in 16 KB chunks costs
-39 ms, in 64 KB chunks 15 ms. Not the reason the 4 MB test was failing --
-that was the truncation above -- and not urgent at these numbers, but the
-new `socket-writer.ts` deliberately avoids the same pattern on the outbound
-side by queueing views rather than one growing buffer.
+`markdown-renderer.tsx` deleted: 781 lines, nothing imported it. Deleting it
+exposed `DocumentConfig.diffs` as a **documented feature nothing
+implemented** -- only that renderer ever applied diff markers, while
+skills/document/SKILL.md advertised diff highlighting with two worked
+examples. Removed from the type and the skill, which now points at the
+`diff` canvas.
 
-**9. CLOSED 2026-09-08: `tmux split-window` now has execution behind it.**
-Phase 1 recorded the pane-opening path as analysis-only and judged it safe.
-tmux 3.7c was installed and all four primitives were driven end to end in a
-real pane -- real `split-window`, real Ink render, real IPC, real CLI. See
-the smoke test section below. The path works; the judgement was correct.
+Duplicated types resolved: the document types existed identically in two
+files; `CalendarEvent` existed three times, two byte-identical and a third
+with ISO **string** fields that was genuinely a different type sharing a
+name, now `CalendarEventInput`. Net 885 deletions.
+
+### CLOSED 8 -- FrameDecoder was O(n^2) (commit 8f42921)
+
+Phase 1's documented Phase 3 deferral. Now holds a chunk list and joins one
+frame's bytes on completion. Measured old versus new: 4 MB in 16 KB chunks
+41 ms -> 7 ms; 13 MB in 16 KB chunks 304 ms -> 22 ms. Across a 3.25x
+increase in payload the old path grew 7.4x and the new one 3.1x -- quadratic
+against linear.
+
+### CLOSED 9 -- tmux never executed (commit b9b3ae8)
+
+See the smoke test section below. Now `canvas/scripts/smoke.sh`, in the
+repository and self-checking.
 
 ---
 
-## Spec success criteria, closed out
+### STILL OPEN 5 -- The `update` message is unreachable
 
-| Criterion | State |
-|---|---|
-| Each primitive spawns via the existing CLI with the four kinds added to `KNOWN_KINDS` | met — verified by invoking all seven kinds and a typo |
-| Each renders with a byte-stable snapshot test | met — 22 snapshots |
-| `diff`'s parser recovers structure from real `git diff` output | met — 15 parser tests |
-| `picker` supports single and multi from one implementation | met |
-| `form` supports all five field types | met |
-| `table` renders scrollable tabular data with no selection concept | met |
-| No new runtime dependencies | met — dependency list unchanged |
-| A `skills/<kind>/SKILL.md` per primitive | met |
+`protocol.ts` defines it, `use-canvas-server.ts` exposes `onUpdate`, and
+`document.tsx` implements it -- but **the CLI has no `update` verb**
+(`show`, `spawn`, `wait`, `get`, `close`, `list`, `scenarios`, `env`). The
+roadmap chose TCP over files-plus-polling specifically because polling
+"gives up server-push to the canvas — which live `update` needs"; the
+feature that decided the transport has no way to be invoked. None of the
+four Phase 2 primitives implements `onUpdate` either, which costs nothing
+until the verb exists.
 
-Non-goals held: nothing here composes primitives into a domain canvas, no
-image rendering, no row selection inside `table`, no field types beyond the
-five approved.
+### STILL OPEN 6 -- `table` measures column width in UTF-16 code units
 
-The one success criterion the spec itself scoped out remains out: "making
-Claude actually choose to open these unprompted" is a prompting concern, and
-the four new SKILL.md files are the whole of what this pass can do about it.
+CJK and emoji cells misalign their row. The fix needs a display-width
+measure; the phase constraint is no new runtime dependencies, and reaching
+into Ink's transitive `string-width` is worse than the misalignment.
+`Intl.Segmenter` is built into Bun and would give correct grapheme
+clustering without a dependency, which is the route to take.
+
+### STILL OPEN 7 -- The calendar meeting-picker's help bar overlaps its readout at 70x18
+
+Both the pre- and post-fix baselines of `calendar meeting-picker renders`
+show the cyan time text overwriting the start of the grey hint line -- a
+vertical overflow artifact, unrelated to the locale and 24-hour fixes that
+touched those lines. The grid renders a fixed number of hours regardless of
+the terminal height; making it fit is the fix.
+
+### Unresolved, not a gap: one unreproduced test failure
+
+A single full-suite run reported `1 fail` without naming the test, between
+the gap-2 code and its documentation. 85 subsequent full-suite runs were
+clean (15 + 30 immediately after, plus 25 runtime-only and the 15 before).
+Recorded rather than dismissed: cross-file interference through the real
+user data directory is plausible in principle, since several test files
+write registry records concurrently, though `cli.test.ts`'s `list` test uses
+`toContain` rather than an exact match and the new outcome tests scope
+themselves to their own ids. If it recurs, capture the full output -- the
+runs above were re-run with output saved for exactly that reason and it did
+not reappear.
 
 ---
 

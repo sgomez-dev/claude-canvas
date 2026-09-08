@@ -5,6 +5,4 @@ export const diffReviewScenario: ScenarioDefinition = {
   description: "Review a multi-file unified diff hunk by hunk",
   canvasKind: "diff",
   interactionMode: "selection",
-  closeOn: "selection",
-  defaultConfig: {},
 };

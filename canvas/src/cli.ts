@@ -1,10 +1,10 @@
 #!/usr/bin/env bun
 import { program } from "commander";
 import { assertIdent } from "./runtime/validate";
-import { configPath } from "./runtime/paths";
+import { configPath, logPath } from "./runtime/paths";
 import { getValue, requestClose, waitForOutcome, DEFAULT_WAIT_MS } from "./runtime/client";
 import { awaitRecord, listRecords, type CanvasRecord } from "./runtime/registry";
-import { logPath } from "./runtime/paths";
+import { getScenario, listScenarios } from "./scenarios/registry";
 import { detectHost } from "./host";
 
 type Writer = (s: string) => boolean;
@@ -17,23 +17,47 @@ type Writer = (s: string) => boolean;
 // pane's own exit-0 handling never ran, leaving an unremovable pane on
 // Windows. Checking membership here, before any pane is spawned or
 // renderCanvas is called, is what actually prevents that.
-const KNOWN_KINDS = new Set([
-  "calendar",
-  "document",
-  "flight",
-  "diff",
-  "picker",
-  "form",
-  "table",
+//
+// The value is that kind's default scenario. This used to be a bare set,
+// with every kind defaulting to "display" -- so `spawn flight` ran with
+// scenario "display", which is not a scenario flight has, and only worked
+// because flight.tsx ignores the string. The registry record then recorded
+// a scenario that does not exist. One map, so a kind's default cannot drift
+// from the scenarios actually registered for it.
+export const KIND_DEFAULT_SCENARIO = new Map([
+  ["calendar", "display"],
+  ["document", "display"],
+  ["flight", "booking"],
+  ["diff", "review"],
+  ["picker", "select"],
+  ["form", "fill"],
+  ["table", "display"],
 ]);
 
 function assertKnownKind(kind: string): string {
-  if (!KNOWN_KINDS.has(kind)) {
+  if (!KIND_DEFAULT_SCENARIO.has(kind)) {
     throw new Error(
-      `Unknown canvas kind: ${kind}. Expected one of: ${[...KNOWN_KINDS].join(", ")}.`
+      `Unknown canvas kind: ${kind}. Expected one of: ${[...KIND_DEFAULT_SCENARIO.keys()].join(", ")}.`
     );
   }
   return kind;
+}
+
+// Shape-valid but nonexistent scenario names used to pass straight through
+// to the canvas, which compared the string and silently rendered something
+// else: `--scenario meting-picker` got a read-only calendar, with nothing
+// reported and `wait` answering `pending` 55 s later. The registry knows
+// every real (kind, scenario) pair, so this is the check it always should
+// have been backing.
+export function resolveScenario(kind: string, requested: string | undefined): string {
+  const scenario = assertIdent("scenario", requested ?? KIND_DEFAULT_SCENARIO.get(kind)!);
+  if (!getScenario(kind, scenario)) {
+    throw new Error(
+      `Unknown scenario for ${kind}: ${scenario}. ` +
+        `Expected one of: ${listScenarios(kind).map((x) => x.name).join(", ")}.`
+    );
+  }
+  return scenario;
 }
 
 // Every command prints exactly one JSON object on stdout. Diagnostics go to
@@ -88,7 +112,7 @@ export async function runShow(kind: string, opts: ShowOpts, io: ActionIO = defau
     const id = assertIdent("id", opts.id ?? `${kind}-1`);
     assertIdent("kind", kind);
     assertKnownKind(kind);
-    const scenario = assertIdent("scenario", opts.scenario ?? "display");
+    const scenario = resolveScenario(kind, opts.scenario);
     const config = opts.configFile ? await Bun.file(opts.configFile).json() : undefined;
     process.stdout.write(`\x1b]0;canvas: ${kind}\x07`);
     const { renderCanvas } = await import("./canvases");
@@ -121,7 +145,7 @@ export async function runSpawn(kind: string, opts: SpawnOpts, io: ActionIO = def
     const id = assertIdent("id", opts.id ?? `${kind}-1`);
     assertIdent("kind", kind);
     assertKnownKind(kind);
-    const scenario = assertIdent("scenario", opts.scenario ?? "display");
+    const scenario = resolveScenario(kind, opts.scenario);
     const argv = [
       process.execPath,
       "run",
@@ -233,6 +257,34 @@ program.command("close <id>").action(async (id: string) => {
 program.command("list").action(async () => {
   emit(await listCanvases());
 });
+
+// Gives the scenario registry a consumer, and gives a controller a way to
+// discover what it can ask for -- including `interactionMode`, which is how
+// it knows whether to expect a result at all: a "view-only" scenario has no
+// `selected` outcome, so its `wait` ending in `cancelled` is success.
+program
+  .command("scenarios")
+  .argument("[kind]")
+  .action((kind: string | undefined) => {
+    try {
+      if (kind !== undefined) {
+        assertIdent("kind", kind);
+        assertKnownKind(kind);
+      }
+      emit({
+        status: "ok",
+        scenarios: listScenarios(kind).map((x) => ({
+          kind: x.canvasKind,
+          name: x.name,
+          description: x.description,
+          interactionMode: x.interactionMode,
+          isDefault: KIND_DEFAULT_SCENARIO.get(x.canvasKind) === x.name,
+        })),
+      });
+    } catch (e) {
+      fail((e as Error).message);
+    }
+  });
 
 program.command("env").action(() => {
   try {

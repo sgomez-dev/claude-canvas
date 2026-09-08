@@ -5,6 +5,4 @@ export const flightBookingScenario: ScenarioDefinition = {
   description: "Compare flights and select a seat",
   canvasKind: "flight",
   interactionMode: "selection",
-  closeOn: "selection",
-  defaultConfig: {},
 };

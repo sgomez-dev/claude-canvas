@@ -1,7 +1,8 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import { Box, Text, useInput, useApp, useStdout } from "ink";
 import { MeetingPickerView } from "./calendar/scenarios/meeting-picker-view";
-import type { MeetingPickerConfig } from "../scenarios/types";
+import { isMeetingPickerConfig, type MeetingPickerConfig } from "../scenarios/types";
+import { useCanvasServer } from "../runtime/use-canvas-server";
 // Re-exported because this module's public surface has always included it;
 // the definition now lives in one place instead of being copied here
 // byte-for-byte.
@@ -344,10 +345,28 @@ function AllDayEventsRow({ weekDays, events, columnWidth, timeColumnWidth }: All
 // Thin router: calls no hooks of its own, so switching scenarios never
 // changes which hooks run for a given mount (a rules-of-hooks violation the
 // previous single-component version had, harmless only because the scenario
-// never actually changes mid-mount). It delegates entirely to whichever
-// child owns the hooks for that scenario.
+// never actually changes mid-mount). Each branch mounts a different
+// component, and that component owns its own hooks.
 export function Calendar({ id, config, enabled = false, scenario = "display" }: Props) {
-  if (scenario === "meeting-picker" && config?.calendars) {
+  if (scenario === "meeting-picker") {
+    // The check used to be an inline `config?.calendars` truth test whose
+    // else-branch fell through to the read-only display. A caller who asked
+    // for a meeting picker and got a calendar they could not pick from was
+    // told nothing at all: no error anywhere, and `wait` answered `pending`
+    // 55 s later. This is the type guard that check should always have
+    // been, and a bad config is now reported like every other primitive's.
+    if (!config || !isMeetingPickerConfig(config)) {
+      return (
+        <CalendarConfigError
+          id={id}
+          scenario={scenario}
+          enabled={enabled}
+          message={
+            "calendar config: scenario 'meeting-picker' needs a non-empty 'calendars' array"
+          }
+        />
+      );
+    }
     const pickerConfig: MeetingPickerConfig = {
       calendars: config.calendars,
       slotGranularity: config.slotGranularity || 30,
@@ -360,14 +379,56 @@ export function Calendar({ id, config, enabled = false, scenario = "display" }: 
     return <MeetingPickerView id={id} config={pickerConfig} enabled={enabled} />;
   }
 
-  return <CalendarDisplay config={config} />;
+  return <CalendarDisplay id={id} config={config} enabled={enabled} scenario={scenario} />;
+}
+
+interface CalendarConfigErrorProps {
+  id: string;
+  scenario: string;
+  enabled: boolean;
+  message: string;
+}
+
+// Owns a server so the error actually reaches the controller, and so the
+// pane is still closable and discoverable like any other canvas.
+function CalendarConfigError({ id, scenario, enabled, message }: CalendarConfigErrorProps) {
+  const ipc = useCanvasServer({ id, kind: "calendar", scenario, enabled, onClose: () => {} });
+  const sentRef = useRef(false);
+  useEffect(() => {
+    if (ipc.isConnected && !sentRef.current) {
+      sentRef.current = true;
+      ipc.sendError(message);
+    }
+  }, [ipc.isConnected, ipc.sendError, message]);
+  return (
+    <Box flexDirection="column" borderStyle="round" borderColor="red" padding={1}>
+      <Text color="red">{message}</Text>
+    </Box>
+  );
 }
 
 interface CalendarDisplayProps {
+  id: string;
   config?: CalendarConfig;
+  enabled: boolean;
+  scenario: string;
 }
 
-function CalendarDisplay({ config }: CalendarDisplayProps) {
+function CalendarDisplay({ id, config, enabled, scenario }: CalendarDisplayProps) {
+  // This scenario had no server at all: it started no IPC, wrote no
+  // registry record, and so could not be listed, read or closed. `close`
+  // answered "no canvas <id>" for a pane that was sitting right there --
+  // against the lifecycle design, which requires closing to be an IPC
+  // request because killing the process leaves a zombie pane on Windows.
+  const ipc = useCanvasServer({
+    id,
+    kind: "calendar",
+    scenario,
+    enabled,
+    onClose: () => {},
+    onGet: (key) => (key === "config" ? (config ?? null) : null),
+  });
+  void ipc;
   const { exit } = useApp();
   const { stdout } = useStdout();
   const [currentDate, setCurrentDate] = useState(new Date());

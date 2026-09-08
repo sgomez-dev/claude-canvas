@@ -83,6 +83,13 @@ Every command prints one JSON object. `wait` returns one of
 `{"status":"pending"}` (timed out, canvas still alive — call `wait` again),
 `{"status":"disconnected"}`, or `{"status":"error","message":...}`.
 
+`scenarios [kind]` lists every scenario you can ask for, with its
+`interactionMode`. Worth reading once rather than guessing: a
+`view-only` scenario has **no `selected` outcome at all**, so its `wait`
+ending in `{"status":"cancelled"}` is the successful end of its life, not a
+failure. An unknown `--scenario` is now rejected outright, naming the real
+ones, rather than silently rendering a different view.
+
 `get <id> <key>` reads state. Only `document` currently implements `onGet`
 and answers `selection`, `content`, and `config`; `flight` and `calendar`
 return `{"status":"ok","data":null}` for any key today.

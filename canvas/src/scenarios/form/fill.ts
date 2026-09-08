@@ -5,6 +5,4 @@ export const formFillScenario: ScenarioDefinition = {
   description: "Fill in a small set of structured fields and submit them as one result",
   canvasKind: "form",
   interactionMode: "selection",
-  closeOn: "selection",
-  defaultConfig: {},
 };

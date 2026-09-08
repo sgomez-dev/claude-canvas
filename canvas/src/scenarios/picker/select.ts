@@ -5,6 +5,4 @@ export const pickerSelectScenario: ScenarioDefinition = {
   description: "Choose one or more options from a list",
   canvasKind: "picker",
   interactionMode: "selection",
-  closeOn: "selection",
-  defaultConfig: {},
 };

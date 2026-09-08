@@ -26,6 +26,16 @@ Ask what kind of canvas the user needs:
 - **Form** - Fill in structured fields and submit them as one result
 - **Table** - Display tabular data, view-only
 
+If you are unsure which scenario a kind supports, ask the CLI rather than
+guessing -- an unknown `--scenario` is rejected:
+
+```bash
+bun run ${CLAUDE_PLUGIN_ROOT}/src/cli.ts scenarios <kind>
+```
+
+A scenario reported as `"interactionMode": "view-only"` has no `selected`
+outcome; its `wait` ends in `cancelled` by design.
+
 ### Step 2: Gather Configuration
 
 Based on the canvas type, collect the necessary configuration:

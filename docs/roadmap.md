@@ -121,6 +121,20 @@ Known now so the foundations do not have to be redone later:
   report what the terminal can do, not just how to open a pane. That is an
   additional field on the `CanvasHost` interface.
 
+### Debt Phase 1 knowingly leaves for Phase 2
+
+**Reuse detection is not implemented.** The design's lifecycle section
+originally stated, as an invariant, that a canvas is reused when its pid is
+alive and still a child of the current terminal (referencing `wtSession`).
+That was never built: `wtSession` is written to the registry record but read
+nowhere, and `runSpawn` has no liveness check at all. Spawning twice with the
+same `--id` silently overwrites the first pane's registry record — the
+original pane's port and token are gone from the registry, so `close` can
+never reach it again, and it is orphaned for the life of the process. Final
+whole-branch review, 2026-09-08. Deferred to Phase 2; see the corrected note
+in `docs/superpowers/specs/2026-09-07-canvas-foundations-design.md`'s
+lifecycle section.
+
 ### Debt Phase 1 knowingly leaves for Phase 3
 
 **`FrameDecoder` re-concatenates its whole buffer on every chunk.** Found by

@@ -293,7 +293,8 @@ quoting. Three layers, all required:
 **Pane reuse never uses `send-keys`.** It is inherently a shell string
 (`terminal.ts:132`), so the vector stays open while it exists. It also carries a
 `setTimeout(150)` wait for the previous process to die, which is a race in
-disguise. Reuse is handled by the lifecycle protocol below instead.
+disguise. The lifecycle protocol below was intended to handle reuse instead,
+but that detection was never implemented — see its note below.
 
 **Config passes by file, not argv.** `--config-file <path>`, written under
 `dataDir`. Necessary rather than cosmetic: Windows caps a command line at
@@ -320,12 +321,18 @@ This turns three things from preferences into invariants:
    over IPC and recorded in the registry file before exiting cleanly; the exit
    code is not a channel. Exiting non-zero on Windows creates unremovable UI
    litter, so a non-zero exit is a defect, not a diagnostic.
-3. **Reuse detection is by process identity, not pane id.** The registry file
-   gains `host` and, on Windows, `wtSession`. A canvas is reusable when its pid
-   is alive **and** still a child of the current `WindowsTerminal.exe`;
-   otherwise the entry is cleared and a fresh pane is split. This replaces
-   `/tmp/claude-canvas-pane-id` (`terminal.ts:63`), which stores a tmux pane id
-   that has no Windows equivalent.
+3. **Reuse detection is NOT implemented in Phase 1.** The registry file gains
+   `host` and, on Windows, `wtSession`, and the original intent was for a
+   canvas to be reusable when its pid is alive **and** still a child of the
+   current `WindowsTerminal.exe` — otherwise the entry would be cleared and a
+   fresh pane split. That liveness/ownership check was never built:
+   `wtSession` is written to the registry but read nowhere, and `runSpawn` has
+   no liveness check at all. Spawning twice with the same `--id` silently
+   overwrites the first pane's registry record, orphaning its port/token
+   forever — `close` can never reach it again. This replaces
+   `/tmp/claude-canvas-pane-id` (`terminal.ts:63`), which stored a tmux pane id
+   that has no Windows equivalent, but does not itself reintroduce reuse.
+   Deferred to Phase 2; see `docs/roadmap.md`.
 
 tmux does have real pane handles and could close a pane directly, but it
 implements the same protocol so that one lifecycle serves both backends.
@@ -466,7 +473,7 @@ TDD throughout: tests before implementation.
 | Registry | write/read roundtrip; dead-pid cleanup; two concurrent canvases do not collide; `0600` on Unix |
 | Host | with `$TMUX` / `$WT_SESSION` mocked, assert the backend chosen **and the exact argv**; assert `-w 0` is always present for `wt` |
 | Input validation | `id`, `kind` and `scenario` reject `;`, spaces, quotes, path separators and anything outside `^[A-Za-z0-9_-]{1,64}$`, before any argv is built. **This is the injection regression test**, and `;` is its most important case — the one that defeats argv arrays on `wt` |
-| Lifecycle | every canvas exit path returns 0, error paths included; a canvas that fails to bind still writes a discoverable `lastError`; reuse detection rejects a dead pid and a pid that is no longer a child of the current terminal |
+| Lifecycle | every canvas exit path returns 0, error paths included; a canvas that fails to bind still writes a discoverable `lastError`; reuse detection is NOT implemented in Phase 1 (deferred to Phase 2 — see the lifecycle section above and `docs/roadmap.md`), so there is no test for it here |
 | Integration | in-process server, real TCP client, full `ready → update → get/value → selected → close` — no tmux, no pane. **This is the test that proves defect 1 is dead.** |
 | Render | **Snapshots** of the captured frame for all three canvases across fixture configs, via the in-repo harness described below |
 

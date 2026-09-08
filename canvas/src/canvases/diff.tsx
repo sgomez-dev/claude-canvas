@@ -38,6 +38,18 @@ export function Diff({ id, config, scenario = "review", enabled }: DiffProps): R
   }, [files]);
 
   const [cursor, setCursor] = useState(0);
+  // Mirrors `cursor` synchronously into a ref on every render (NOT inside a
+  // useEffect, which would reintroduce the same one-render lag this is
+  // fixing). useInput's handler is re-registered in a passive effect that
+  // lags one render behind a state-driven re-render, so reading the
+  // closed-over `cursor` directly in the "a"/"r" branches can observe a
+  // stale value: press "j" then "a" fast enough and the approve/reject would
+  // land on the PREVIOUS hunk, not the one just highlighted. Reading from
+  // this ref always sees the latest committed cursor regardless of which
+  // render's useInput registration is currently active.
+  const cursorRef = useRef(cursor);
+  cursorRef.current = cursor;
+
   const [decisions, setDecisions] = useState<Map<string, HunkDecision>>(new Map());
   // useInput registers its handler in a passive effect that lags one render
   // behind a state-driven re-render (Ink's own useInput hook re-subscribes
@@ -65,13 +77,13 @@ export function Diff({ id, config, scenario = "review", enabled }: DiffProps): R
     } else if (key.downArrow || input === "j") {
       setCursor((c) => Math.min(flatHunks.length - 1, c + 1));
     } else if (input === "a") {
-      const ref = flatHunks[cursor];
+      const ref = flatHunks[cursorRef.current];
       if (ref) {
         const hunk = files[ref.fileIndex]!.hunks[ref.hunkIndex]!;
         setDecisions((prev) => new Map(prev).set(hunk.id, "approved"));
       }
     } else if (input === "r") {
-      const ref = flatHunks[cursor];
+      const ref = flatHunks[cursorRef.current];
       if (ref) {
         const hunk = files[ref.fileIndex]!.hunks[ref.hunkIndex]!;
         setDecisions((prev) => new Map(prev).set(hunk.id, "rejected"));

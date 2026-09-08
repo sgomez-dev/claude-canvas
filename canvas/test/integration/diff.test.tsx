@@ -119,6 +119,65 @@ test("approving and submitting with only a single settle() tick still reports ap
   r.dispose();
 });
 
+const TWO_HUNK_TWO_FILE_DIFF = `diff --git a/a.txt b/a.txt
+--- a/a.txt
++++ b/a.txt
+@@ -1,1 +1,1 @@
+-old a
++new a
+diff --git a/b.txt b/b.txt
+--- a/b.txt
++++ b/b.txt
+@@ -1,1 +1,1 @@
+-old b
++new b
+`;
+
+// Regression test for the CRITICAL stale-closure bug: the "a"/"r" branches
+// of useInput read `cursor` (a plain closed-over value) instead of a ref.
+// useInput's handler is re-registered in a passive effect that lags one
+// render behind a state-driven re-render, so a "j" (move cursor) followed
+// by "a" (approve) with only a single settle() tick in between used to have
+// the approve land on the PREVIOUS hunk, not the one now highlighted on
+// screen. Fails against the pre-fix diff.tsx (approve lands on hunk 1
+// instead of hunk 2); passes once the "a"/"r" branches read from a ref that
+// is always current.
+test("moving the cursor then approving with only a single settle() tick approves the NEW hunk, not the old one", async () => {
+  const id = "diff-it-5";
+  ids.push(id);
+  const r = renderCanvas(
+    <Diff id={id} config={{ diffText: TWO_HUNK_TWO_FILE_DIFF }} scenario="review" enabled={true} />,
+    { columns: 80, rows: 24 }
+  );
+  await r.settle();
+  await new Promise((res) => setTimeout(res, 50));
+
+  const conn = await openConnection(id);
+
+  // Move to hunk 2, then approve it — both with only a single settle() tick
+  // each, racing useInput's passive-effect resubscription.
+  r.stdin.write("j");
+  await r.settle();
+  r.stdin.write("a");
+  await r.settle();
+  r.stdin.write("\r");
+  await r.settle();
+
+  const msg = await conn.next(2000);
+  expect(msg).toEqual({
+    type: "selected",
+    data: {
+      decisions: [
+        { hunkId: "a.txt#0", decision: "rejected" },
+        { hunkId: "b.txt#0", decision: "approved" },
+      ],
+    },
+  });
+
+  conn.close();
+  r.dispose();
+});
+
 test("escape cancels without sending a result", async () => {
   const id = "diff-it-3";
   ids.push(id);

@@ -99,19 +99,22 @@ closed, which is what these entry conditions were asking for:
   was chosen over files-plus-polling, and it had never been invocable.
 - `table` measures column width in display columns, via `Intl.Segmenter`
   and a UAX #11 subset — no dependency was needed after all.
+- The calendar meeting-picker windows its slot grid instead of overflowing
+  it, and the mouse maps clicks through that window (it would otherwise
+  book the wrong time on a paged grid).
 
-**Still open before Phase 3:**
+**All nine of the Phase 2 ledger's gaps are now closed.** The only entry
+condition left is one that was always Phase 3's own work:
 
-- **The calendar meeting-picker overflows vertically at 70x18**, overlapping
-  its own help bar. A Phase 1 layout defect, unrelated to the clock fixes
-  that touched those lines.
 - **Verify Sixel in Windows Terminal** before committing to a graphics
   protocol, as already noted below.
 
 The pane-opening path is no longer unverified: tmux 3.7c was installed on
-2026-09-08 and all four primitives were driven end to end in a real pane
-(spawn, render, keys, outcome through `wait`). 4 pass, 0 fail. Windows
-Terminal's `split-pane` remains analysis-only.
+2026-09-08 and `canvas/scripts/smoke.sh` drives all four primitives end to
+end in a real pane — spawn, render, keystrokes, live `update`, and the
+outcome read back through `wait`, including an outcome produced before the
+controller connects. 7 pass, 0 fail. Windows Terminal's `split-pane`
+remains analysis-only.
 
 ### Phase 4 — Publishing
 

@@ -144,3 +144,31 @@ bun run ${CLAUDE_PLUGIN_ROOT}/src/cli.ts wait cal-1
 `wait` prints `{"status":"selected","data":{"startTime":...,"endTime":...,"duration":...}}`
 once the user picks a slot, `{"status":"cancelled"}` if they quit, or
 `{"status":"pending"}` if it timed out (still alive — call `wait` again).
+
+## Keys (meeting-picker)
+
+`↑↓←→` move the cursor, `Enter` or `Space` picks the highlighted slot,
+`n`/`p` change week, `t` jumps to today, `Esc` or `q` cancels. Slots can
+also be clicked; `Shift`+click or `Shift`+`Enter` skips the 3-second
+confirmation countdown.
+
+A day is 32 half-hour slots from 06:00 to 22:00, which is more than fits in
+a short pane. When it does not fit, the grid shows as many slots as it can
+and pages as the cursor crosses a boundary; the footer names the visible
+range (`11:30-17:00`). Every slot stays reachable, and a click maps to the
+slot actually under the pointer rather than to the same offset from the
+start of the day.
+
+## Config errors
+
+Asking for `--scenario meeting-picker` without a non-empty `calendars`
+array is a config error, reported through `wait` as
+`{"status":"error","message":"..."}`. It used to fall through silently to
+the read-only display, leaving a calendar the user could not pick from and
+a `wait` that answered `pending` 55 seconds later.
+
+## Reading the display scenario's config
+
+`get <id> config` returns the config a `display` calendar was given. That
+scenario also had no IPC server at all until 2026-09-08, so it could not be
+listed, read or closed.

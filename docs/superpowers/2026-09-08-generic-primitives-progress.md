@@ -352,13 +352,38 @@ data contains -- are unaffected.
 one so the defect stays legible, plus a render snapshot of a table whose
 every row mixes widths.
 
-### STILL OPEN 7 -- The calendar meeting-picker's help bar overlaps its readout at 70x18
+### CLOSED 7 -- The calendar meeting-picker overflowed vertically (this commit)
 
 Both the pre- and post-fix baselines of `calendar meeting-picker renders`
-show the cyan time text overwriting the start of the grey hint line -- a
-vertical overflow artifact, unrelated to the locale and 24-hour fixes that
-touched those lines. The grid renders a fixed number of hours regardless of
-the terminal height; making it fit is the fix.
+showed the cyan cursor readout overwriting the start of the grey key hints.
+The cause was one `Math.max`: a 6:00-22:00 day at 30-minute granularity is
+32 slots, at 70x18 the vertical budget is 11 rows, and
+
+    Math.max(1, Math.floor(availableHeight / totalSlots))
+
+floors to 0 and is then forced to 1 -- so the grid rendered all 32 slots at
+one row each into an 11-row box and Ink drew them over the help bar.
+
+**Ruling 15: window the slots, the same way picker, diff and table do.** The
+grid now shows as many slots as fit and pages when the cursor crosses a
+boundary, with the footer naming the visible range. Every slot stays
+reachable by navigation, and a pane roomy enough for all 32 keeps the old
+behaviour of taller slots sharing out the spare rows. The alternative --
+shrinking the day's hour range to fit -- would silently hide times the
+caller asked for. Cost if wrong: the grid moves a window at a time instead
+of scrolling smoothly.
+
+The subtle half was the mouse. `terminalToSlot` maps a pixel row to a slot,
+so it has to add the window offset as well; without that, clicking the top
+of a paged grid books the slot at the same offset from the *start of the
+day* rather than the one under the pointer. That is the worst outcome this
+canvas has -- a silently wrong meeting time -- so it has its own test, which
+was confirmed to fail with the offset removed: it booked 06:00 instead of
+11:30.
+
+Also removed: `cumulativeHeights`, computed on every render and read
+nowhere. And the calendar skill now documents its keys, its paging, and its
+config errors, none of which it mentioned at all.
 
 ### Unresolved, not a gap: one unreproduced test failure
 

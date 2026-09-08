@@ -126,21 +126,38 @@ export function MeetingPickerView({ id, config, enabled = false }: Props) {
   const slotsPerHour = 60 / slotGranularity;
   const totalSlots = (endHour - startHour) * slotsPerHour;
 
-  // Calculate slot heights to fill vertical space
+  // Vertical budget, and the window of slots that actually fits in it.
+  //
+  // This used to render EVERY slot unconditionally at a height of
+  // `Math.max(1, floor(availableHeight / totalSlots))`. That floor is the
+  // defect: at 70x18 the budget is 11 rows while a 6:00-22:00 day at 30
+  // minutes is 32 slots, so the max(1, 0) forced 32 rows into 11 and Ink
+  // overlapped them -- the grid ran over the help bar, and the cursor
+  // readout overwrote the start of the key hints. Both the pre- and
+  // post-fix baselines of the render snapshot showed it.
+  //
+  // Now the grid shows as many slots as fit and pages when the cursor
+  // crosses a boundary, exactly as picker, diff and table do. Every slot
+  // stays reachable by navigation; none is drawn on top of another. When
+  // everything fits, the slots share out the spare rows and grow taller,
+  // which is the behaviour a roomy terminal had before.
   const headerHeight = 5;
   const footerHeight = 2;
   const availableHeight = Math.max(1, termHeight - headerHeight - footerHeight);
-  const baseSlotHeight = Math.max(1, Math.floor(availableHeight / totalSlots));
-  const extraRows = availableHeight - baseSlotHeight * totalSlots;
-  const slotHeights = Array.from({ length: totalSlots }, (_, i) =>
+  const visibleSlotCount = Math.max(1, Math.min(totalSlots, availableHeight));
+  const windowStart =
+    totalSlots <= visibleSlotCount
+      ? 0
+      : Math.min(
+          Math.floor(cursorSlot / visibleSlotCount) * visibleSlotCount,
+          totalSlots - visibleSlotCount
+        );
+  const baseSlotHeight = Math.max(1, Math.floor(availableHeight / visibleSlotCount));
+  const extraRows = availableHeight - baseSlotHeight * visibleSlotCount;
+  // Indexed by VISIBLE position, not absolute slot index.
+  const slotHeights = Array.from({ length: visibleSlotCount }, (_, i) =>
     baseSlotHeight + (i < extraRows ? 1 : 0)
   );
-
-  // Calculate cumulative heights for grid positioning
-  const cumulativeHeights = slotHeights.reduce((acc, h, i) => {
-    acc.push((acc[i - 1] || 0) + h);
-    return acc;
-  }, [] as number[]);
 
   const weekDays = getWeekDays(currentDate);
   const today = new Date();
@@ -205,22 +222,25 @@ export function MeetingPickerView({ id, config, enabled = false }: Props) {
       const dayIndex = Math.floor(relX / columnWidth);
       if (dayIndex >= 7) return null;
 
-      // Find slot from cumulative heights
-      let slotIndex = 0;
+      // Find the visible slot from cumulative heights, then map it back to
+      // an absolute slot index: only the window is on screen, so a click at
+      // the top of the grid is windowStart, not slot 0.
+      let visibleIndex = 0;
       let cumHeight = 0;
-      for (let i = 0; i < totalSlots; i++) {
-        // slotHeights has exactly totalSlots elements (built via
-        // Array.from({ length: totalSlots }, ...) above), and i ranges over
-        // [0, totalSlots) by the loop condition, so index i always exists.
+      for (let i = 0; i < visibleSlotCount; i++) {
+        // slotHeights has exactly visibleSlotCount elements (built via
+        // Array.from({ length: visibleSlotCount }, ...) above), and i ranges
+        // over [0, visibleSlotCount), so index i always exists.
         cumHeight += slotHeights[i]!;
         if (relY < cumHeight) {
-          slotIndex = i;
+          visibleIndex = i;
           break;
         }
-        if (i === totalSlots - 1) {
-          slotIndex = i;
+        if (i === visibleSlotCount - 1) {
+          visibleIndex = i;
         }
       }
+      const slotIndex = windowStart + visibleIndex;
 
       if (slotIndex >= totalSlots) return null;
 
@@ -240,7 +260,18 @@ export function MeetingPickerView({ id, config, enabled = false }: Props) {
 
       return { dayIndex, slotIndex, day, startTime, endTime };
     },
-    [weekDays, columnWidth, slotHeights, totalSlots, slotGranularity, startHour, timeColumnWidth, headerHeight]
+    [
+      weekDays,
+      columnWidth,
+      slotHeights,
+      visibleSlotCount,
+      windowStart,
+      totalSlots,
+      slotGranularity,
+      startHour,
+      timeColumnWidth,
+      headerHeight,
+    ]
   );
 
   // Check if a slot is free (no one is busy)
@@ -405,13 +436,22 @@ export function MeetingPickerView({ id, config, enabled = false }: Props) {
   });
 
   // Render time column
+  // Absolute slot index to its wall-clock time, for the window label.
+  const slotTime = (slotIndex: number): Date => {
+    const d = new Date(weekDays[0]!);
+    const minutes = slotIndex * slotGranularity;
+    d.setHours(startHour + Math.floor(minutes / 60), minutes % 60, 0, 0);
+    return d;
+  };
+
   const renderTimeColumn = () => {
     const slots: React.JSX.Element[] = [];
-    for (let slotIndex = 0; slotIndex < totalSlots; slotIndex++) {
-      // slotHeights has exactly totalSlots elements (see definition above),
-      // and slotIndex ranges over [0, totalSlots) by the loop condition, so
-      // index slotIndex always exists.
-      const height = slotHeights[slotIndex]!;
+    for (let visibleIndex = 0; visibleIndex < visibleSlotCount; visibleIndex++) {
+      const slotIndex = windowStart + visibleIndex;
+      // slotHeights has exactly visibleSlotCount elements (see definition
+      // above), and visibleIndex ranges over [0, visibleSlotCount), so the
+      // index always exists.
+      const height = slotHeights[visibleIndex]!;
       const slotMinutes = slotIndex * slotGranularity;
       const hour = startHour + Math.floor(slotMinutes / 60);
       const minute = slotMinutes % 60;
@@ -441,11 +481,12 @@ export function MeetingPickerView({ id, config, enabled = false }: Props) {
     const day = weekDays[dayIndex];
     const slots: React.JSX.Element[] = [];
 
-    for (let slotIndex = 0; slotIndex < totalSlots; slotIndex++) {
-      // slotHeights has exactly totalSlots elements (see definition above),
-      // and slotIndex ranges over [0, totalSlots) by the loop condition, so
-      // index slotIndex always exists.
-      const height = slotHeights[slotIndex]!;
+    for (let visibleIndex = 0; visibleIndex < visibleSlotCount; visibleIndex++) {
+      const slotIndex = windowStart + visibleIndex;
+      // slotHeights has exactly visibleSlotCount elements (see definition
+      // above), and visibleIndex ranges over [0, visibleSlotCount), so the
+      // index always exists.
+      const height = slotHeights[visibleIndex]!;
       const key = `${dayIndex}-${slotIndex}`;
       const busyColors = busyMap.get(key) || [];
       const isBusy = busyColors.length > 0;
@@ -603,7 +644,19 @@ export function MeetingPickerView({ id, config, enabled = false }: Props) {
           <Text color="gray">Esc to cancel</Text>
         ) : (
           <>
-            <Text color="gray">{"↑↓←→ move • Space/Enter select • n/p week • t today • q cancel"}</Text>
+            {/* Sized to fit 70 columns with the window label prefixed: the
+                previous wording plus the label overflowed and the hint was
+                clipped mid-word at the right edge. Only the visible range
+                is shown, not "X of Y" -- the full day is implied by being
+                able to scroll to it. */}
+            <Text color="gray">
+              {totalSlots > visibleSlotCount
+                ? `${formatTime(slotTime(windowStart))}-${formatTime(
+                    slotTime(windowStart + visibleSlotCount)
+                  )}  `
+                : ""}
+              {"↑↓←→ move • Enter pick • n/p week • t today • q quit"}
+            </Text>
             {(() => {
               const cursorInfo = getCursorSlotInfo();
               if (cursorInfo) {

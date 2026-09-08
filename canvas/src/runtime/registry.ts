@@ -58,7 +58,16 @@ export async function listRecords(): Promise<CanvasRecord[]> {
   const out: CanvasRecord[] = [];
   for (const name of names) {
     if (!name.endsWith(".json")) continue;
-    const r = await readRecord(name.slice(0, -5));
+    // readRecord calls assertIdent internally, which throws on a basename
+    // that isn't a valid identifier. A stray/malformed filename in the
+    // canvases dir must not take down `list` for every other canvas — skip
+    // it rather than let the throw escape.
+    let r: CanvasRecord | null;
+    try {
+      r = await readRecord(name.slice(0, -5));
+    } catch {
+      continue;
+    }
     if (r && !r.lastError) out.push(r);
   }
   return out;

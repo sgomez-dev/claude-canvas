@@ -43,7 +43,16 @@ export async function openConnection(id: string): Promise<Connection> {
     port: record.port,
     socket: {
       data(_s, data) {
-        for (const raw of decoder.push(new Uint8Array(data))) settle(raw as CanvasMessage);
+        // Mirrors server.ts's equivalent handler: decoder.push can throw on
+        // a malformed/oversized frame, and an uncaught throw here would
+        // escape a runtime-invoked socket callback as an unhandled
+        // rejection/crash. Treat a decode failure the same as the
+        // connection dying, via the same die() path close/error already use.
+        try {
+          for (const raw of decoder.push(new Uint8Array(data))) settle(raw as CanvasMessage);
+        } catch {
+          die();
+        }
       },
       close: die,
       error: die,

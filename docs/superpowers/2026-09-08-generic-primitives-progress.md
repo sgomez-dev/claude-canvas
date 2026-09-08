@@ -390,18 +390,39 @@ repository and self-checking.
 
 ---
 
-### Unresolved, not a gap: one unreproduced test failure
+### Flaky test, found and fixed: `a large config survives the update path`
 
-A single full-suite run reported `1 fail` without naming the test, between
-the gap-2 code and its documentation. 85 subsequent full-suite runs were
-clean (15 + 30 immediately after, plus 25 runtime-only and the 15 before).
-Recorded rather than dismissed: cross-file interference through the real
-user data directory is plausible in principle, since several test files
-write registry records concurrently, though `cli.test.ts`'s `list` test uses
-`toContain` rather than an exact match and the new outcome tests scope
-themselves to their own ids. If it recurs, capture the full output -- the
-runs above were re-run with output saved for exactly that reason and it did
-not reappear.
+CI went red on ubuntu-latest for **27f8af2, a docs-only commit** -- which is
+the tell that a test, not the code, was at fault.
+
+The test pushed a ~600 KB config through `pushUpdate` and asserted on the
+next frame after a single `r.settle()`. `pushUpdate` resolves when the bytes
+reach the socket; the canvas still has to receive them, reassemble them
+through `FrameDecoder` and re-render, which takes many event-loop turns at
+that size, while `settle()` waits exactly one macrotask. So the assertion
+held whenever the machine was idle and failed whenever it was not -- 30+
+clean local runs, then red on a loaded runner.
+
+The same shape as the timer-based races removed from the Phase 1 tests in
+dc70a08, and the same mistake: asserting on a deadline instead of on a
+condition.
+
+**Ruling 17: assert on a condition, never on a fixed number of turns.**
+A `settleUntil(r, predicate, timeoutMs)` helper re-renders until the frame
+satisfies the predicate. All four `update` tests use it, not only the one
+that failed -- the three small configs were equally racy in principle and
+merely small enough to usually win. Verified 20 consecutive runs of that
+file and 10 of the full suite, all clean. Cost if wrong: a genuinely broken
+update now fails by timeout rather than immediately, which is slower to
+diagnose but never wrong.
+
+### Unresolved: one earlier unreproduced failure
+
+Separate from the above, and still open. A single full-suite run reported
+`1 fail` without naming the test, during the gap-2 work -- before
+`update.test.tsx` existed, so it was not this one. 85 full-suite runs
+immediately afterwards were clean, plus 10 more since. Recorded rather than
+dismissed; if it recurs, capture the full output.
 
 ---
 

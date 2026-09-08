@@ -9,17 +9,6 @@ export interface CalendarEvent {
   allDay?: boolean;
 }
 
-export interface TimeSlot {
-  day: Date;
-  hour: number;
-  minute: number; // 0 or 30 for half-hour slots
-}
-
-export interface TimeRange {
-  startTime: Date;
-  endTime: Date;
-}
-
 // Color palette with contrasting text colors
 export const INK_COLORS = ["yellow", "green", "blue", "magenta", "red", "cyan"];
 
@@ -93,17 +82,4 @@ export function isAllDayEvent(event: CalendarEvent): boolean {
     end.getMinutes() === 0 &&
     end.getTime() - start.getTime() >= 24 * 60 * 60 * 1000
   );
-}
-
-export function timeToDecimal(date: Date): number {
-  return date.getHours() + date.getMinutes() / 60;
-}
-
-export function slotToTime(day: Date, slotIndex: number, granularity: number): Date {
-  const result = new Date(day);
-  const totalMinutes = slotIndex * granularity;
-  const hours = Math.floor(totalMinutes / 60);
-  const minutes = totalMinutes % 60;
-  result.setHours(hours, minutes, 0, 0);
-  return result;
 }

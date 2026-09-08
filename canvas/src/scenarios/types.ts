@@ -16,8 +16,15 @@ export interface ScenarioDefinition<
   defaultConfig: Partial<TConfig>;
 }
 
-// Calendar-specific event type
-export interface CalendarEvent {
+// A calendar event as it arrives in a --config payload: times are ISO
+// strings, because that is what survives JSON.
+//
+// Deliberately NOT called `CalendarEvent`. There is a runtime
+// `CalendarEvent` in canvases/calendar/types.ts whose startTime/endTime are
+// `Date`, and having both shapes share one name across the codebase meant
+// two different types were indistinguishable at a glance and interchangeable
+// to no one. This is the wire shape; that is the parsed shape.
+export interface CalendarEventInput {
   id: string;
   title: string;
   startTime: string; // ISO datetime
@@ -30,13 +37,13 @@ export interface CalendarEvent {
 export interface NamedCalendar {
   name: string;
   color: string;
-  events: CalendarEvent[];
+  events: CalendarEventInput[];
 }
 
 // Base calendar config (used by display scenario)
 export interface BaseCalendarConfig {
   title?: string;
-  events?: CalendarEvent[];
+  events?: CalendarEventInput[];
   startHour?: number;
   endHour?: number;
 }
@@ -59,39 +66,15 @@ export interface MeetingPickerResult {
 // Union type for all calendar configs
 export type CalendarScenarioConfig = BaseCalendarConfig | MeetingPickerConfig;
 
-// Type guard for meeting picker config
+// Type guard for meeting picker config.
+//
+// No caller yet, deliberately kept: calendar.tsx currently decides whether
+// it has a meeting-picker config with an inline `config?.calendars` truth
+// test that silently falls through to the read-only view when the config is
+// wrong. This is the guard that check should be, and wiring it is part of
+// closing the scenario-validation gap.
 export function isMeetingPickerConfig(
   config: CalendarScenarioConfig
 ): config is MeetingPickerConfig {
   return "calendars" in config && Array.isArray(config.calendars);
-}
-
-// ============================================
-// Document Canvas Types
-// ============================================
-
-// Document diff marker for highlighting changes
-export interface DocumentDiff {
-  startOffset: number;       // Character offset in content
-  endOffset: number;         // End character offset
-  type: "add" | "delete";    // Type of change
-}
-
-// Document canvas configuration (from Claude)
-export interface DocumentConfig {
-  content: string;           // Markdown content
-  title?: string;            // Optional document title
-  diffs?: DocumentDiff[];    // Optional diff markers for highlighting
-  readOnly?: boolean;        // Disable selection (default false)
-}
-
-// Document selection result (sent to Claude via IPC)
-export interface DocumentSelection {
-  selectedText: string;      // The selected text content
-  startOffset: number;       // Start character offset in content
-  endOffset: number;         // End character offset
-  startLine: number;         // Line number (1-based)
-  endLine: number;           // End line number
-  startColumn: number;       // Column in start line
-  endColumn: number;         // Column in end line
 }

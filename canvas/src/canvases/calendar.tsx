@@ -2,15 +2,11 @@ import React, { useState, useEffect } from "react";
 import { Box, Text, useInput, useApp, useStdout } from "ink";
 import { MeetingPickerView } from "./calendar/scenarios/meeting-picker-view";
 import type { MeetingPickerConfig } from "../scenarios/types";
-
-export interface CalendarEvent {
-  id: string;
-  title: string;
-  startTime: Date;
-  endTime: Date;
-  color?: string;
-  allDay?: boolean;
-}
+// Re-exported because this module's public surface has always included it;
+// the definition now lives in one place instead of being copied here
+// byte-for-byte.
+export type { CalendarEvent } from "./calendar/types";
+import type { CalendarEvent } from "./calendar/types";
 
 export interface CalendarConfig {
   title?: string;

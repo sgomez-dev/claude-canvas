@@ -7,7 +7,7 @@ description: |
 
 # Document Canvas
 
-Display markdown documents with optional text selection and diff highlighting.
+Display markdown documents with optional text selection.
 
 ## Example Prompts
 
@@ -45,9 +45,6 @@ Interactive document view with text selection. User can click and drag to select
 bun run src/cli.ts spawn document --scenario edit --config '{
   "content": "# My Blog Post\n\nThis is the **introduction** to my post.\n\n## Section One\n\n- Point one\n- Point two",
   "title": "Blog Post Draft",
-  "diffs": [
-    {"startOffset": 50, "endOffset": 62, "type": "add"}
-  ]
 }'
 ```
 
@@ -69,7 +66,6 @@ bun run src/cli.ts show document --scenario email-preview --config-file cfg.json
 interface DocumentConfig {
   content: string;        // Markdown content
   title?: string;         // Document title (shown in header)
-  diffs?: DocumentDiff[]; // Optional diff markers for highlighting
   readOnly?: boolean;     // Disable selection (default: false for edit)
 }
 
@@ -122,7 +118,6 @@ bun run ${CLAUDE_PLUGIN_ROOT}/src/cli.ts spawn document --scenario edit \
   --id doc-1 --config '{
     "content": "# My Document\n\nSelect some **text** here.",
     "title": "Edit Mode",
-    "diffs": [{ "startOffset": 20, "endOffset": 30, "type": "add" }]
   }'
 
 # Read the current selection on demand — this is pull-only, not push-based.
@@ -141,3 +136,13 @@ is no push notification for it.
 `wait doc-1` still returns `{"status":"cancelled"}` if the user quits (`q`/`Esc`),
 or `{"status":"pending"}` if it timed out (still alive — call `wait` again); it
 never returns `{"status":"selected",...}` for the document canvas.
+
+## Reviewing a code change
+
+This canvas does **not** highlight diffs. It used to advertise a `diffs`
+config field, but the only renderer that applied it was deleted as dead
+code -- `document` never actually highlighted anything.
+
+Use the `diff` canvas instead: it parses real unified diff output, walks it
+hunk by hunk, and returns a per-hunk approve/reject decision. See the `diff`
+skill.

@@ -173,9 +173,14 @@ primitive earns its keep cannot cause that. Each file therefore leads with
 
 ## Known gaps
 
-Nine were recorded when this ledger was first written. Six are closed; the
-status of each is below, newest work first. **A reader picking this up
-should start with the three still open.**
+Nine were recorded when this ledger was first written. **All nine are now
+closed**, each with the commit that closed it. They are listed in gap order;
+the rulings are numbered in the order they were made, so they run out of
+sequence here.
+
+Anyone picking this up should read the roadmap's "Phase 3 — entry
+conditions" next: the only item left there is verifying Sixel in Windows
+Terminal, which was always Phase 3's own work.
 
 ### CLOSED 1 -- Outcomes are not buffered (commit 3d7dab5)
 
@@ -214,7 +219,7 @@ Contract change for anyone writing a controller: **the first frame received
 is not necessarily the outcome.** `ready` arrives first. `waitForOutcome`
 skips non-outcome frames; tests use the new `nextOutcome` helper.
 
-### CLOSED 2 -- The scenario registry had no runtime consumer (this commit)
+### CLOSED 2 -- The scenario registry had no runtime consumer (commit bb182e2)
 
 `getScenario` was called only from its own test, `registerScenario` and
 `listScenarios` from nowhere, and `interactionMode` / `closeOn` /
@@ -273,22 +278,7 @@ files; `CalendarEvent` existed three times, two byte-identical and a third
 with ISO **string** fields that was genuinely a different type sharing a
 name, now `CalendarEventInput`. Net 885 deletions.
 
-### CLOSED 8 -- FrameDecoder was O(n^2) (commit 8f42921)
-
-Phase 1's documented Phase 3 deferral. Now holds a chunk list and joins one
-frame's bytes on completion. Measured old versus new: 4 MB in 16 KB chunks
-41 ms -> 7 ms; 13 MB in 16 KB chunks 304 ms -> 22 ms. Across a 3.25x
-increase in payload the old path grew 7.4x and the new one 3.1x -- quadratic
-against linear.
-
-### CLOSED 9 -- tmux never executed (commit b9b3ae8)
-
-See the smoke test section below. Now `canvas/scripts/smoke.sh`, in the
-repository and self-checking.
-
----
-
-### CLOSED 5 -- The `update` message was unreachable (this commit)
+### CLOSED 5 -- The `update` message was unreachable (commit 06c7863)
 
 `protocol.ts` defined it, `use-canvas-server.ts` exposed `onUpdate` and
 `document.tsx` implemented it -- but there was no CLI verb, and none of the
@@ -320,7 +310,7 @@ would be silently truncated, which is the same class of bug as 158e74a.
 Covered by a test that pushes 3000 rows. Cost if wrong: an update takes as
 long as the socket needs, which is the correct cost.
 
-### CLOSED 6 -- `table` measured column width in UTF-16 code units (this commit)
+### CLOSED 6 -- `table` measured column width in UTF-16 code units (commit e08d447)
 
 `String.length` was the wrong unit three ways: a CJK ideograph is one code
 unit and two columns, an astral emoji two units and two columns, and a ZWJ
@@ -352,7 +342,7 @@ data contains -- are unaffected.
 one so the defect stays legible, plus a render snapshot of a table whose
 every row mixes widths.
 
-### CLOSED 7 -- The calendar meeting-picker overflowed vertically (this commit)
+### CLOSED 7 -- The calendar meeting-picker overflowed vertically (commit de5080b)
 
 Both the pre- and post-fix baselines of `calendar meeting-picker renders`
 showed the cyan cursor readout overwriting the start of the grey key hints.
@@ -384,6 +374,21 @@ was confirmed to fail with the offset removed: it booked 06:00 instead of
 Also removed: `cumulativeHeights`, computed on every render and read
 nowhere. And the calendar skill now documents its keys, its paging, and its
 config errors, none of which it mentioned at all.
+
+### CLOSED 8 -- FrameDecoder was O(n^2) (commit 8f42921)
+
+Phase 1's documented Phase 3 deferral. Now holds a chunk list and joins one
+frame's bytes on completion. Measured old versus new: 4 MB in 16 KB chunks
+41 ms -> 7 ms; 13 MB in 16 KB chunks 304 ms -> 22 ms. Across a 3.25x
+increase in payload the old path grew 7.4x and the new one 3.1x -- quadratic
+against linear.
+
+### CLOSED 9 -- tmux never executed (commit b9b3ae8)
+
+See the smoke test section below. Now `canvas/scripts/smoke.sh`, in the
+repository and self-checking.
+
+---
 
 ### Unresolved, not a gap: one unreproduced test failure
 

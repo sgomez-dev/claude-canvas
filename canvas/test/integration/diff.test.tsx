@@ -81,6 +81,44 @@ test("submitting without deciding a hunk reports it as rejected", async () => {
   r.dispose();
 });
 
+// Regression test for a stale-closure race: useInput's handler is
+// re-registered in a passive effect that lags one render behind a
+// state-driven re-render. Submitting right after a single settle() tick
+// following the approve keystroke — with NO extra tick, unlike the test
+// above — used to read `decisions` from the pre-approval closure and report
+// "rejected" even though the user approved. Fails against the pre-fix
+// `diff.tsx` (which read the closed-over `decisions` directly) and passes
+// once the submit branch reads from a ref that's always current.
+test("approving and submitting with only a single settle() tick still reports approved", async () => {
+  const id = "diff-it-4";
+  ids.push(id);
+  const r = renderCanvas(
+    <Diff id={id} config={{ diffText: ONE_HUNK_DIFF }} scenario="review" enabled={true} />,
+    { columns: 80, rows: 24 }
+  );
+  await r.settle();
+  await new Promise((res) => setTimeout(res, 50));
+
+  const conn = await openConnection(id);
+
+  // Simulate a fast, programmatic caller: approve, then submit after only
+  // one settle() tick — no second tick to let useInput's resubscription
+  // catch up.
+  r.stdin.write("a");
+  await r.settle();
+  r.stdin.write("\r");
+  await r.settle();
+
+  const msg = await conn.next(2000);
+  expect(msg).toEqual({
+    type: "selected",
+    data: { decisions: [{ hunkId: "a.txt#0", decision: "approved" }] },
+  });
+
+  conn.close();
+  r.dispose();
+});
+
 test("escape cancels without sending a result", async () => {
   const id = "diff-it-3";
   ids.push(id);

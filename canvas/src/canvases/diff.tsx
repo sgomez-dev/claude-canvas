@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from "react";
+import React, { useMemo, useRef, useState } from "react";
 import { Box, Text, useInput, useApp } from "ink";
 import { useCanvasServer } from "../runtime/use-canvas-server";
 import { parseUnifiedDiff, DiffParseError } from "./diff/parser";
@@ -39,6 +39,16 @@ export function Diff({ id, config, scenario = "review", enabled }: DiffProps): R
 
   const [cursor, setCursor] = useState(0);
   const [decisions, setDecisions] = useState<Map<string, HunkDecision>>(new Map());
+  // useInput registers its handler in a passive effect that lags one render
+  // behind a state-driven re-render (Ink's own useInput hook re-subscribes
+  // on the next commit's effect flush, not synchronously). A submit
+  // keystroke arriving before that resubscription catches up would read
+  // `decisions` from a stale, pre-update closure. Mirror the latest value
+  // into a ref, updated synchronously on every render (not via an effect),
+  // so the submit branch below always reads the current map regardless of
+  // which render's useInput registration is currently active.
+  const decisionsRef = useRef(decisions);
+  decisionsRef.current = decisions;
 
   const ipc = useCanvasServer({
     id,
@@ -70,7 +80,7 @@ export function Diff({ id, config, scenario = "review", enabled }: DiffProps): R
       const result: DiffReviewResult = {
         decisions: flatHunks.map((ref) => {
           const hunk = files[ref.fileIndex]!.hunks[ref.hunkIndex]!;
-          return { hunkId: hunk.id, decision: decisions.get(hunk.id) ?? "rejected" };
+          return { hunkId: hunk.id, decision: decisionsRef.current.get(hunk.id) ?? "rejected" };
         }),
       };
       ipc.sendSelected(result);

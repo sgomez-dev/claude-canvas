@@ -21,12 +21,35 @@ function splitIntoFileBlocks(text: string): string[] {
   const lines = trimmed.split("\n");
   const blocks: string[][] = [];
   let current: string[] = [];
-  for (const line of lines) {
-    if (FILE_HEADER_RE.test(line) || (OLD_PATH_RE.test(line) && current.length === 0)) {
+  // Tracks whether the block currently being accumulated has already
+  // consumed its own `--- `/`+++ ` header pair. A well-formed file block
+  // (git-style or plain `diff -u` style) contains exactly one such pair,
+  // immediately before its hunks. So a `--- `/`+++ ` pair seen again after
+  // one has already been consumed for the current block cannot be a
+  // continuation of that block -- it must belong to the next file -- while
+  // the FIRST such pair for a block (whether it's a plain diff's very first
+  // file, or the expected `--- `/`+++ ` line pair that follows a `diff
+  // --git` header) is not itself a new block start.
+  let seenHeaderInCurrent = false;
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i]!;
+    const isGitHeader = FILE_HEADER_RE.test(line);
+    // A `--- `/`+++ ` pair is only ever a file header, never accidental
+    // diff-body content (diff body lines never start with those exact
+    // prefixes in that combination). Previously this only recognized a new
+    // block starting at a bare `--- a/...` line for the VERY FIRST file
+    // (guarded by `current.length === 0`) -- a second plain-format file's
+    // `--- a/y` line was swallowed into the first file's block as ordinary
+    // content, misattributing its hunks under the first file's path.
+    const isHeaderPair = OLD_PATH_RE.test(line) && NEW_PATH_RE.test(lines[i + 1] ?? "");
+    const startsNewBlock = isGitHeader || (isHeaderPair && seenHeaderInCurrent);
+    if (startsNewBlock) {
       if (current.length > 0) blocks.push(current);
       current = [line];
+      seenHeaderInCurrent = false;
     } else {
       current.push(line);
+      if (isHeaderPair) seenHeaderInCurrent = true;
     }
   }
   if (current.length > 0) blocks.push(current);
@@ -85,23 +108,29 @@ function parseFileBlock(block: string): DiffFile {
     }
   }
 
+  // A file that is both renamed AND modified (git's rename detection is on
+  // by default and commonly produces exactly this shape: `rename from`/
+  // `rename to` lines followed by `---`/`+++`/`@@` hunks) must NOT return
+  // here -- it needs to fall through to the same binary-detection and
+  // hunk-parsing logic every other file block goes through, so its hunks
+  // (if any exist in the block) get parsed instead of silently discarded. A
+  // pure rename with no hunks still correctly ends up with `hunks: []`
+  // below, since `bodyStart` stays -1 when no `--- `/`+++ ` pair is present.
+  let finalOldPath: string;
+  let finalNewPath: string;
+  let status: DiffFile["status"];
   if (renameFrom && renameTo) {
-    return {
-      oldPath: renameFrom,
-      newPath: renameTo,
-      status: "renamed",
-      binary: false,
-      hunks: [],
-    };
+    finalOldPath = renameFrom;
+    finalNewPath = renameTo;
+    status = "renamed";
+  } else {
+    if (!oldPath && !newPath) {
+      throw new DiffParseError(`Could not determine file path in block:\n${block.slice(0, 200)}`);
+    }
+    finalOldPath = oldPath ?? newPath!;
+    finalNewPath = newPath ?? oldPath!;
+    status = oldIsDevNull ? "added" : newIsDevNull ? "deleted" : "modified";
   }
-
-  if (!oldPath && !newPath) {
-    throw new DiffParseError(`Could not determine file path in block:\n${block.slice(0, 200)}`);
-  }
-
-  const finalOldPath = oldPath ?? newPath!;
-  const finalNewPath = newPath ?? oldPath!;
-  const status: DiffFile["status"] = oldIsDevNull ? "added" : newIsDevNull ? "deleted" : "modified";
 
   if (binary) {
     return { oldPath: finalOldPath, newPath: finalNewPath, status, binary: true, hunks: [] };

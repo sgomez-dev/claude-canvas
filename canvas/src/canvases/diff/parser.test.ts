@@ -56,6 +56,43 @@ rename from old-name.txt
 rename to new-name.txt
 `;
 
+// A file renamed AND modified: git's rename detection is on by default and
+// commonly produces exactly this shape -- `rename from`/`rename to` lines
+// followed by a normal `---`/`+++`/`@@` hunk.
+const RENAMED_AND_MODIFIED_FILE = `diff --git a/old-name.txt b/new-name.txt
+similarity index 80%
+rename from old-name.txt
+rename to new-name.txt
+--- a/old-name.txt
++++ b/new-name.txt
+@@ -1,3 +1,3 @@
+ line one
+-line two
++line TWO changed
+ line three
+`;
+
+// Real `diff -u a/x.txt b/x.txt > out.diff; diff -u a/y.txt b/y.txt >>
+// out.diff`-style output for two files back to back, no `diff --git`
+// header -- captured from an actual GNU diffutils 3.12 run (timestamps
+// stripped from the `---`/`+++` lines, which this parser doesn't consume
+// anyway; every other byte, including the single-space context-line
+// prefix, is exactly what `diff -u` produced).
+const PLAIN_TWO_FILE_DIFF = `--- a/x.txt
++++ b/x.txt
+@@ -1,3 +1,3 @@
+ line one
+-line two
++line TWO changed
+ line three
+--- a/y.txt
++++ b/y.txt
+@@ -1,2 +1,2 @@
+ alpha
+-beta
++BETA changed
+`;
+
 const BINARY_FILE = `diff --git a/image.png b/image.png
 index 1234567..89abcde 100644
 Binary files a/image.png and b/image.png differ
@@ -124,6 +161,62 @@ describe("parseUnifiedDiff", () => {
     expect(files[0]!.oldPath).toBe("old-name.txt");
     expect(files[0]!.newPath).toBe("new-name.txt");
     expect(files[0]!.hunks).toHaveLength(0);
+  });
+
+  // Regression: the renameFrom/renameTo branch used to return before any
+  // hunk parsing, silently discarding a renamed-and-modified file's hunks.
+  test("a file that is both renamed and modified keeps its hunks", () => {
+    const files = parseUnifiedDiff(RENAMED_AND_MODIFIED_FILE);
+    expect(files).toHaveLength(1);
+    const file = files[0]!;
+    expect(file.status).toBe("renamed");
+    expect(file.oldPath).toBe("old-name.txt");
+    expect(file.newPath).toBe("new-name.txt");
+    expect(file.hunks).toHaveLength(1);
+    const hunk = file.hunks[0]!;
+    expect(hunk.id).toBe("new-name.txt#0");
+    expect(hunk.lines).toEqual([
+      { type: "context", content: "line one", oldLineNo: 1, newLineNo: 1 },
+      { type: "remove", content: "line two", oldLineNo: 2 },
+      { type: "add", content: "line TWO changed", newLineNo: 2 },
+      { type: "context", content: "line three", oldLineNo: 3, newLineNo: 3 },
+    ]);
+  });
+
+  // Regression: splitIntoFileBlocks's block-start condition only recognized
+  // a bare `--- a/...` line as a new block for the VERY FIRST file (guarded
+  // by `current.length === 0`) -- a second plain-format (`diff -u`, no
+  // `diff --git` header) file's `--- a/y` line was swallowed into the first
+  // file's block as ordinary content. Fixture captured from a real
+  // `diff -u` run (see PLAIN_TWO_FILE_DIFF above).
+  test("splits a plain diff -u (no `diff --git` header) multi-file diff into separate files", () => {
+    const files = parseUnifiedDiff(PLAIN_TWO_FILE_DIFF);
+    expect(files).toHaveLength(2);
+
+    const x = files[0]!;
+    expect(x.oldPath).toBe("x.txt");
+    expect(x.newPath).toBe("x.txt");
+    expect(x.status).toBe("modified");
+    expect(x.hunks).toHaveLength(1);
+    expect(x.hunks[0]!.id).toBe("x.txt#0");
+    expect(x.hunks[0]!.lines).toEqual([
+      { type: "context", content: "line one", oldLineNo: 1, newLineNo: 1 },
+      { type: "remove", content: "line two", oldLineNo: 2 },
+      { type: "add", content: "line TWO changed", newLineNo: 2 },
+      { type: "context", content: "line three", oldLineNo: 3, newLineNo: 3 },
+    ]);
+
+    const y = files[1]!;
+    expect(y.oldPath).toBe("y.txt");
+    expect(y.newPath).toBe("y.txt");
+    expect(y.status).toBe("modified");
+    expect(y.hunks).toHaveLength(1);
+    expect(y.hunks[0]!.id).toBe("y.txt#0");
+    expect(y.hunks[0]!.lines).toEqual([
+      { type: "context", content: "alpha", oldLineNo: 1, newLineNo: 1 },
+      { type: "remove", content: "beta", oldLineNo: 2 },
+      { type: "add", content: "BETA changed", newLineNo: 2 },
+    ]);
   });
 
   test("marks a binary file as binary with no hunks, without throwing", () => {

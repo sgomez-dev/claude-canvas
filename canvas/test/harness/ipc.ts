@@ -25,3 +25,29 @@ export async function nextOutcome(
     if (msg.type === "selected" || msg.type === "cancelled" || msg.type === "error") return msg;
   }
 }
+
+/**
+ * Re-renders until `predicate` holds on the latest frame, or the deadline
+ * passes, and returns that frame.
+ *
+ * A single `settle()` waits one macrotask, which is enough for a state
+ * change already committed in-process and NOT enough for anything that has
+ * to cross a socket first. `pushUpdate` resolves once the bytes are handed
+ * to the socket; the canvas still has to receive them, decode them and
+ * re-render. A 600 KB config needs many event-loop turns to do that, and
+ * asserting after one macrotask passes only when the machine is idle --
+ * which is why `a large config survives the update path` passed locally 30+
+ * times and failed on ubuntu-latest in CI run for 27f8af2.
+ */
+export async function settleUntil(
+  r: { settle(): Promise<string> },
+  predicate: (frame: string) => boolean,
+  timeoutMs = 5000
+): Promise<string> {
+  const deadline = Date.now() + timeoutMs;
+  let frame = await r.settle();
+  while (!predicate(frame) && Date.now() < deadline) {
+    frame = await r.settle();
+  }
+  return frame;
+}

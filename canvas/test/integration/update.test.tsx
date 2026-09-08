@@ -6,7 +6,7 @@ import { Diff } from "../../src/canvases/diff";
 import { renderCanvas } from "../harness/render";
 import { awaitRecord, deleteRecord } from "../../src/runtime/registry";
 import { openConnection, pushUpdate } from "../../src/runtime/client";
-import { nextOutcome } from "../harness/ipc";
+import { nextOutcome, settleUntil } from "../harness/ipc";
 
 const ids: string[] = [];
 afterEach(async () => {
@@ -48,7 +48,9 @@ test("a pushed config replaces a picker's options and resets the cursor", async 
     mode: "single",
     options: [{ id: "x", label: "Gamma" }, { id: "y", label: "Delta" }],
   });
-  const frame = await r.settle();
+  // Polls rather than asserting after one macrotask: pushUpdate resolves
+  // when the bytes reach the socket, not when the canvas has re-rendered.
+  const frame = await settleUntil(r, (f) => f.includes("Gamma"));
   expect(frame).toContain("Gamma");
   expect(frame).not.toContain("Alpha");
   // Cursor is back on the first option of the new list, not still on index 1.
@@ -85,7 +87,7 @@ test("a pushed config refreshes a table's rows and resets the scroll", async () 
     columns: [{ key: "n", label: "N", width: 6 }],
     rows: [{ n: "only" }],
   });
-  const frame = await r.settle();
+  const frame = await settleUntil(r, (f) => f.includes("only"));
   expect(frame).toContain("only");
   // One row now, so no range counter, and the body is back at the top.
   expect(frame).not.toContain("of 30");
@@ -119,7 +121,7 @@ test("a pushed diff drops decisions made against the previous one", async () => 
 
   // Same path, same hunk index, so the same hunk id -- the collision case.
   await pushUpdate(id, { diffText: second });
-  const frame = await r.settle();
+  const frame = await settleUntil(r, (f) => f.includes("TWO"));
   expect(frame).toContain("TWO");
   expect(frame).toContain("[undecided]");
   expect(frame).not.toContain("[approved]");
@@ -148,7 +150,11 @@ test("a large config survives the update path instead of being truncated", async
   // keeps it intact.
   const rows = Array.from({ length: 3000 }, (_, i) => ({ v: `value-${i}-${"x".repeat(200)}` }));
   await pushUpdate(id, { columns: [{ key: "v", label: "V", width: 12 }], rows });
-  const frame = await r.settle();
+  // ~600 KB has to cross the socket, be reassembled by FrameDecoder and
+  // re-render. One macrotask is nowhere near enough on a loaded runner:
+  // this assertion after a bare settle() is what turned ubuntu-latest red
+  // on a docs-only commit.
+  const frame = await settleUntil(r, (f) => f.includes("of 3000"), 15_000);
   expect(frame).toContain("of 3000");
   r.dispose();
 });

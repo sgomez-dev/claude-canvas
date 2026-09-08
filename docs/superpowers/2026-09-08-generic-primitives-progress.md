@@ -400,113 +400,44 @@ not reappear.
 
 ---
 
-## End-to-end smoke test (2026-09-08, tmux 3.7c, Bun 1.4.2)
+## End-to-end smoke test (`canvas/scripts/smoke.sh`)
 
-The first execution of the pane-opening path on any real machine. Each
-primitive was spawned into a real tmux pane, its rendered frame captured
-with `capture-pane`, driven with `send-keys`, and its outcome read back
-through the CLI's own `wait`. `wait` was started before the keys were sent,
-which is the ordering the canvas skill now tells Claude to use.
+The only thing in this repository that exercises the pane-opening path.
+Everything else tests the IPC layer with no terminal at all -- which is what
+the TCP transport was chosen to make possible -- so this is where a real
+tmux split, a real Ink render, real keystrokes and the CLI's own `wait` meet.
+tmux 3.7c, Bun 1.4.2. Self-checking; exits non-zero on failure.
 
-| Primitive | Keys sent | `wait` returned |
-|---|---|---|
-| `picker` | `j` `Enter` | `{"status":"selected","data":{"selectedIds":["beta"]}}` |
-| `table` | `Escape` | `{"status":"cancelled","reason":"escape"}` |
-| `form` | `h` `i` `Tab` `Space` `Tab` `Enter` | `{"status":"selected","data":{"values":{"who":"hi","ok":true}}}` |
-| `diff` | `a` `Enter` | `{"status":"selected","data":{"decisions":[{"hunkId":"x.txt#0","decision":"approved"}]}}` |
+**12 pass, 0 fail** as of the final run:
 
-4 pass, 0 fail. Every frame rendered legibly at 120 columns, `spawn`
-reported `"host":"tmux"`, and every pane closed itself by exiting 0 -- no
-orphaned panes, which is the failure class the whole lifecycle design exists
-to prevent.
+| Case | What it pins |
+|---|---|
+| `picker` | `j` `Enter` -> `{"selectedIds":["beta"]}` |
+| `table` | `Escape` -> `{"cancelled","reason":"escape"}` |
+| `form` | typed text, checkbox, submit -> per-type values |
+| `diff` | `a` `Enter` -> one approved hunk decision |
+| `calendar` meeting-picker | `Enter` -> a selected time slot |
+| `calendar` display x3 | appears in `list`, answers `get`, is closable -- none of which worked before it had a server |
+| invalid `--scenario` | rejected, rather than silently rendering another view |
+| live `update` x2 | a table's title and rows replaced while its pane stayed open |
+| retained outcome | a choice made with no controller attached still reaches `wait` |
 
-### Found by the smoke test, and fixed
+Every pane closed itself by exiting 0 -- no orphaned panes, which is the
+failure class the whole lifecycle design exists to prevent.
 
-**An empty text/textarea/number field rendered no input line at all.** The
-form pane showed:
+### Two bugs the script itself had, worth recording
 
-```
-> Who *
-  Confirmed
-  [ ]
-```
+Both were in the harness rather than the product, and both produced
+convincing false results:
 
-The focused `Who` field had a label and nothing beneath it: an empty value
-with no `placeholder` rendered an empty `<Text>` that collapsed to nothing,
-so the user was typing into a field with no visible extent. A `placeholder`
-masks it, and every snapshot fixture gave its textarea one, which is exactly
-why no test caught it. This is the case for driving a real pane -- 212 unit
-and integration tests did not surface it, and one `capture-pane` did.
-
-Fixed: a field always renders with visible extent. The cursor `▏` sits where
-the next character will land, so it follows the typed text and marks the
-focused field; an unfocused empty field falls back to a dim `—`. Verified
-back in a real pane, where the same form now shows:
-
-```
-> Who *
-  ▏
-  Confirmed
-  [ ]
-```
-
-**Ruling 7: the cursor marks focus in addition to the `> ` gutter and the
-label colour, not instead of them.** The gutter already survives a no-color
-terminal (picker.tsx's precedent), so the cursor is redundant as a focus
-indicator -- but it is not redundant as an *extent* indicator, which is the
-actual defect. Cost if wrong: one glyph per focused field.
-
----
-
-## Post-push CI failure and its fix (run 34271005232)
-
-The first push went green on all three legs (run 34270256655 — the first
-green run this repository has ever had). The second push failed on
-**macos-latest only**, with ubuntu and windows passing:
-
-```
-(fail) waitForOutcome resolves cancelled [2037.10ms]
-211 pass, 1 fail
-```
-
-Not a regression from the pushed commits. A latent race in a Phase 1 test
-(Task 7, `client.test.ts`), surfaced by scheduling luck:
-
-`server.broadcast` only reaches connections that are **already
-authenticated** —
-
-```ts
-broadcast(msg) { for (const [socket, state] of conns) if (state.authed) send(socket, msg); }
-```
-
-— and the test broadcast on a fixed 30 ms timer while `waitForOutcome` was
-still doing a TCP connect, a filesystem read of the registry record, and the
-hello round trip. When the timer wins, the message is dropped silently and
-the wait runs to its full 2000 ms timeout, which is exactly the 2037 ms in
-the log. The sibling `waitForOutcome resolves selected` test has the
-identical shape and merely won the race that day; `integration.test.ts` had
-a third instance on a 40 ms timer.
-
-**Ruling 8: fixed by removing the guess, not by lengthening it.** A longer
-timer lowers the failure rate without eliminating it and slows the suite,
-and this repository has already paid for that lesson once (6a14420, "remove
-timing-dependent flakiness in two tests"). `CanvasServerOptions` gains
-`onAuthenticated(reply)`, called immediately after `hello-ok` with a reply
-bound to that one connection, so all three tests now send at the exact
-moment the handshake completes and contain no sleep at all. Verified with 25
-consecutive runs of the runtime suite: 0 failures.
-
-This hook is not test-only scaffolding. It is precisely what gap 1's fix
-needs — the server previously had no way to tell anyone that a controller
-had attached, which is the root cause of `sendError` being broadcast to zero
-connections. Nothing in production wires it yet; three tests cover it
-(fires after hello-ok and in that order, does not fire for a failed
-handshake, and a throwing callback is routed to onError while the connection
-survives — a canvas must always be able to exit 0).
-
-The other four broadcast call sites in the tests were checked and are safe:
-each follows an awaited `openConnection`, which resolves only after
-`hello-ok`.
+- `other_pane` took the first pane that was not the script's own. The
+  meeting picker confirms for ~3 s before exiting, so its pane outlived its
+  own `wait` and the next case sent keystrokes to it. Now the new pane is
+  identified by diffing the pane list around the spawn.
+- `spawn_pane` echoed an informational line to stdout, and callers capture
+  its stdout as the pane id -- so `target` became two lines and every
+  `send-keys` missed, turning five cases into `pending`. The echo goes to
+  stderr, with a comment saying why.
 
 *** PHASE 2 IMPLEMENTATION COMPLETE. Not reviewed by a second pass: this
 ledger and the code in commits 158e74a..ddd263a are one agent's work with no

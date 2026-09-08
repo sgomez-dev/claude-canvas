@@ -153,7 +153,9 @@ export function MeetingPickerView({ id, config, enabled = false }: Props) {
       const eventEnd = new Date(event.endTime);
 
       for (let dayIndex = 0; dayIndex < 7; dayIndex++) {
-        const day = weekDays[dayIndex];
+        // weekDays always has exactly 7 elements (getWeekDays always pushes
+        // 7 days), so index dayIndex (0..6) always exists.
+        const day = weekDays[dayIndex]!;
         if (!isSameDay(eventStart, day) && !isSameDay(eventEnd, day)) continue;
 
         const dayStart = new Date(day);
@@ -206,7 +208,10 @@ export function MeetingPickerView({ id, config, enabled = false }: Props) {
       let slotIndex = 0;
       let cumHeight = 0;
       for (let i = 0; i < totalSlots; i++) {
-        cumHeight += slotHeights[i];
+        // slotHeights has exactly totalSlots elements (built via
+        // Array.from({ length: totalSlots }, ...) above), and i ranges over
+        // [0, totalSlots) by the loop condition, so index i always exists.
+        cumHeight += slotHeights[i]!;
         if (relY < cumHeight) {
           slotIndex = i;
           break;
@@ -218,7 +223,9 @@ export function MeetingPickerView({ id, config, enabled = false }: Props) {
 
       if (slotIndex >= totalSlots) return null;
 
-      const day = weekDays[dayIndex];
+      // relX >= 0 (checked above) and columnWidth > 0, so dayIndex >= 0;
+      // dayIndex < 7 is checked above, so weekDays[dayIndex] always exists.
+      const day = weekDays[dayIndex]!;
       const slotMinutes = slotIndex * slotGranularity;
       const startTime = new Date(day);
       startTime.setHours(
@@ -295,7 +302,9 @@ export function MeetingPickerView({ id, config, enabled = false }: Props) {
     if (cursorDay < 0 || cursorDay >= 7) return null;
     if (cursorSlot < 0 || cursorSlot >= totalSlots) return null;
 
-    const day = weekDays[cursorDay];
+    // cursorDay is checked to be in [0, 7) above, so weekDays[cursorDay]
+    // always exists.
+    const day = weekDays[cursorDay]!;
     const slotMinutes = cursorSlot * slotGranularity;
     const startTime = new Date(day);
     startTime.setHours(
@@ -398,7 +407,10 @@ export function MeetingPickerView({ id, config, enabled = false }: Props) {
   const renderTimeColumn = () => {
     const slots: React.JSX.Element[] = [];
     for (let slotIndex = 0; slotIndex < totalSlots; slotIndex++) {
-      const height = slotHeights[slotIndex];
+      // slotHeights has exactly totalSlots elements (see definition above),
+      // and slotIndex ranges over [0, totalSlots) by the loop condition, so
+      // index slotIndex always exists.
+      const height = slotHeights[slotIndex]!;
       const slotMinutes = slotIndex * slotGranularity;
       const hour = startHour + Math.floor(slotMinutes / 60);
       const minute = slotMinutes % 60;
@@ -429,7 +441,10 @@ export function MeetingPickerView({ id, config, enabled = false }: Props) {
     const slots: React.JSX.Element[] = [];
 
     for (let slotIndex = 0; slotIndex < totalSlots; slotIndex++) {
-      const height = slotHeights[slotIndex];
+      // slotHeights has exactly totalSlots elements (see definition above),
+      // and slotIndex ranges over [0, totalSlots) by the loop condition, so
+      // index slotIndex always exists.
+      const height = slotHeights[slotIndex]!;
       const key = `${dayIndex}-${slotIndex}`;
       const busyColors = busyMap.get(key) || [];
       const isBusy = busyColors.length > 0;
@@ -472,7 +487,9 @@ export function MeetingPickerView({ id, config, enabled = false }: Props) {
           textColor = "white";
           if (line === 0) content = " busy".padEnd(columnWidth - 1);
         } else if (isBusy) {
-          bgColor = busyColors[0];
+          // isBusy is true only when busyColors.length > 0 (see isBusy
+          // above), so index 0 always exists.
+          bgColor = busyColors[0]!;
           textColor = TEXT_COLORS[bgColor] || "white";
           if (line === 0) {
             const names = calendars
@@ -536,7 +553,9 @@ export function MeetingPickerView({ id, config, enabled = false }: Props) {
       {/* Title bar */}
       <Box marginBottom={1}>
         <Text bold color="white">
-          {formatMonthYear(weekDays[0])} - Select a meeting time
+          {/* weekDays always has exactly 7 elements (see getWeekDays), so
+              weekDays[0] always exists. */}
+          {formatMonthYear(weekDays[0]!)} - Select a meeting time
         </Text>
       </Box>
 

@@ -100,6 +100,28 @@ run_case diff sm-diff \
   '{"status":"selected","data":{"decisions":[{"hunkId":"x.txt#0","decision":"approved"}]}}' \
   a Enter
 
+# Live server-push. The `update` message had no CLI verb until 2026-09-08,
+# so this whole path -- controller -> canvas config replacement -- was
+# unreachable end to end despite being the capability the roadmap cited when
+# it chose TCP over files-plus-polling.
+echo
+echo "=== update en vivo (server-push) ==="
+sp=$(cli spawn table --id sm-update --config '{"title":"Antes","columns":[{"key":"a","label":"A","width":8}],"rows":[{"a":"antes"}]}')
+echo "  spawn -> $sp"
+if wait_for_record sm-update; then
+  target=$(other_pane)
+  cli update sm-update --config '{"title":"Despues","columns":[{"key":"a","label":"A","width":8}],"rows":[{"a":"despues"}]}' > /dev/null
+  sleep 0.8
+  pane=$(tmux capture-pane -p -t "$target")
+  echo "  --- panel tras el update ---"
+  echo "$pane" | sed 's/^/  | /' | head -6
+  check "config reemplazada en vivo" "$pane" "despues"
+  check "titulo reemplazado en vivo" "$pane" "Despues"
+  cli close sm-update > /dev/null
+else
+  FAIL=$((FAIL+2))
+fi
+
 # The regression that retained outcomes exist for: the user chooses with NO
 # controller attached, and `wait` only connects afterwards. Before outcomes
 # were retained this answered {"status":"error","message":"no canvas

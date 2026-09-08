@@ -60,6 +60,20 @@ Every command prints one JSON object on stdout. `wait` returns one of
 
 - `/canvas` - Interactive canvas spawning
 
+## CLI verbs
+
+| Verb | Purpose |
+|---|---|
+| `show <kind>` | Render in the current terminal |
+| `spawn <kind>` | Open in a split pane; waits until the canvas is reachable |
+| `wait <id>` | Block for the outcome; reads a persisted one if the canvas already exited |
+| `update <id>` | Push a new config into a running canvas |
+| `get <id> <key>` | Read canvas state (only `document` answers keys today) |
+| `close <id>` | Ask the canvas to exit |
+| `list` | Live canvases |
+| `scenarios [kind]` | Available scenarios and their interaction modes |
+| `env` | Detected host and terminal capabilities |
+
 ## Skills
 
 - `canvas` - Main skill with overview and IPC details

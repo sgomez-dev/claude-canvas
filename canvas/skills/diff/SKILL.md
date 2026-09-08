@@ -87,3 +87,11 @@ A parse error reaches you as `{"status":"error","message":"..."}` from
 `wait`, even though it is reported before you connect — see `canvas` skill,
 "Outcomes cannot be missed". Note that a parse error is itself the outcome:
 if the user then presses Escape you still get the error, not a cancellation.
+
+## Updating it in place
+
+`update <id> --config '<json>'` replaces the config of a running canvas.
+The interaction state is **reset**: a pushed config is a new question, so
+**all hunk decisions are discarded.** They are keyed by hunk id, and an id
+from the previous diff can collide with an unrelated hunk in the new one --
+carrying them over would apply a decision to code the user never saw.

@@ -2,7 +2,13 @@
 import { program } from "commander";
 import { assertIdent } from "./runtime/validate";
 import { configPath, logPath } from "./runtime/paths";
-import { getValue, requestClose, waitForOutcome, DEFAULT_WAIT_MS } from "./runtime/client";
+import {
+  getValue,
+  pushUpdate,
+  requestClose,
+  waitForOutcome,
+  DEFAULT_WAIT_MS,
+} from "./runtime/client";
 import { awaitRecord, listRecords, type CanvasRecord } from "./runtime/registry";
 import { getScenario, listScenarios } from "./scenarios/registry";
 import { detectHost } from "./host";
@@ -228,6 +234,44 @@ program
       const result = await waitForOutcome(id, resolveWaitTimeout(opts.timeout));
       emit(result);
       process.exit(result.status === "disconnected" || result.status === "error" ? 1 : 0);
+    } catch (e) {
+      fail((e as Error).message);
+    }
+  });
+
+// Exported for the same reason resolveWaitTimeout is: the argument rules are
+// worth testing without going through commander's process.exit-laden action.
+export async function resolveUpdateConfig(opts: {
+  config?: string;
+  configFile?: string;
+}): Promise<unknown> {
+  // Exactly one, not "either": accepting both would silently pick a winner,
+  // and accepting neither would push `undefined` as a config.
+  if ((opts.config === undefined) === (opts.configFile === undefined)) {
+    throw new Error("update needs exactly one of --config or --config-file");
+  }
+  if (opts.configFile) return await Bun.file(opts.configFile).json();
+  try {
+    return JSON.parse(opts.config!);
+  } catch {
+    throw new Error("Invalid --config: not valid JSON");
+  }
+}
+
+// The controller half of the protocol's `update` message. Without this verb
+// the message, `useCanvasServer`'s `onUpdate` and document.tsx's handler
+// were unreachable end to end -- the roadmap chose TCP over
+// files-plus-polling because polling "gives up server-push to the canvas —
+// which live `update` needs", and that capability had no way to be invoked.
+program
+  .command("update <id>")
+  .option("--config <json>")
+  .option("--config-file <path>")
+  .action(async (id: string, opts: { config?: string; configFile?: string }) => {
+    try {
+      assertIdent("id", id);
+      await pushUpdate(id, await resolveUpdateConfig(opts));
+      emit({ status: "updated", id });
     } catch (e) {
       fail((e as Error).message);
     }

@@ -9,6 +9,7 @@ import {
   runShow,
   runSpawn,
   resolveScenario,
+  resolveUpdateConfig,
   KIND_DEFAULT_SCENARIO,
   type ActionIO,
 } from "./cli";
@@ -239,4 +240,23 @@ test("show rejects an unknown scenario and still exits 0 (never a non-zero exit 
   await runShow("calendar", { id: "cli-test-badscenario2", scenario: "nope" }, io);
   expect(exits).toEqual([0]);
   expect(JSON.parse(lines[0]!).status).toBe("error");
+});
+
+// --- update ---------------------------------------------------------------
+
+test("update needs exactly one of --config or --config-file", async () => {
+  await expect(resolveUpdateConfig({})).rejects.toThrow(/exactly one/);
+  await expect(
+    resolveUpdateConfig({ config: "{}", configFile: "/tmp/x.json" })
+  ).rejects.toThrow(/exactly one/);
+});
+
+test("update rejects malformed --config JSON rather than pushing garbage", async () => {
+  await expect(resolveUpdateConfig({ config: "{not json" })).rejects.toThrow(/not valid JSON/);
+});
+
+test("update parses --config into the object it will push", async () => {
+  expect(await resolveUpdateConfig({ config: '{"rows":[{"a":"1"}]}' })).toEqual({
+    rows: [{ a: "1" }],
+  });
 });

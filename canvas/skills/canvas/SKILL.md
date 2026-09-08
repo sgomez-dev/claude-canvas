@@ -83,6 +83,13 @@ Every command prints one JSON object. `wait` returns one of
 `{"status":"pending"}` (timed out, canvas still alive — call `wait` again),
 `{"status":"disconnected"}`, or `{"status":"error","message":...}`.
 
+`update <id> --config '<json>'` pushes a new config into a canvas that is
+already open — refreshing a table's rows, or replacing a diff after you
+regenerated it, without closing the pane. Use `--config-file` for anything
+large. Note that the canvas **resets its interaction state** on an update:
+a pushed config is a new question, so a half-filled form or a set of hunk
+decisions from the previous diff is discarded rather than misapplied.
+
 `scenarios [kind]` lists every scenario you can ask for, with its
 `interactionMode`. Worth reading once rather than guessing: a
 `view-only` scenario has **no `selected` outcome at all**, so its `wait`

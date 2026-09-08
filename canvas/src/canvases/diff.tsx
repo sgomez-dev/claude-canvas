@@ -29,9 +29,12 @@ const CHROME_ROWS = 9;
 // the hunk body it exists to help you read.
 const MAX_FILE_ROWS = 5;
 
-export function Diff({ id, config, scenario = "review", enabled }: DiffProps): React.JSX.Element {
+export function Diff({ id, config: initialConfig, scenario = "review", enabled }: DiffProps): React.JSX.Element {
   const { exit } = useApp();
   const { stdout } = useStdout();
+
+  // Live config: replaced by an `update` pushed from the controller.
+  const [config, setConfig] = useState<DiffReviewConfig | undefined>(initialConfig);
 
   // Files and any parse error are derived from ONE memo so there is a single
   // source of truth for "did parsing fail". Previously `parseError` was set
@@ -95,7 +98,26 @@ export function Diff({ id, config, scenario = "review", enabled }: DiffProps): R
     scenario,
     enabled,
     onClose: () => {},
+    onUpdate: (next) => setConfig(next as DiffReviewConfig),
   });
+
+  // A pushed config is a new question, so the interaction state that
+  // referred to the old one is dropped rather than carried over: a cursor
+  // can point past the new content, and a selection or decision can name
+  // something that no longer exists. Skipped on the first run, where the
+  // state initializers already hold the right values.
+  // Decisions in particular MUST be dropped: they are keyed by hunk id, and
+  // a hunk id from the previous diff can collide with an unrelated hunk in
+  // the new one, which would silently apply a decision to code the user
+  // never saw.
+  const generation = useRef(0);
+  useEffect(() => {
+    if (generation.current++ === 0) return;
+    setCursor(0);
+    setLineOffset(0);
+    setDecisions(new Map());
+    sentRef.current = false;
+  }, [files]);
 
   // Reports a parse failure to the controller exactly once, when `error`
   // transitions from null to non-null. Gated on `ipc.isConnected`: the IPC

@@ -112,6 +112,18 @@ bun run src/cli.ts spawn form --config '{"fields": [...]}'
 bun run src/cli.ts spawn table --config '{"columns": [...], "rows": [...]}'
 ```
 
+### Step 3b: Update a canvas in place (optional)
+
+To change what an open canvas shows without closing it:
+
+```bash
+bun run ${CLAUDE_PLUGIN_ROOT}/src/cli.ts update cal-1 --config '{...}'
+```
+
+The canvas resets its interaction state on an update -- a pushed config is a
+new question, so a half-filled form or a previous diff's decisions are
+discarded rather than misapplied.
+
 ### Step 4: Handle Results
 
 Use `wait <id>` to block for the user's interaction (returns within ~55s no

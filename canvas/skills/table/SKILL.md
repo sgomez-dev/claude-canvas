@@ -81,3 +81,10 @@ footer shows the visible range whenever the data does not fit.
 Column widths are measured in UTF-16 code units, not display columns, so
 cells containing CJK characters or emoji will misalign their row. Prefer
 ASCII content, or set explicit widths with slack.
+
+## Updating it in place
+
+`update <id> --config '<json>'` replaces the config of a running canvas.
+The interaction state is **reset**: a pushed config is a new question, so
+the scroll returns to the top. This is the primitive most likely to want
+an update -- refreshing rows in place is the obvious use for server-push.

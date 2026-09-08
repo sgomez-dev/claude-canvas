@@ -74,7 +74,7 @@ prints one JSON result on stdout:
 ```typescript
 // Controller → Canvas
 { type: "hello", token }     // authenticate onto the canvas's socket
-{ type: "update", config }   // push new config
+{ type: "update", config }   // push new config (CLI: `update <id>`)
 { type: "get", key }         // read state (selection, content, config)
 { type: "close" }            // ask the canvas to exit
 { type: "ping" }             // health check
@@ -112,6 +112,15 @@ already exited, still reaches Claude.
 
 `spawn` does not report success until the canvas is reachable — it waits for
 the registry record rather than returning the moment the pane opens.
+
+**Live updates.** `update <id> --config <json>` (or `--config-file`) pushes a
+new config into a running canvas. All four primitives and `document`
+implement `onUpdate`; the four primitives **reset their interaction state**
+when one arrives, because a pushed config is a new question: a cursor can
+point past the new content, and `form`'s values and `diff`'s decisions are
+keyed by field and hunk id, so carrying them over could apply an answer to
+something the user never saw. `pushUpdate` waits for the writer to drain
+before closing, so a multi-megabyte config is not truncated.
 
 `wait <id>` polls this connection and surfaces one outcome per call:
 `{"status":"selected","data":...}`, `{"status":"cancelled"}`,

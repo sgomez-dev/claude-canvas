@@ -26,9 +26,12 @@ function firstEnabledIndex(options: PickerOption[]): number {
   return idx === -1 ? 0 : idx;
 }
 
-export function Picker({ id, config, scenario = "select", enabled }: PickerProps): React.JSX.Element {
+export function Picker({ id, config: initialConfig, scenario = "select", enabled }: PickerProps): React.JSX.Element {
   const { exit } = useApp();
   const { stdout } = useStdout();
+
+  // Live config: replaced by an `update` pushed from the controller.
+  const [config, setConfig] = useState<PickerConfig | undefined>(initialConfig);
 
   // Options, mode, and any config error are derived from ONE memo so there
   // is a single source of truth for "is this config usable at all" — see
@@ -133,7 +136,21 @@ export function Picker({ id, config, scenario = "select", enabled }: PickerProps
     scenario,
     enabled,
     onClose: () => {},
+    onUpdate: (next) => setConfig(next as PickerConfig),
   });
+
+  // A pushed config is a new question, so the interaction state that
+  // referred to the old one is dropped rather than carried over: a cursor
+  // can point past the new content, and a selection or decision can name
+  // something that no longer exists. Skipped on the first run, where the
+  // state initializers already hold the right values.
+  const generation = useRef(0);
+  useEffect(() => {
+    if (generation.current++ === 0) return;
+    setCursor(firstEnabledIndex(options));
+    setChecked(new Set());
+    sentRef.current = false;
+  }, [options]);
 
   // Reports a config validation failure to the controller exactly once,
   // when `error` transitions from null to non-null. Gated on

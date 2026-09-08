@@ -124,8 +124,11 @@ function clampNumber(raw: string, min: number | undefined, max: number | undefin
   return String(n);
 }
 
-export function Form({ id, config, scenario = "fill", enabled }: FormProps): React.JSX.Element {
+export function Form({ id, config: initialConfig, scenario = "fill", enabled }: FormProps): React.JSX.Element {
   const { exit } = useApp();
+
+  // Live config: replaced by an `update` pushed from the controller.
+  const [config, setConfig] = useState<FormConfig | undefined>(initialConfig);
   const { fields, error } = useMemo<ValidatedForm>(() => validateForm(config), [config]);
 
   const [values, setValues] = useState<Record<string, FieldState>>(() => {
@@ -170,7 +173,27 @@ export function Form({ id, config, scenario = "fill", enabled }: FormProps): Rea
     scenario,
     enabled,
     onClose: () => {},
+    onUpdate: (next) => setConfig(next as FormConfig),
   });
+
+  // A pushed config is a new question, so the interaction state that
+  // referred to the old one is dropped rather than carried over: a cursor
+  // can point past the new content, and a selection or decision can name
+  // something that no longer exists. Skipped on the first run, where the
+  // state initializers already hold the right values.
+  // Values in particular MUST be dropped: they are keyed by field id, so a
+  // value typed for one field would survive into a differently-typed field
+  // that happens to reuse the id.
+  const generation = useRef(0);
+  useEffect(() => {
+    if (generation.current++ === 0) return;
+    const next: Record<string, FieldState> = {};
+    for (const f of fields) next[f.id] = initialValue(f);
+    setValues(next);
+    setFocusIndex(0);
+    setErrors(new Set());
+    sentRef.current = false;
+  }, [fields]);
 
   // Reports a config validation failure to the controller exactly once,
   // when `error` transitions from null to non-null. Gated on

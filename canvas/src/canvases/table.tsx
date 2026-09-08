@@ -95,9 +95,14 @@ function fitCell(content: string, width: number): string {
   return content.padEnd(width);
 }
 
-export function Table({ id, config, scenario = "display", enabled }: TableProps): React.JSX.Element {
+export function Table({ id, config: initialConfig, scenario = "display", enabled }: TableProps): React.JSX.Element {
   const { exit } = useApp();
   const { stdout } = useStdout();
+
+  // Live config: replaced by an `update` pushed from the controller. This is
+  // the primitive most likely to receive one -- refreshing a table's rows in
+  // place is the obvious use for server-push.
+  const [config, setConfig] = useState<TableConfig | undefined>(initialConfig);
 
   const { columns, rows, error } = useMemo<ValidatedTable>(() => validateTable(config), [config]);
 
@@ -119,7 +124,20 @@ export function Table({ id, config, scenario = "display", enabled }: TableProps)
     scenario,
     enabled,
     onClose: () => {},
+    onUpdate: (next) => setConfig(next as TableConfig),
   });
+
+  // A pushed config is a new question, so the interaction state that
+  // referred to the old one is dropped rather than carried over: a cursor
+  // can point past the new content, and a selection or decision can name
+  // something that no longer exists. Skipped on the first run, where the
+  // state initializers already hold the right values.
+  const generation = useRef(0);
+  useEffect(() => {
+    if (generation.current++ === 0) return;
+    setScrollOffset(0);
+    sentRef.current = false;
+  }, [rows]);
 
   // Reports a config error to the controller exactly once, gated on
   // ipc.isConnected because the server starts asynchronously. See

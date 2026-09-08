@@ -77,3 +77,10 @@ unusable list: `options` not an array, empty, an option missing `id` or
 A config error reaches you as
 `{"status":"error","message":"..."}` from `wait`, even though it is reported
 before you connect — see `canvas` skill, "Outcomes cannot be missed".
+
+## Updating it in place
+
+`update <id> --config '<json>'` replaces the config of a running canvas.
+The interaction state is **reset**: a pushed config is a new question, so
+the cursor returns to the first enabled option and any multi-select
+toggles are cleared, since they named options that may no longer exist.

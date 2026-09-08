@@ -94,12 +94,12 @@ closed, which is what these entry conditions were asking for:
   stated precondition for screenshot work.
 - The pane-opening path has execution behind it (b9b3ae8), via
   `canvas/scripts/smoke.sh`.
+- Live server-push works: an `update <id>` verb exists and all four
+  primitives implement `onUpdate`. That was the capability cited when TCP
+  was chosen over files-plus-polling, and it had never been invocable.
 
 **Still open before Phase 3:**
 
-- **The `update` message has no CLI verb**, so live server-push — the
-  capability that decided the TCP transport — cannot be invoked at all.
-  Phase 3's richer canvases are the first thing that would want it.
 - **`table` measures column width in UTF-16 code units**, so CJK and emoji
   misalign. `Intl.Segmenter` is built into Bun and needs no dependency.
 - **The calendar meeting-picker overflows vertically at 70x18**, overlapping

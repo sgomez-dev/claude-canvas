@@ -288,16 +288,37 @@ repository and self-checking.
 
 ---
 
-### STILL OPEN 5 -- The `update` message is unreachable
+### CLOSED 5 -- The `update` message was unreachable (this commit)
 
-`protocol.ts` defines it, `use-canvas-server.ts` exposes `onUpdate`, and
-`document.tsx` implements it -- but **the CLI has no `update` verb**
-(`show`, `spawn`, `wait`, `get`, `close`, `list`, `scenarios`, `env`). The
-roadmap chose TCP over files-plus-polling specifically because polling
-"gives up server-push to the canvas — which live `update` needs"; the
-feature that decided the transport has no way to be invoked. None of the
-four Phase 2 primitives implements `onUpdate` either, which costs nothing
-until the verb exists.
+`protocol.ts` defined it, `use-canvas-server.ts` exposed `onUpdate` and
+`document.tsx` implemented it -- but there was no CLI verb, and none of the
+four Phase 2 primitives implemented the callback. So live server-push, the
+capability the roadmap cited when it chose TCP over files-plus-polling
+("polling gives up server-push to the canvas — which live `update`
+needs"), could not be invoked end to end at all.
+
+Now: an `update <id>` verb taking `--config` or `--config-file`, a
+`pushUpdate` on the controller side, and `onUpdate` wired into all four
+primitives. Verified in a real pane -- a table's title and rows replaced in
+place while it stayed open.
+
+**Ruling 12: a pushed config resets the interaction state.** A new config is
+a new question, and the state that referred to the old one is not merely
+stale but dangerous: `form`'s values are keyed by field id and `diff`'s
+decisions by hunk id, so an id reused across two configs would carry an
+answer onto something the user never saw. The diff case is the sharpest --
+same path plus same hunk index means the same id, so "approved" would
+survive onto different code. Cursors and scroll offsets are reset for the
+duller reason that they can point past the new content. Cost if wrong: a
+controller that wants to append to a table has to re-send the whole thing,
+which it does anyway since a config is replaced wholesale.
+
+**Ruling 13: `pushUpdate` drains before closing.** `Connection.close()`
+destroys the queued writer, discarding whatever the socket had not accepted
+-- so without waiting for `flushed()` a config larger than one socket write
+would be silently truncated, which is the same class of bug as 158e74a.
+Covered by a test that pushes 3000 rows. Cost if wrong: an update takes as
+long as the socket needs, which is the correct cost.
 
 ### STILL OPEN 6 -- `table` measures column width in UTF-16 code units
 

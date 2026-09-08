@@ -87,3 +87,11 @@ malformed.
 A config error reaches you as
 `{"status":"error","message":"..."}` from `wait`, even though it is reported
 before you connect — see `canvas` skill, "Outcomes cannot be missed".
+
+## Updating it in place
+
+`update <id> --config '<json>'` replaces the config of a running canvas.
+The interaction state is **reset**: a pushed config is a new question, so
+every field is reset to its initial value. Values are keyed by field id,
+so carrying them over could put a value typed for one field into a
+differently-typed field that reuses the id.

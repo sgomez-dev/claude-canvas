@@ -20,6 +20,12 @@ export type WaitResult =
 export interface Connection {
   send(msg: ControllerMessage): void;
   next(timeoutMs: number): Promise<CanvasMessage | null>;
+  /**
+   * Resolves once everything sent has been accepted by the socket. Needed
+   * before closing after a large send: the queued writer holds bytes the
+   * socket refused under backpressure, and close() discards them.
+   */
+  flushed(): Promise<void>;
   close(): void;
 }
 
@@ -92,6 +98,9 @@ export async function openConnection(id: string): Promise<Connection> {
       // the bytes now survive backpressure instead of being truncated.
       if (!dead) writer?.write(encodeFrame(msg));
     },
+    flushed() {
+      return writer?.flushed() ?? Promise.resolve();
+    },
     next(timeoutMs) {
       const buffered = inbox.shift();
       if (buffered) return Promise.resolve(buffered);
@@ -147,6 +156,32 @@ export async function getValue(id: string, key: string): Promise<unknown> {
       if (msg.type === "value" && msg.key === key) return msg.data;
       if (msg.type === "error") throw new Error(msg.message);
     }
+  } finally {
+    conn.close();
+  }
+}
+
+/**
+ * Pushes a new config into a live canvas.
+ *
+ * This is the controller half of the `update` message, which existed in the
+ * protocol and in `useCanvasServer`'s `onUpdate` from Phase 1 but had no
+ * caller anywhere: there was no CLI verb, so live server-push -- the
+ * capability the roadmap cited when choosing TCP over files-plus-polling --
+ * could not be invoked at all.
+ */
+export async function pushUpdate(id: string, config: unknown): Promise<void> {
+  const conn = await openConnection(id);
+  try {
+    conn.send({ type: "update", config });
+    // A config can be large (Phase 3's screenshots by construction), and
+    // close() drops whatever the socket has not accepted yet. Waiting for
+    // the queue to empty is what makes a big update survive at all.
+    await conn.flushed();
+    // Then the same one-macrotask deferral requestClose documents below:
+    // closing while inbound data is still unread makes the OS send RST,
+    // which discards this frame before the peer reads it.
+    await new Promise<void>((resolve) => setTimeout(resolve, 0));
   } finally {
     conn.close();
   }

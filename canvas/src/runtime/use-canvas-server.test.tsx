@@ -259,7 +259,13 @@ test("a throwing onUpdate callback is routed to the log file, not dropped or cra
   }
 });
 
-test("a missing host at startup writes a lastError record instead of throwing out of the app", async () => {
+// Review finding: this hook used to call detectHost() unconditionally before
+// starting the server, so NoHostError (thrown outside tmux/Windows Terminal)
+// stopped the server from starting at all -- even though `show` in a plain
+// terminal (no spawn, no pane, no host needed -- the IPC transport is plain
+// TCP) is a documented supported flow. Only `spawn` genuinely needs a host,
+// to open a pane; NoHostError must surface there, never from this hook.
+test("a missing host at startup still starts the server, host-less, instead of failing to start", async () => {
   const savedTmux = process.env.TMUX;
   const savedWt = process.env.WT_SESSION;
   delete process.env.TMUX;
@@ -275,18 +281,28 @@ test("a missing host at startup writes a lastError record instead of throwing ou
 
   const r = renderCanvas(<Probe />, { columns: 40, rows: 3 });
   try {
-    let record = await readRecord(id);
-    for (let i = 0; i < 30 && !record; i++) {
-      await new Promise((res) => setTimeout(res, 20));
-      record = await readRecord(id);
-    }
-    expect(record).not.toBeNull();
-    expect(record!.lastError).toContain("No canvas host available");
-    // isConnected must stay false: no server ever came up.
-    expect(await r.settle()).toContain("connected=false");
+    const record = await waitForRecord(id);
+    // No host detected -> falls back to a "none"-shaped host, not a startup
+    // failure: no lastError, and the server comes up and accepts connections
+    // exactly as it would with a real host.
+    expect(record.lastError).toBeUndefined();
+    expect(record.host).toBe("none");
+    expect(record.port).toBeGreaterThan(0);
+    expect(await r.settle()).toContain("connected=true");
 
-    const log = await Bun.file(path).text();
-    expect(log).toContain("startup failed:");
+    // Sanity: the port genuinely accepts a connection -- proves this isn't
+    // just a registry write with no server behind it.
+    const client = await connectClient(record.port);
+    try {
+      client.send({ type: "hello", token: record.token });
+      await new Promise((res) => setTimeout(res, 60));
+      expect(client.messages).toContainEqual({ type: "hello-ok" });
+    } finally {
+      client.close();
+    }
+
+    const log = await Bun.file(path).text().catch(() => "");
+    expect(log).not.toContain("startup failed:");
   } finally {
     r.dispose();
     await new Promise((res) => setTimeout(res, 40));

@@ -5,7 +5,7 @@ import { dirname } from "node:path";
 import { startCanvasServer, type CanvasServer } from "./server";
 import { deleteRecord, writeRecord } from "./registry";
 import { logPath } from "./paths";
-import { detectHost } from "../host";
+import { detectHost, baseCapabilities, type TerminalCapabilities } from "../host";
 import type { CanvasMessage } from "./protocol";
 
 export interface UseCanvasServerOptions {
@@ -58,8 +58,23 @@ export function useCanvasServer(o: UseCanvasServerOptions): CanvasServerHandle {
     let live = true;
 
     (async () => {
+      // The IPC transport (TCP) needs no host at all; only `spawn` genuinely
+      // needs one, to open a pane. `show` in a plain terminal (no spawn) is a
+      // documented supported flow (skills/canvas/SKILL.md, canvas/README.md),
+      // so detectHost() throwing NoHostError outside tmux/Windows Terminal
+      // must not stop the server from starting here — fall back to a
+      // host-less shape and keep going. NoHostError should only ever surface
+      // from `spawn`.
+      let hostName = "none";
+      let capabilities: TerminalCapabilities = baseCapabilities(process.env);
       try {
         const host = detectHost();
+        hostName = host.name;
+        capabilities = host.capabilities(process.env);
+      } catch {
+        // No host available; proceed host-less. See comment above.
+      }
+      try {
         const server = await startCanvasServer({
           onMessage(msg, reply) {
             switch (msg.type) {
@@ -99,11 +114,11 @@ export function useCanvasServer(o: UseCanvasServerOptions): CanvasServerHandle {
           token: server.token,
           pid: process.pid,
           startedAt: new Date().toISOString(),
-          host: host.name,
+          host: hostName,
           wtSession: process.env.WT_SESSION,
         });
         setIsConnected(true);
-        server.broadcast({ type: "ready", scenario, capabilities: host.capabilities(process.env) });
+        server.broadcast({ type: "ready", scenario, capabilities });
       } catch (e) {
         // A canvas must still exit 0, so a startup failure travels in the
         // registry record and the log file rather than throwing out of this

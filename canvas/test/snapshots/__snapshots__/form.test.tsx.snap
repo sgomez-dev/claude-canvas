@@ -4,6 +4,7 @@ exports[`form renders all five field types 1`] = `
 "\x1B[36m╭──────────────────────────────────────────────────────────╮\x1B[39m
 \x1B[36m│\x1B[39m \x1B[1mReport a bug\x1B[22m                                             \x1B[36m│\x1B[39m
 \x1B[36m│\x1B[39m \x1B[36m> Summary *\x1B[39m                                              \x1B[36m│\x1B[39m
+\x1B[36m│\x1B[39m   \x1B[2m▏\x1B[22m                                                      \x1B[36m│\x1B[39m
 \x1B[36m│\x1B[39m   Details                                                \x1B[36m│\x1B[39m
 \x1B[36m│\x1B[39m   \x1B[2mWhat happened?\x1B[22m                                         \x1B[36m│\x1B[39m
 \x1B[36m│\x1B[39m   Severity                                               \x1B[36m│\x1B[39m
@@ -11,6 +12,7 @@ exports[`form renders all five field types 1`] = `
 \x1B[36m│\x1B[39m   Is it a regression?                                    \x1B[36m│\x1B[39m
 \x1B[36m│\x1B[39m   [ ]                                                    \x1B[36m│\x1B[39m
 \x1B[36m│\x1B[39m   Occurrences                                            \x1B[36m│\x1B[39m
+\x1B[36m│\x1B[39m   \x1B[2m—\x1B[22m                                                      \x1B[36m│\x1B[39m
 \x1B[36m│\x1B[39m                                                          \x1B[36m│\x1B[39m
 \x1B[36m│\x1B[39m   [ Submit ]                                             \x1B[36m│\x1B[39m
 \x1B[36m│\x1B[39m                                                          \x1B[36m│\x1B[39m
@@ -23,6 +25,7 @@ exports[`form renders a cycled select and a checked checkbox 1`] = `
 "\x1B[36m╭──────────────────────────────────────────────────────────╮\x1B[39m
 \x1B[36m│\x1B[39m \x1B[1mReport a bug\x1B[22m                                             \x1B[36m│\x1B[39m
 \x1B[36m│\x1B[39m   Summary *                                              \x1B[36m│\x1B[39m
+\x1B[36m│\x1B[39m   \x1B[2m—\x1B[22m                                                      \x1B[36m│\x1B[39m
 \x1B[36m│\x1B[39m   Details                                                \x1B[36m│\x1B[39m
 \x1B[36m│\x1B[39m   \x1B[2mWhat happened?\x1B[22m                                         \x1B[36m│\x1B[39m
 \x1B[36m│\x1B[39m   Severity                                               \x1B[36m│\x1B[39m
@@ -30,6 +33,7 @@ exports[`form renders a cycled select and a checked checkbox 1`] = `
 \x1B[36m│\x1B[39m \x1B[36m> Is it a regression?\x1B[39m                                    \x1B[36m│\x1B[39m
 \x1B[36m│\x1B[39m   [x]                                                    \x1B[36m│\x1B[39m
 \x1B[36m│\x1B[39m   Occurrences                                            \x1B[36m│\x1B[39m
+\x1B[36m│\x1B[39m   \x1B[2m—\x1B[22m                                                      \x1B[36m│\x1B[39m
 \x1B[36m│\x1B[39m                                                          \x1B[36m│\x1B[39m
 \x1B[36m│\x1B[39m   [ Submit ]                                             \x1B[36m│\x1B[39m
 \x1B[36m│\x1B[39m                                                          \x1B[36m│\x1B[39m
@@ -42,6 +46,7 @@ exports[`form renders required fields flagged after a failed submit 1`] = `
 "\x1B[36m╭──────────────────────────────────────────────────────────╮\x1B[39m
 \x1B[36m│\x1B[39m \x1B[1mReport a bug\x1B[22m                                             \x1B[36m│\x1B[39m
 \x1B[36m│\x1B[39m \x1B[31m> Summary *  <- required\x1B[39m                                 \x1B[36m│\x1B[39m
+\x1B[36m│\x1B[39m   \x1B[2m▏\x1B[22m                                                      \x1B[36m│\x1B[39m
 \x1B[36m│\x1B[39m   Details                                                \x1B[36m│\x1B[39m
 \x1B[36m│\x1B[39m   \x1B[2mWhat happened?\x1B[22m                                         \x1B[36m│\x1B[39m
 \x1B[36m│\x1B[39m   Severity                                               \x1B[36m│\x1B[39m
@@ -49,6 +54,7 @@ exports[`form renders required fields flagged after a failed submit 1`] = `
 \x1B[36m│\x1B[39m   Is it a regression?                                    \x1B[36m│\x1B[39m
 \x1B[36m│\x1B[39m   [ ]                                                    \x1B[36m│\x1B[39m
 \x1B[36m│\x1B[39m   Occurrences                                            \x1B[36m│\x1B[39m
+\x1B[36m│\x1B[39m   \x1B[2m—\x1B[22m                                                      \x1B[36m│\x1B[39m
 \x1B[36m│\x1B[39m                                                          \x1B[36m│\x1B[39m
 \x1B[36m│\x1B[39m   [ Submit ]                                             \x1B[36m│\x1B[39m
 \x1B[36m│\x1B[39m                                                          \x1B[36m│\x1B[39m
@@ -64,4 +70,19 @@ exports[`form renders a config error state for a select with no options 1`] = `
 \x1B[31m│\x1B[39m \x1B[31m'options' array\x1B[39m                                          \x1B[31m│\x1B[39m
 \x1B[31m│\x1B[39m                                                          \x1B[31m│\x1B[39m
 \x1B[31m╰──────────────────────────────────────────────────────────╯\x1B[39m"
+`;
+
+exports[`an empty field with no placeholder still renders a visible input line 1`] = `
+"\x1B[36m╭──────────────────────────────────────────────────────────╮\x1B[39m
+\x1B[36m│\x1B[39m \x1B[1mNo placeholders anywhere\x1B[22m                                 \x1B[36m│\x1B[39m
+\x1B[36m│\x1B[39m \x1B[36m> Who *\x1B[39m                                                  \x1B[36m│\x1B[39m
+\x1B[36m│\x1B[39m   \x1B[2m▏\x1B[22m                                                      \x1B[36m│\x1B[39m
+\x1B[36m│\x1B[39m   Count                                                  \x1B[36m│\x1B[39m
+\x1B[36m│\x1B[39m   \x1B[2m—\x1B[22m                                                      \x1B[36m│\x1B[39m
+\x1B[36m│\x1B[39m                                                          \x1B[36m│\x1B[39m
+\x1B[36m│\x1B[39m   [ Submit ]                                             \x1B[36m│\x1B[39m
+\x1B[36m│\x1B[39m                                                          \x1B[36m│\x1B[39m
+\x1B[36m│\x1B[39m \x1B[2mTab/Shift+Tab: move  Enter: submit (on the button)  Esc:\x1B[22m \x1B[36m│\x1B[39m
+\x1B[36m│\x1B[39m \x1B[2m cancel\x1B[22m                                                  \x1B[36m│\x1B[39m
+\x1B[36m╰──────────────────────────────────────────────────────────╯\x1B[39m"
 `;

@@ -369,9 +369,34 @@ export function Form({ id, config, scenario = "fill", enabled }: FormProps): Rea
                   {" >"}
                 </Text>
               ) : (
-                <Text dimColor={!value && Boolean("placeholder" in f && f.placeholder)}>
-                  {(value as string) || ("placeholder" in f ? f.placeholder : undefined) || ""}
-                </Text>
+                // text / textarea / number.
+                //
+                // A field must always have visible extent. An empty value
+                // with no placeholder used to render an empty <Text> that
+                // collapsed to nothing, so the focused field the user was
+                // typing into had no visible line at all -- found by the
+                // 2026-09-08 tmux smoke test, where the form pane showed
+                // "> Who *" with nothing beneath it. The snapshot fixtures
+                // all gave their textarea a placeholder, which is why no
+                // test caught it.
+                //
+                // The cursor sits where the next character will land, so it
+                // follows the typed text. An unfocused empty field falls
+                // back to a dim rule rather than nothing.
+                (() => {
+                  const raw = (value as string) ?? "";
+                  const placeholder =
+                    "placeholder" in f && f.placeholder ? f.placeholder : undefined;
+                  const body = raw.length > 0 ? raw : (placeholder ?? "");
+                  const filler = body.length === 0 && !isFocused ? "—" : "";
+                  return (
+                    <Text dimColor={raw.length === 0}>
+                      {body}
+                      {filler}
+                      {isFocused ? "▏" : ""}
+                    </Text>
+                  );
+                })()
               )}
             </Box>
           </Box>

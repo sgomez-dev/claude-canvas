@@ -100,3 +100,31 @@ test("form is deterministic across renders", async () => {
   b.dispose();
   expect(second).toBe(first);
 });
+
+// Regression test for what the tmux smoke test found: the form pane showed
+// "> Who *" with nothing beneath it, because an empty value with no
+// `placeholder` rendered an empty <Text> that collapsed. The user was
+// typing into a field with no visible extent. Every fixture above gives its
+// textarea a placeholder, which is exactly why none of them showed it.
+test("an empty field with no placeholder still renders a visible input line", async () => {
+  const r = renderCanvas(
+    <Form
+      id="form-6"
+      config={{
+        title: "No placeholders anywhere",
+        fields: [
+          { id: "who", type: "text", label: "Who", required: true },
+          { id: "count", type: "number", label: "Count" },
+        ],
+      }}
+      enabled={false}
+    />,
+    { columns: 60, rows: 14 }
+  );
+  const frame = await r.settle();
+  // The focused field carries the cursor; the unfocused empty one a rule.
+  expect(frame).toContain("▏");
+  expect(frame).toContain("—");
+  expect(await r.settle()).toMatchSnapshot();
+  r.dispose();
+});

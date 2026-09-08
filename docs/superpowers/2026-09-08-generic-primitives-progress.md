@@ -336,9 +336,9 @@ reported `"host":"tmux"`, and every pane closed itself by exiting 0 -- no
 orphaned panes, which is the failure class the whole lifecycle design exists
 to prevent.
 
-### Found by the smoke test, not fixed
+### Found by the smoke test, and fixed
 
-**An empty text/textarea/number field renders no input line at all.** The
+**An empty text/textarea/number field rendered no input line at all.** The
 form pane showed:
 
 ```
@@ -347,13 +347,30 @@ form pane showed:
   [ ]
 ```
 
-The focused `Who` field has a label and nothing beneath it, because an empty
-value with no `placeholder` renders an empty `<Text>` that collapses to
-nothing. The user is typing into a field with no visible extent. A
-`placeholder` masks it, so the snapshot fixtures -- which give the textarea
-one -- never showed it. A one-line fix (render a rule or a cursor block when
-the value is empty) but it changes what the form looks like, so it is left
-for the owner rather than decided here.
+The focused `Who` field had a label and nothing beneath it: an empty value
+with no `placeholder` rendered an empty `<Text>` that collapsed to nothing,
+so the user was typing into a field with no visible extent. A `placeholder`
+masks it, and every snapshot fixture gave its textarea one, which is exactly
+why no test caught it. This is the case for driving a real pane -- 212 unit
+and integration tests did not surface it, and one `capture-pane` did.
+
+Fixed: a field always renders with visible extent. The cursor `▏` sits where
+the next character will land, so it follows the typed text and marks the
+focused field; an unfocused empty field falls back to a dim `—`. Verified
+back in a real pane, where the same form now shows:
+
+```
+> Who *
+  ▏
+  Confirmed
+  [ ]
+```
+
+**Ruling 7: the cursor marks focus in addition to the `> ` gutter and the
+label colour, not instead of them.** The gutter already survives a no-color
+terminal (picker.tsx's precedent), so the cursor is redundant as a focus
+indicator -- but it is not redundant as an *extent* indicator, which is the
+actual defect. Cost if wrong: one glyph per focused field.
 
 *** PHASE 2 IMPLEMENTATION COMPLETE. Not reviewed by a second pass: this
 ledger and the code in commits 158e74a..ddd263a are one agent's work with no

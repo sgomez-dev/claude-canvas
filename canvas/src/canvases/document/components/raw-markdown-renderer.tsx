@@ -42,7 +42,9 @@ function highlightLine(line: string): HighlightedSegment[] {
   // Check for header
   const headerMatch = line.match(/^(#{1,6})\s/);
   if (headerMatch) {
-    segments.push({ text: headerMatch[1], color: SYNTAX_COLORS.header, bold: true });
+    // Group 1 "(#{1,6})" is a mandatory (non-optional) capture group, so a
+    // successful match always populates headerMatch[1].
+    segments.push({ text: headerMatch[1]!, color: SYNTAX_COLORS.header, bold: true });
     segments.push({ text: " " });
     // Highlight rest of header line
     const rest = line.slice(headerMatch[0].length);
@@ -75,7 +77,9 @@ function highlightLine(line: string): HighlightedSegment[] {
     if (listMatch[1]) {
       segments.push({ text: listMatch[1] });
     }
-    segments.push({ text: listMatch[2], color: SYNTAX_COLORS.listMarker, bold: true });
+    // Group 2 "([-*+]|\d+\.)" is a mandatory capture group, so a successful
+    // match always populates listMatch[2].
+    segments.push({ text: listMatch[2]!, color: SYNTAX_COLORS.listMarker, bold: true });
     segments.push({ text: " " });
     const rest = line.slice(listMatch[0].length);
     segments.push(...highlightInline(rest));
@@ -97,7 +101,8 @@ function highlightInline(text: string, baseStyle: Partial<HighlightedSegment> = 
     const codeMatch = remaining.match(/^`([^`]+)`/);
     if (codeMatch) {
       segments.push({ text: "`", color: SYNTAX_COLORS.code, ...baseStyle });
-      segments.push({ text: codeMatch[1], color: SYNTAX_COLORS.code, ...baseStyle });
+      // Group 1 "([^`]+)" is mandatory, so a successful match always populates codeMatch[1].
+      segments.push({ text: codeMatch[1]!, color: SYNTAX_COLORS.code, ...baseStyle });
       segments.push({ text: "`", color: SYNTAX_COLORS.code, ...baseStyle });
       remaining = remaining.slice(codeMatch[0].length);
       continue;
@@ -107,7 +112,8 @@ function highlightInline(text: string, baseStyle: Partial<HighlightedSegment> = 
     const boldMatch = remaining.match(/^\*\*([^*]+)\*\*/);
     if (boldMatch) {
       segments.push({ text: "**", color: SYNTAX_COLORS.bold, dimColor: true, ...baseStyle });
-      segments.push({ text: boldMatch[1], color: SYNTAX_COLORS.bold, bold: true, ...baseStyle });
+      // Group 1 "([^*]+)" is mandatory, so a successful match always populates boldMatch[1].
+      segments.push({ text: boldMatch[1]!, color: SYNTAX_COLORS.bold, bold: true, ...baseStyle });
       segments.push({ text: "**", color: SYNTAX_COLORS.bold, dimColor: true, ...baseStyle });
       remaining = remaining.slice(boldMatch[0].length);
       continue;
@@ -117,7 +123,8 @@ function highlightInline(text: string, baseStyle: Partial<HighlightedSegment> = 
     const italicMatch = remaining.match(/^\*([^*]+)\*/);
     if (italicMatch) {
       segments.push({ text: "*", color: SYNTAX_COLORS.italic, dimColor: true, ...baseStyle });
-      segments.push({ text: italicMatch[1], color: SYNTAX_COLORS.italic, italic: true, ...baseStyle });
+      // Group 1 "([^*]+)" is mandatory, so a successful match always populates italicMatch[1].
+      segments.push({ text: italicMatch[1]!, color: SYNTAX_COLORS.italic, italic: true, ...baseStyle });
       segments.push({ text: "*", color: SYNTAX_COLORS.italic, dimColor: true, ...baseStyle });
       remaining = remaining.slice(italicMatch[0].length);
       continue;
@@ -127,9 +134,11 @@ function highlightInline(text: string, baseStyle: Partial<HighlightedSegment> = 
     const linkMatch = remaining.match(/^\[([^\]]+)\]\(([^)]+)\)/);
     if (linkMatch) {
       segments.push({ text: "[", color: SYNTAX_COLORS.link, dimColor: true, ...baseStyle });
-      segments.push({ text: linkMatch[1], color: SYNTAX_COLORS.link, ...baseStyle });
+      // Groups 1 "([^\]]+)" and 2 "([^)]+)" are both mandatory, so a successful
+      // match always populates linkMatch[1] and linkMatch[2].
+      segments.push({ text: linkMatch[1]!, color: SYNTAX_COLORS.link, ...baseStyle });
       segments.push({ text: "](", color: SYNTAX_COLORS.link, dimColor: true, ...baseStyle });
-      segments.push({ text: linkMatch[2], color: SYNTAX_COLORS.linkUrl, dimColor: true, ...baseStyle });
+      segments.push({ text: linkMatch[2]!, color: SYNTAX_COLORS.linkUrl, dimColor: true, ...baseStyle });
       segments.push({ text: ")", color: SYNTAX_COLORS.link, dimColor: true, ...baseStyle });
       remaining = remaining.slice(linkMatch[0].length);
       continue;
@@ -144,7 +153,8 @@ function highlightInline(text: string, baseStyle: Partial<HighlightedSegment> = 
     }
 
     // Single special character (didn't match any pattern)
-    segments.push({ text: remaining[0], ...baseStyle });
+    // The enclosing `while (remaining.length > 0)` guarantees remaining[0] exists.
+    segments.push({ text: remaining[0]!, ...baseStyle });
     remaining = remaining.slice(1);
   }
 
@@ -169,25 +179,31 @@ export function RawMarkdownRenderer({
   if (cursorPosition !== undefined) {
     let charCount = 0;
     for (let i = 0; i < lines.length; i++) {
-      if (charCount + lines[i].length >= cursorPosition) {
+      // i < lines.length per the loop condition, so lines[i] is always defined.
+      const currentLine = lines[i]!;
+      if (charCount + currentLine.length >= cursorPosition) {
         cursorLine = i;
         cursorCol = cursorPosition - charCount;
         break;
       }
-      charCount += lines[i].length + 1; // +1 for newline
+      charCount += currentLine.length + 1; // +1 for newline
     }
     // Handle cursor at very end
     if (cursorLine === -1) {
       cursorLine = lines.length - 1;
-      cursorCol = lines[lines.length - 1].length;
+      // content.split("\n") always yields at least one element, so
+      // lines.length - 1 is always a valid, defined index.
+      cursorCol = lines[lines.length - 1]!.length;
     }
   }
 
   // Normalize selection bounds
-  const selStart = selectionStart !== null && selectionEnd !== null
+  // Guard against both `null` (explicitly "no selection") and `undefined`
+  // (prop omitted); either means there is no usable selection bound.
+  const selStart = selectionStart != null && selectionEnd != null
     ? Math.min(selectionStart, selectionEnd)
     : null;
-  const selEnd = selectionStart !== null && selectionEnd !== null
+  const selEnd = selectionStart != null && selectionEnd != null
     ? Math.max(selectionStart, selectionEnd)
     : null;
   const hasSelection = selStart !== null && selEnd !== null && selStart !== selEnd;
@@ -344,7 +360,8 @@ function renderSegmentsWithCursorAndSelection(
   let charIndex = 0;
 
   for (let segIdx = 0; segIdx < segments.length; segIdx++) {
-    const seg = segments[segIdx];
+    // segIdx < segments.length per the loop condition, so seg is always defined.
+    const seg = segments[segIdx]!;
 
     for (let i = 0; i < seg.text.length; i++) {
       const globalIdx = charIndex + i;

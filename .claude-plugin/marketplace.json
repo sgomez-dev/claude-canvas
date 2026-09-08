@@ -1,8 +1,8 @@
 {
   "name": "claude-canvas",
   "owner": {
-    "name": "David Siegel",
-    "email": "djsiegel@gmail.com"
+    "name": "Santiago Gomez de la Torre Romero",
+    "email": "santiago.gomez@evenbytes.com"
   },
   "metadata": {
     "description": "Claude Code plugin marketplace for interactive terminal TUI components"
@@ -11,8 +11,8 @@
     {
       "name": "canvas",
       "source": "./canvas",
-      "description": "Spawn and control interactive terminal displays (calendars, documents, flights) with real-time IPC communication",
-      "version": "0.1.0",
+      "description": "Interactive terminal panes Claude can open beside the conversation and read answers back from: pickers, forms, tables, diff review, file trees, dashboards, calendars and documents",
+      "version": "0.2.0",
       "strict": false
     }
   ]

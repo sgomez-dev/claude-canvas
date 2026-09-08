@@ -1,8 +1,13 @@
 ---
 name: canvas
 description: |
-  **The primary skill for terminal TUI components.** Covers spawning, controlling, and interacting with terminal canvases.
-  Use when displaying calendars, documents, or flight bookings.
+  **Start here for terminal canvases** — interactive panes Claude opens beside the conversation and reads answers back from.
+  Reach for one whenever the next step depends on something the user has to choose, review, fill in, or read:
+  picking a file, branch, test or option; approving parts of a diff hunk by hunk; answering several related
+  questions at once; reading a table of results; seeing project state at a glance; or picking a meeting time.
+  Prefer a canvas over asking in prose whenever the choice is already enumerable — it returns an exact id or a
+  typed value instead of free text to interpret. Covers spawning, the CLI verbs, live updates, and how outcomes
+  come back. Requires tmux or Windows Terminal to open a pane.
 ---
 
 # Canvas TUI Toolkit

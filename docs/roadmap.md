@@ -13,9 +13,25 @@ Four sub-projects. The order is forced by dependencies, not preference.
 
 ### Phase 1 — Foundations: one IPC, running on any OS
 
-**Status: complete.** All 18 tasks landed: `bun test` passes (124+ tests) and
-`tsc --noEmit` reports 0 errors. See the final whole-branch review's fix wave
-(2026-09-08) for the last of the cleanup.
+**Status: complete, with two defects that escaped it** — corrected 2026-09-08,
+see the Phase 2 ledger's audit section. All 18 tasks landed and `tsc --noEmit`
+reported 0 errors, but the "124 pass / 0 fail" recorded at the time held only
+on the machine it was measured on: **CI was red at the very commit that
+declared Phase 1 complete**, and had never been green since the 3-OS matrix
+landed in Task 18.
+
+1. `Bun.Socket.write()` returns fewer bytes than offered under backpressure;
+   `server.ts` and `client.ts` both discarded the return value, so every frame
+   larger than the socket send buffer was silently truncated (measured:
+   327,212 of 4,000,000 bytes). Failed on ubuntu and macOS, passed on Windows,
+   whose loopback buffers absorb 4 MB in one call — which is why the machine
+   the code was written on never saw it.
+2. `meeting-picker-view.tsx` rendered its clock through `toLocaleTimeString([])`,
+   whose locale Bun resolves from the host, so the committed snapshot baseline
+   matched no CI leg.
+
+Both fixed (158e74a, a8e9b4b). The lesson worth keeping: a green local run on
+one OS is not evidence, and the matrix existed but nothing was reading it.
 
 The bottleneck for everything else. Two problems that turn out to be one
 decision: choosing how a canvas talks to Claude *is* choosing the transport,
@@ -33,13 +49,50 @@ Scope:
 
 ### Phase 2 — Generic primitives
 
-Depends on Phase 1. Reusable canvases instead of domain-specific demos:
-`picker`, `form`, `table`, `diff`. This is where the everyday value lives.
+**Status: complete** as of 2026-09-08. All four primitives — `picker`, `form`,
+`table`, `diff` — are implemented, wired into `KNOWN_KINDS`, the scenario
+registry and `renderCanvas`, and each has render snapshots, real-socket IPC
+tests and a `SKILL.md`. `bun test` is 211 pass / 0 fail and `tsc --noEmit` is
+clean.
+
+Getting there needed more than finishing the last two: the implementation work
+had landed on `worktree-phase2-primitives` and never reached `main`, `form` was
+committed without any wiring or tests, `table` did not exist despite two commit
+messages claiming it, and no ledger was kept. See
+`docs/superpowers/2026-09-08-generic-primitives-progress.md` for the audit, the
+rulings, and **nine known gaps** — of which gap 1 (outcomes are not buffered,
+so a selection made before `wait` connects is lost and a config error is never
+observable by Claude) is the most consequential open defect in the project and
+should be closed before Phase 3.
+
+Reusable canvases instead of domain-specific demos. This is where the everyday
+value lives.
 
 ### Phase 3 — Richer canvases
 
 Depends on Phase 2, because new canvases should *compose* primitives rather
 than be 600 bespoke lines like `flight` is today. See the backlog below.
+
+### Phase 3 — entry conditions
+
+Recorded here because Phase 2 uncovered them and Phase 3 depends on them:
+
+- **Close gap 1 from the Phase 2 ledger first.** Every primitive's result can
+  be lost to a timing race today, and no amount of new canvases improves on
+  that.
+- **Decide what the scenario registry is.** It has no runtime consumer at all
+  — `getScenario` is called only from its own test, and `interactionMode` /
+  `closeOn` / `autoCloseDelay` are read by nothing. Either the CLI starts
+  validating `--scenario` against it and honouring those fields, or it goes.
+  Phase 3's "compose primitives" premise needs an answer either way.
+- **`--scenario` is unvalidated.** `calendar.tsx:354` falls through to a
+  read-only view when the scenario name is right but the config lacks
+  `calendars`, with nothing reported. Composition will multiply this.
+- **Delete `markdown-renderer.tsx`** (781 dead lines, ~10% of the codebase)
+  and de-duplicate the document/calendar types before writing canvases that
+  import them.
+- **Verify Sixel in Windows Terminal** before committing to a graphics
+  protocol, as already noted below.
 
 ### Phase 4 — Publishing
 
@@ -154,9 +207,16 @@ and screenshots are exactly the case that meets this cost.
 
 **Fix it before any screenshot work lands**, by buffering incoming chunks in a
 list and concatenating once, when a frame is known to be complete, rather than
-eagerly on arrival. Task 7's integration test already pushes a 4 MB payload
-through the decoder, so it is a usable canary: if that test is noticeably slow,
-this is why.
+eagerly on arrival.
+
+Measured 2026-09-08 rather than estimated: a 4 MB frame costs 39 ms in 16 KB
+chunks, 15 ms in 64 KB chunks, 7 ms in 256 KB chunks. So the real cost is an
+order of magnitude below the 2 GB-of-copying estimate above, and this is not
+urgent. Note that the 4 MB integration test's failure was **not** this — it was
+the send-side truncation described in Phase 1's status. `socket-writer.ts`,
+added by that fix, deliberately avoids the same pattern outbound by queueing
+views instead of one growing buffer; the same shape is what `FrameDecoder`
+needs inbound.
 
 ## Findings from the initial review
 

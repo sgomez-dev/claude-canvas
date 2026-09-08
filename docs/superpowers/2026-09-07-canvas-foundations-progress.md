@@ -887,3 +887,97 @@ final whole-branch review (skill mandates the most capable available model
 for this specific step, not the session default) before finishing-a-
 development-branch. Asking the user about this given their explicit
 sonnet-always directive conflicts with that skill guidance. ***
+
+## FINAL WHOLE-BRANCH REVIEW (Opus, 2d45bcc..a0d847b, 49 commits)
+
+Verdict: Ready to merge WITH FIXES. Found what no task-scoped review could:
+
+CRITICAL: canvases/index.tsx's unknown-kind default branch does
+console.error+process.exit(1) from inside the pane process, violating the
+spec's hard "canvas always exits 0" invariant. Reachable by a typo
+(assertIdent validates identifier SHAPE, not membership in {calendar,
+document, flight}) -- process.exit doesn't unwind, so runShow's finally{exit 0}
+never runs. On Windows this is the exact unremovable zombie pane the whole
+lifecycle design exists to prevent, caused by a typo.
+
+IMPORTANT (7): (2) 3 skill-doc `show` examples use --config which doesn't
+exist on show (only --config-file, commander rejects unknown options,
+prints no JSON); (3) document/SKILL.md documents a `selected` wait outcome
+document.tsx never sends (it's pull-only via get); (4) wait/get/close/list
+have no try/catch around validation -- unhandled rejections instead of the
+promised single JSON object, plus client.ts's decoder.push lacks the guard
+server.ts's equivalent has; (5) spec's reuse-detection invariant is
+unimplemented -- wtSession written, never read, no liveness check in
+runSpawn, so double-spawn on one id orphans the first pane permanently;
+(6) commands/canvas.md still tmux-exclusive; (7) use-canvas-server calls
+detectHost() unconditionally, so `show` in a plain terminal (a documented
+supported flow) throws NoHostError with no IPC at all instead of degrading.
+
+Independently verified by the reviewer, not just claimed: measured 20/20 clean
+on the one other send-then-close candidate (server.stop() after a broadcast);
+confirmed the 4 rulings (token leaf module, error-count arithmetic,
+send-then-close deviation, macos-latest) all correct in hindsight; re-derived
+every invariant in Task 16 batch C/D's assertions independently and confirmed
+the ledger's dead-code/untested-path characterizations still hold.
+
+Ruling 16: fix wave includes the Critical, all 7 Important, plus cheap
+Minor doc one-liners (root README tmux line, roadmap "Status: in design" and
+false new-window-fallback claim, stale TZ-pin comment, ready-message
+dead-on-arrival note in CLAUDE.md, get-key generic-claim scoping, tmux 3.1+
+version note) and two test-robustness Minors the reviewer explicitly called
+"should fix before merge" (client.test.ts's flaky fixed-100ms-wait assertion;
+cli.test.ts's list-test not platform-forced, silently asserting nothing on
+2 of 3 CI legs right as the 3-OS matrix runs for the first time).
+
+Ruling 17: Important #5 (reuse detection) is resolved by DOWNGRADING the
+spec's claim, not by implementing new reuse logic in this fix wave -- why:
+it's substantial new logic (liveness check + wtSession consumption in
+runSpawn), not a mechanical fix, and the SDD process caps this at one fix
+wave with no dedicated review round for a new feature. Rushing untested reuse
+logic into a single-pass commit is worse than being honest that Phase 1
+doesn't have it. The spec's invariant claim gets corrected to describe
+current behavior (double-spawn orphans a pane) and the feature moves to the
+roadmap's Phase 2 backlog. Cost if wrong: double-spawn remains a real
+footgun until Phase 2; mitigated by it now being honestly documented instead
+of silently broken against a false claim.
+
+Minors deliberately left out of the fix wave (backlog, not blockers):
+idle-timeout on unauthenticated connections, PaneSpec.title unused/uncovered
+by the semicolon guard, config/log file accumulation with no cleanup,
+registry.ts's newToken re-export (Ruling 1 partial regression risk),
+markdown-renderer.tsx being dead code (delete recommended, not required),
+get() unimplemented on flight/calendar (doc-scoped instead per Ruling 17's
+logic), tmux open() never executed on any real machine (analysis-only,
+judged safe).
+
+## SCOPED RE-REVIEW OF FIX WAVE (Opus, 8a069ff..6a14420)
+
+Verdict: all findings addressed, no new Critical/Important breakage. Verified
+against source, not against the fix wave's own report -- the kind-check runs
+in the controller before any pane spawns, renderCanvas's default branch is
+genuinely non-crashing and returns rather than exiting, the client.ts decoder
+guard routes to the same die() real disconnects use (so waitForOutcome
+correctly reports "disconnected"), and finding #5 confirmed documentation-only
+with zero reuse-detection code anywhere (grep for wtSession shows writes only,
+never read).
+
+Ruling 18: 6 new Minor items surfaced by the re-review are parked, not chased
+with another round -- the process caps this at one fix wave with one scoped
+re-review, and the reviewer's own verdict was "Nothing blocking":
+(1) CLAUDE.md's note that the dead-on-arrival `ready` message is "covered by
+tests" is false -- the test comment says the opposite; (2) use-canvas-server's
+startup-failure lastError path lost its only test coverage when the fix wave
+repurposed the old no-host test; (3) skills/canvas/SKILL.md:84 says get
+returns {"data":null} but omits the key field that's actually present;
+(4) commands/canvas.md's own wait example uses an id its own spawn examples
+never pass, so the default id wouldn't match; (5) CLAUDE.md's "Adding a New
+Canvas Type" steps don't mention KNOWN_KINDS (cli.ts) as a third place a new
+canvas type must be registered, alongside the switch and the scenario
+registry; (6) use-canvas-server's host-detection catch is untyped/silent, so
+a future non-env-based host probe's real error could be silently downgraded
+to "no host" rather than surfaced. All six recorded for whoever next touches
+these files; none block merge.
+
+*** FINAL WHOLE-BRANCH REVIEW COMPLETE. All 18 tasks + the 1 Critical/7
+Important/9 Minor fix wave + this scoped re-review are done. No further
+review rounds remain per the SDD process. Next: finishing-a-development-branch. ***

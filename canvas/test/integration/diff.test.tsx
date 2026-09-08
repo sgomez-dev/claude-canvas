@@ -178,6 +178,76 @@ test("moving the cursor then approving with only a single settle() tick approves
   r.dispose();
 });
 
+const THREE_HUNK_TWO_FILE_DIFF = `diff --git a/a.txt b/a.txt
+--- a/a.txt
++++ b/a.txt
+@@ -1,2 +1,2 @@
+-old a1
++new a1
+ shared
+@@ -8,2 +8,2 @@
+ shared2
+-old a2
++new a2
+diff --git a/b.txt b/b.txt
+--- a/b.txt
++++ b/b.txt
+@@ -1,1 +1,1 @@
+-old b
++new b
+`;
+
+// Broader interaction coverage beyond the single-hunk fixtures every other
+// test in this primitive uses: a two-file, multi-hunk diff (3 hunks total),
+// navigating across the file boundary, with a genuine mix of all three
+// decision states (approved, rejected, undecided-defaults-to-rejected).
+test("navigating across a file boundary and mixing approve/reject/undecided submits the exact decisions made", async () => {
+  const id = "diff-it-9";
+  ids.push(id);
+  const r = renderCanvas(
+    <Diff id={id} config={{ diffText: THREE_HUNK_TWO_FILE_DIFF }} scenario="review" enabled={true} />,
+    { columns: 80, rows: 24 }
+  );
+  await r.settle();
+  await new Promise((res) => setTimeout(res, 50));
+
+  const conn = await openConnection(id);
+
+  // Cursor starts at a.txt#0: approve it.
+  r.stdin.write("a");
+  await r.settle();
+  await r.settle();
+  // Move to a.txt#1 (still within a.txt): reject it.
+  r.stdin.write("j");
+  await r.settle();
+  await r.settle();
+  r.stdin.write("r");
+  await r.settle();
+  await r.settle();
+  // Move to b.txt#0 -- crosses the file boundary. Leave it undecided.
+  r.stdin.write("j");
+  await r.settle();
+  await r.settle();
+  // Submit.
+  r.stdin.write("\r");
+  await r.settle();
+
+  const msg = await conn.next(2000);
+  expect(msg).toEqual({
+    type: "selected",
+    data: {
+      decisions: [
+        { hunkId: "a.txt#0", decision: "approved" },
+        { hunkId: "a.txt#1", decision: "rejected" },
+        { hunkId: "b.txt#0", decision: "rejected" },
+      ],
+    },
+  });
+
+  conn.close();
+  r.dispose();
+});
+
 test("escape cancels without sending a result", async () => {
   const id = "diff-it-3";
   ids.push(id);

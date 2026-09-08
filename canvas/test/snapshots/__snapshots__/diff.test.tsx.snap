@@ -34,3 +34,20 @@ exports[`diff canvas renders a parse error state 1`] = `
 \x1B[31m│\x1B[39m                                                                              \x1B[31m│\x1B[39m
 \x1B[31m╰──────────────────────────────────────────────────────────────────────────────╯\x1B[39m"
 `;
+
+exports[`diff canvas renders after navigating and approving a hunk 1`] = `
+"\x1B[36m╭──────────────────────────────────────────────────────────────────────────────╮\x1B[39m
+\x1B[36m│\x1B[39m \x1B[1mReview\x1B[22m                                                                       \x1B[36m│\x1B[39m
+\x1B[36m│\x1B[39m   a.txt (modified) 0/1 decided                                               \x1B[36m│\x1B[39m
+\x1B[36m│\x1B[39m \x1B[36m> b.txt (modified) 1/1 decided\x1B[39m                                               \x1B[36m│\x1B[39m
+\x1B[36m╰──────────────────────────────────────────────────────────────────────────────╯\x1B[39m
+
+╭──────────────────────────────────────────────────────────────────────────────╮
+│ \x1B[2m@@ -1,1 +1,1 @@\x1B[22m                                                              │
+│ \x1B[31m-old b\x1B[39m                                                                       │
+│ \x1B[32m+new b\x1B[39m                                                                       │
+│ \x1B[1m\x1B[32m[approved]\x1B[39m\x1B[22m                                                                   │
+╰──────────────────────────────────────────────────────────────────────────────╯
+
+\x1B[2ma: approve  r: reject  ↑/↓: navigate  Enter: submit  Esc: cancel\x1B[22m"
+`;

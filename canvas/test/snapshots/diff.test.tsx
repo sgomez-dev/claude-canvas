@@ -47,6 +47,23 @@ test("diff canvas renders a parse error state", async () => {
   r.dispose();
 });
 
+// Every other snapshot in this file captures only the initial render (cursor
+// at hunk 0, everything undecided). This one exercises one navigation
+// keypress and one decision keypress so a committed snapshot shows a moved
+// cursor and a non-undecided hunk state.
+test("diff canvas renders after navigating and approving a hunk", async () => {
+  const r = renderCanvas(
+    <Diff id="diff-5" config={{ title: "Review", diffText: SAMPLE_DIFF }} scenario="review" enabled={false} />,
+    { columns: 80, rows: 24 }
+  );
+  await r.settle();
+  r.stdin.write("j"); // move from a.txt's hunk to b.txt's hunk
+  await r.settle();
+  r.stdin.write("a"); // approve it
+  expect(await r.settle()).toMatchSnapshot();
+  r.dispose();
+});
+
 test("diff canvas is deterministic across renders", async () => {
   const a = renderCanvas(
     <Diff id="diff-4" config={{ title: "Review", diffText: SAMPLE_DIFF }} scenario="review" enabled={false} />,

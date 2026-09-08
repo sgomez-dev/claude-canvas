@@ -76,11 +76,16 @@ state.
 `↑`/`↓` or `j`/`k` scroll a row, `PgUp`/`PgDn` a window. `Esc` closes. The
 footer shows the visible range whenever the data does not fit.
 
-## Known limitation
+## Wide characters
 
-Column widths are measured in UTF-16 code units, not display columns, so
-cells containing CJK characters or emoji will misalign their row. Prefer
-ASCII content, or set explicit widths with slack.
+Column widths are measured in display columns, so CJK, fullwidth forms,
+emoji and combining marks all align correctly -- a cell holding `日本語`
+counts as 6 columns, not 3, and a family emoji as 2, not 11.
+
+The one case that can still look wrong is a ZWJ sequence (a family or
+profession emoji) in a terminal that does not support ZWJ: it draws the
+component emoji side by side and occupies more room than any measurement
+would predict. Single-codepoint emoji and CJK are unaffected.
 
 ## Updating it in place
 

@@ -320,13 +320,37 @@ would be silently truncated, which is the same class of bug as 158e74a.
 Covered by a test that pushes 3000 rows. Cost if wrong: an update takes as
 long as the socket needs, which is the correct cost.
 
-### STILL OPEN 6 -- `table` measures column width in UTF-16 code units
+### CLOSED 6 -- `table` measured column width in UTF-16 code units (this commit)
 
-CJK and emoji cells misalign their row. The fix needs a display-width
-measure; the phase constraint is no new runtime dependencies, and reaching
-into Ink's transitive `string-width` is worse than the misalignment.
-`Intl.Segmenter` is built into Bun and would give correct grapheme
-clustering without a dependency, which is the route to take.
+`String.length` was the wrong unit three ways: a CJK ideograph is one code
+unit and two columns, an astral emoji two units and two columns, and a ZWJ
+family emoji **eleven** units and two columns. Any row containing one of
+them sheared apart.
+
+**Ruling 14: no dependency was needed, only `Intl.Segmenter`.** The hard
+half of the problem is grapheme clustering, and Bun has it built in --
+verified before writing anything: it clusters a ZWJ family emoji, a
+regional-indicator flag and a decomposed accent each as one segment. The
+easy half is a width table for the cluster's leading code point, which is
+~24 sorted ranges. So the phase constraint (no new runtime dependencies)
+never had to be traded against correctness, and reaching into Ink's
+transitive `string-width` was never necessary.
+
+The range table is a deliberate practical subset of UAX #11 rather than a
+generated implementation: the ranges a terminal actually renders
+double-width, with East Asian *Ambiguous* treated as width 1, which is what
+a terminal in a Latin locale does.
+
+One limit is the domain's rather than the code's, and is now documented in
+both `width.ts` and the table skill: a ZWJ sequence is one grapheme of two
+columns by the emoji convention, but a terminal without ZWJ support draws
+the components side by side and occupies more. No measurement can reconcile
+those. Single-codepoint emoji, CJK and fullwidth forms -- what real table
+data contains -- are unaffected.
+
+13 unit tests, each asserting the old `.length` value alongside the correct
+one so the defect stays legible, plus a render snapshot of a table whose
+every row mixes widths.
 
 ### STILL OPEN 7 -- The calendar meeting-picker's help bar overlaps its readout at 70x18
 

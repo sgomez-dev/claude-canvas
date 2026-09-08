@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 import { Box, Text, useInput, useApp, useStdout } from "ink";
 import { useCanvasServer } from "../runtime/use-canvas-server";
 import type { TableConfig, TableColumn } from "./table/types";
+import { displayWidth, padToWidth, truncateToWidth } from "./width";
 
 export interface TableProps {
   id: string;
@@ -74,25 +75,28 @@ function validateTable(config: TableConfig | undefined): ValidatedTable {
 
 function computeWidth(col: TableColumn, rows: Array<Record<string, string>>): number {
   if (col.width !== undefined) return col.width;
-  let longest = col.label.length;
+  let longest = displayWidth(col.label);
   for (const row of rows) {
-    const cell = row[col.key] ?? "";
-    if (cell.length > longest) longest = cell.length;
+    const cell = displayWidth(row[col.key] ?? "");
+    if (cell > longest) longest = cell;
   }
   return Math.max(1, Math.min(MAX_AUTO_WIDTH, longest));
 }
 
-// Known limitation, deliberate: width is measured in UTF-16 code units, not
-// display columns, so a cell holding CJK or emoji misaligns its row. The fix
-// is a width-aware measure (Ink depends on `string-width` transitively), but
-// this phase's global constraint is no new runtime dependencies and reaching
-// into a transitive dep is worse than the misalignment. Recorded in the
-// Phase 2 ledger.
+// Measured in display columns, not UTF-16 code units. `.length` was wrong
+// three ways -- a CJK ideograph is one code unit and two columns, an astral
+// emoji is two units and two columns, and a ZWJ family emoji is eleven
+// units and two columns -- so any row containing one misaligned. See
+// width.ts; no dependency was needed, only Intl.Segmenter.
 function fitCell(content: string, width: number): string {
-  if (content.length > width) {
-    return width <= 1 ? content.slice(0, width) : content.slice(0, width - 1) + "…";
+  if (displayWidth(content) > width) {
+    if (width <= 1) return truncateToWidth(content, width);
+    // Truncate to leave room for the ellipsis, then pad: a double-width
+    // character dropped at the boundary can leave the result a column
+    // short of `width - 1`.
+    return padToWidth(truncateToWidth(content, width - 1) + "…", width);
   }
-  return content.padEnd(width);
+  return padToWidth(content, width);
 }
 
 export function Table({ id, config: initialConfig, scenario = "display", enabled }: TableProps): React.JSX.Element {

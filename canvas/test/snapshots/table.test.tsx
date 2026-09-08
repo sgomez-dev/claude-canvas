@@ -65,3 +65,39 @@ test("table is deterministic across renders", async () => {
   b.dispose();
   expect(second).toBe(first);
 });
+
+
+// Every row here mixes widths: CJK (2 columns per ideograph, 1 code unit),
+// an astral emoji (2 columns, 2 code units) and a ZWJ family emoji (2
+// columns, ELEVEN code units). Measured with String.length these rows
+// sheared apart; this snapshot is the proof the column separators line up.
+// Built from code points so the fixture is reviewable.
+const cp = (...points: number[]) => String.fromCodePoint(...points);
+const CJK = cp(0x65e5, 0x672c, 0x8a9e);
+const FAMILY = [0x1f469, 0x200d, 0x1f469, 0x200d, 0x1f467, 0x200d, 0x1f466]
+  .map((c) => cp(c))
+  .join("");
+
+const WIDE_CONFIG: TableConfig = {
+  title: "Mixed-width cells",
+  columns: [
+    { key: "name", label: "Name", width: 10 },
+    { key: "note", label: "Note", width: 13 },
+  ],
+  rows: [
+    { name: "ascii", note: "plain" },
+    { name: CJK, note: "CJK cell" },
+    { name: cp(0x1f680) + " boost", note: "astral emoji" },
+    { name: FAMILY, note: "ZWJ cluster" },
+    { name: CJK + CJK, note: "truncated CJK" },
+  ],
+};
+
+test("table aligns cells of mixed display width", async () => {
+  const r = renderCanvas(<Table id="table-5" config={WIDE_CONFIG} enabled={false} />, {
+    columns: 40,
+    rows: 16,
+  });
+  expect(await r.settle()).toMatchSnapshot();
+  r.dispose();
+});

@@ -29,3 +29,17 @@ exports[`table renders a config error state for an empty columns list 1`] = `
 \x1B[31m│\x1B[39m                                                                    \x1B[31m│\x1B[39m
 \x1B[31m╰────────────────────────────────────────────────────────────────────╯\x1B[39m"
 `;
+
+exports[`table aligns cells of mixed display width 1`] = `
+"\x1B[36m╭──────────────────────────────────────╮\x1B[39m
+\x1B[36m│\x1B[39m \x1B[1mMixed-width cells\x1B[22m                    \x1B[36m│\x1B[39m
+\x1B[36m│\x1B[39m \x1B[1mName       Note          \x1B[22m            \x1B[36m│\x1B[39m
+\x1B[36m│\x1B[39m ascii      plain                     \x1B[36m│\x1B[39m
+\x1B[36m│\x1B[39m 日本語     CJK cell                  \x1B[36m│\x1B[39m
+\x1B[36m│\x1B[39m 🚀 boost   astral emoji              \x1B[36m│\x1B[39m
+\x1B[36m│\x1B[39m 👩‍👩‍👧‍👦         ZWJ cluster               \x1B[36m│\x1B[39m
+\x1B[36m│\x1B[39m 日本語日…  truncated CJK             \x1B[36m│\x1B[39m
+\x1B[36m│\x1B[39m                                      \x1B[36m│\x1B[39m
+\x1B[36m│\x1B[39m \x1B[2m↑/↓/PgUp/PgDn: scroll  Esc: close\x1B[22m    \x1B[36m│\x1B[39m
+\x1B[36m╰──────────────────────────────────────╯\x1B[39m"
+`;

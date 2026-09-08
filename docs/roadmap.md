@@ -97,11 +97,11 @@ closed, which is what these entry conditions were asking for:
 - Live server-push works: an `update <id>` verb exists and all four
   primitives implement `onUpdate`. That was the capability cited when TCP
   was chosen over files-plus-polling, and it had never been invocable.
+- `table` measures column width in display columns, via `Intl.Segmenter`
+  and a UAX #11 subset — no dependency was needed after all.
 
 **Still open before Phase 3:**
 
-- **`table` measures column width in UTF-16 code units**, so CJK and emoji
-  misalign. `Intl.Segmenter` is built into Bun and needs no dependency.
 - **The calendar meeting-picker overflows vertically at 70x18**, overlapping
   its own help bar. A Phase 1 layout defect, unrelated to the clock fixes
   that touched those lines.

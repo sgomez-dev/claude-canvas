@@ -25,12 +25,14 @@ Try asking Claude:
 View-only calendar display. User can navigate weeks but cannot select times.
 
 ```bash
-bun run src/cli.ts show calendar --scenario display --config '{
-  "title": "My Week",
-  "events": [
-    {"id": "1", "title": "Meeting", "startTime": "2025-01-06T09:00:00", "endTime": "2025-01-06T10:00:00"}
-  ]
-}'
+bun run src/cli.ts show calendar --scenario display --config-file cfg.json
+# cfg.json:
+# {
+#   "title": "My Week",
+#   "events": [
+#     {"id": "1", "title": "Meeting", "startTime": "2025-01-06T09:00:00", "endTime": "2025-01-06T10:00:00"}
+#   ]
+# }
 ```
 
 ### `meeting-picker`

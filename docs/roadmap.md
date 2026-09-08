@@ -70,8 +70,24 @@ value lives.
 
 ### Phase 3 — Richer canvases
 
+**Status: in progress** as of 2026-09-08. Design:
+`docs/superpowers/specs/2026-09-08-richer-canvases-design.md`. Ledger:
+`docs/superpowers/2026-09-08-richer-canvases-progress.md`.
+
 Depends on Phase 2, because new canvases should *compose* primitives rather
-than be 600 bespoke lines like `flight` is today. See the backlog below.
+than be 600 bespoke lines like `flight` is today — and no composition
+mechanism exists yet, which is why the phase starts by building one rather
+than by building a canvas.
+
+Four sub-projects, sequenced: **composition** (extract each primitive's view
+from its canvas shell, add a focus contract), **dashboard** (the first
+composed canvas, plus a `tree` view), **image pipeline** (capability
+detection, PNG decode, half-blocks, Sixel, Kitty), **image canvas**. The
+first two are text-only and verifiable anywhere; the third is the one with a
+real verification gap.
+
+The roadmap's fourth backlog item below — an interactive diff reviewer — was
+already delivered in Phase 2 as the `diff` primitive.
 
 ### Phase 3 — entry conditions
 
@@ -179,13 +195,26 @@ Four distinct ideas with very different difficulty:
 Two approaches, and the sane design uses both:
 
 - **Terminal graphics protocols** (Kitty, iTerm2, Sixel) give pixel fidelity
-  but depend on the terminal. **Sixel support in Windows Terminal must be
-  verified before committing to this.**
+  but depend on the terminal.
 - **Coloured half-blocks** (`▀` with foreground/background colours) work in any
   terminal at low fidelity.
 
 Use half-blocks as the universal baseline and a graphics protocol when
 available.
+
+**Sixel support verified 2026-09-08**, which was this phase's stated entry
+condition. Windows Terminal has it from 1.22.10352.0; so do iTerm2 (3.3.0+),
+WezTerm, xterm (patch #359+), foot (1.2.0+) and VS Code (1.80+, behind
+`terminal.integrated.enableImages`). tmux passes it through when built
+`--enable-sixel`, and Homebrew's 3.7c is — checked locally, not assumed.
+
+**Apple Terminal has no graphics protocol at all**, and kitty, Ghostty and
+Alacritty all refuse Sixel (the first two implement the Kitty protocol
+instead). So the "half-blocks as universal baseline" instinct above was
+right, and stronger than it reads: half-blocks are the *common* path on
+macOS, not a degradation. And no single protocol covers the field — Sixel
+reaches six terminals, the Kitty protocol reaches the two that reject Sixel
+on principle.
 
 ### Constraints these ideas place on Phase 1
 

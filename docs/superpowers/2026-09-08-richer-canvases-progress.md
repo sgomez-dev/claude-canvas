@@ -218,8 +218,74 @@ better answer would be for a region to render without its own border and let
 the dashboard draw the separators, which is a layout change this phase's
 non-goals rule out.
 
-### Next
+### Interlude: the plugin was not actually installable
 
-Sub-project 3: the image pipeline -- capability detection, the PNG decoder,
-half-blocks, Sixel, Kitty, and the tmux passthrough. The only sub-project
-with a verification gap, and the one needing the human check in WezTerm.
+Not part of any sub-project, done because the question "how do I try this?"
+turned out to have the answer "you cannot".
+
+A `/plugin install` arrives as a git clone with no `node_modules`, and every
+skill told Claude to run `bun run ${CLAUDE_PLUGIN_ROOT}/src/cli.ts`, which
+imports ink, which imports react. Verified against a real install from the
+marketplace: `Cannot find package 'react'`. Anyone following the README
+would have installed it, asked for a canvas and got nothing.
+
+Fixed by shipping `canvas/dist/cli.js`, a 1.32 MB bundle with no runtime
+imports at all, with the 42 command references across the skills and
+`/canvas` pointing at it.
+
+**Ruling 13: a committed build artifact, guarded by two CI checks.** Putting
+a build output in version control is normally wrong; here it is the only way
+an install works with no setup step. The cost is that it can go stale
+silently, so `build:check` rebuilds and byte-compares it, and
+`check:standalone` runs it in a temp directory where it is the only file.
+The second check exists because **two plausible changes broke the bundle's
+one required property and neither showed up in 293 tests** -- the suite runs
+inside the repository, where every dependency is present:
+
+- `spawn` built its child's argv as `${import.meta.dir}/cli.ts`, a hardcoded
+  filename. From the bundle that is a `cli.ts` which does not exist, so the
+  pane opened and the canvas died instantly. Now `import.meta.path`.
+- `--external react-devtools-core` left a runtime import of a package the
+  plugin cannot resolve. Now resolved to a stub by a Bun.build plugin.
+
+Cost if wrong: a 1.3 MB artifact in history per source change, and two extra
+CI steps.
+
+Worth noting that the "did not become reachable within 10s, see the log"
+error added when outcomes were made durable is what diagnosed the first of
+those in a single read, rather than presenting as a silent hang.
+
+### Next: sub-project 3, the image pipeline
+
+Capability detection, the PNG decoder, half-blocks, Sixel, Kitty, and the
+tmux passthrough. The only sub-project with a verification gap.
+
+**Everything needed to start is already established** (see the pre-flight
+table above): the terminal support matrix, that Homebrew's tmux 3.7c carries
+Sixel, that `Bun.inflateSync` works so a PNG decoder needs no dependency,
+and that `screencapture` is blocked for this process so graphics cannot be
+verified visually by automation from here.
+
+**Verification tooling, current state:**
+
+- **WezTerm 20240203 is installed** (`/opt/homebrew/bin/wezterm`) and is
+  Sixel-capable, for the one human check the spec calls for.
+- **`libsixel` is NOT installed.** `brew install libsixel` provides
+  `sixel2png`, which is the independent decoder the spec wants as an oracle:
+  encode with our code, decode with libsixel, compare pixel-wise to the
+  source. It is a development tool, not a runtime dependency, and the test
+  must skip when it is absent so CI stays green.
+- `screencapture` fails with "could not create image from display" -- macOS
+  Screen Recording permission for this process. Granting it would let the
+  WezTerm check be automated; without it, that check stays a one-off ask.
+
+**Order to work in**, per the spec: capability detection and the
+`CANVAS_GRAPHICS` override first (pure logic, fully testable), then the PNG
+decoder (pure logic, fully testable), then half-blocks (pure ANSI text, so
+byte-snapshot-testable -- and the tier every user gets, so the tier that
+must be provably right), then Sixel against the libsixel oracle, then Kitty,
+then the tmux passthrough that `spawn` has to set up.
+
+**Do not start with Sixel.** It is the part that cannot be verified from
+here without installing libsixel, and the two tiers before it carry no
+verification risk at all.

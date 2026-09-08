@@ -139,6 +139,55 @@ remains analysis-only.
 
 ### Phase 4 — Publishing
 
+**Researched 2026-09-09, not started.** The plugin is already installable
+from this repository — `/plugin marketplace add sgomez-dev/claude-canvas`
+then `/plugin install canvas@claude-canvas` — and verified working from a
+real install with `node_modules` deleted, thanks to the shipped
+`canvas/dist/cli.js` bundle.
+
+Getting it into Anthropic's **`claude-community`** marketplace (the one users
+add as `anthropics/claude-plugins-community` and install from as
+`@claude-community`) works like this:
+
+- `anthropics/claude-plugins-community` is a **read-only mirror**. Pull
+  requests are not the route.
+- Submit through one of two in-app forms:
+  - **claude.ai:** `claude.ai/admin-settings/directory/submissions/plugins/new`
+    — requires a Team or Enterprise organization with directory management
+    access.
+  - **Console:** `platform.claude.com/plugins/submit` — the route for an
+    individual author not in a Team or Enterprise org. **This is the one to
+    use here.**
+- The review pipeline runs `claude plugin validate` plus automated safety
+  screening. Run it locally first; `--strict` treats warnings as errors.
+  **Both manifests pass today, including `--strict`.**
+- An approved plugin is pinned to a commit SHA in the community catalog, and
+  CI bumps that pin as commits land. The public catalog syncs nightly, so
+  approval and availability are not the same moment.
+- The **`claude-plugins-official`** marketplace is curated by Anthropic at
+  their discretion. There is no application process and the submission form
+  does not add anything to it.
+
+**Two things to fix before submitting**, both found while checking this:
+
+1. **There is no `canvas/.claude-plugin/plugin.json`.** Validation passes
+   without one, because the components are all in default locations and the
+   marketplace entry supplies the identity. But a plugin manifest is where
+   `author`, `license`, `repository` and `homepage` live, and where `version`
+   is declared for update purposes — all four are things a submission and
+   its reviewers want, and attribution in particular matters here given the
+   fork.
+2. **`canvas` is the name of both a skill and a command.**
+   `claude plugin details canvas` reports `Skills (10)` and lists `canvas`
+   twice: once for `skills/canvas/SKILL.md` and once for
+   `commands/canvas.md`. The docs also now describe `commands/` as the
+   legacy layout ("Skills as flat Markdown files. Use `skills/` for new
+   plugins"), so the fix is probably to fold `commands/canvas.md` into the
+   skills layout under a name that does not collide — and to decide whether
+   an interactive `/canvas` entry point is still worth having now that every
+   canvas has its own skill with a "when to reach for this" section.
+
+
 Depends on 1 and 2 being real. Docs, versioning, marketplace, contributions.
 Reuse the conventions already established in the `claude-skills` repo:
 `install.sh` / `install.ps1`, `scripts/test-runner.sh`,

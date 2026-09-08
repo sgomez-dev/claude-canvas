@@ -31,7 +31,7 @@ function parseBlocks(content: string): Block[] {
   let i = 0;
 
   while (i < lines.length) {
-    const line = lines[i];
+    const line = lines[i]!; // safe: while loop condition guarantees i < lines.length
     const lineStart = offset;
 
     // Blank line
@@ -53,7 +53,7 @@ function parseBlocks(content: string): Block[] {
         type: "heading",
         source: line,
         sourceOffset: lineStart,
-        level: headingMatch[1].length,
+        level: headingMatch[1]!.length, // safe: capture group 1 is "(#{1,4})", a mandatory (non-optional) group, always present when headingMatch matches
       });
       offset += line.length + 1;
       i++;
@@ -77,14 +77,16 @@ function parseBlocks(content: string): Block[] {
       const codeLines = [line];
       let codeOffset = line.length + 1;
       i++;
-      while (i < lines.length && !lines[i].startsWith("```")) {
-        codeLines.push(lines[i]);
-        codeOffset += lines[i].length + 1;
+      // safe: `i < lines.length` is the first `&&` operand, short-circuiting before every `lines[i]` read below
+      while (i < lines.length && !lines[i]!.startsWith("```")) {
+        codeLines.push(lines[i]!);
+        codeOffset += lines[i]!.length + 1;
         i++;
       }
       if (i < lines.length) {
-        codeLines.push(lines[i]);
-        codeOffset += lines[i].length + 1;
+        // safe: guarded by the `if (i < lines.length)` check above
+        codeLines.push(lines[i]!);
+        codeOffset += lines[i]!.length + 1;
         i++;
       }
       blocks.push({
@@ -101,9 +103,10 @@ function parseBlocks(content: string): Block[] {
       const quoteLines = [line];
       let quoteOffset = line.length + 1;
       i++;
-      while (i < lines.length && (lines[i].startsWith(">") || (lines[i].trim() !== "" && !lines[i].match(/^(#{1,4}|[-*_]{3,}|```|-\s|\d+\.\s)/)))) {
-        quoteLines.push(lines[i]);
-        quoteOffset += lines[i].length + 1;
+      // safe: `i < lines.length` is the first `&&` operand, short-circuiting before every `lines[i]` read below
+      while (i < lines.length && (lines[i]!.startsWith(">") || (lines[i]!.trim() !== "" && !lines[i]!.match(/^(#{1,4}|[-*_]{3,}|```|-\s|\d+\.\s)/)))) {
+        quoteLines.push(lines[i]!);
+        quoteOffset += lines[i]!.length + 1;
         i++;
       }
       blocks.push({
@@ -120,9 +123,10 @@ function parseBlocks(content: string): Block[] {
       const listLines = [line];
       let listOffset = line.length + 1;
       i++;
-      while (i < lines.length && (/^[-*+]\s/.test(lines[i]) || /^\s+/.test(lines[i]))) {
-        listLines.push(lines[i]);
-        listOffset += lines[i].length + 1;
+      // safe: `i < lines.length` is the first `&&` operand, short-circuiting before every `lines[i]` read below
+      while (i < lines.length && (/^[-*+]\s/.test(lines[i]!) || /^\s+/.test(lines[i]!))) {
+        listLines.push(lines[i]!);
+        listOffset += lines[i]!.length + 1;
         i++;
       }
       blocks.push({
@@ -140,9 +144,10 @@ function parseBlocks(content: string): Block[] {
       const listLines = [line];
       let listOffset = line.length + 1;
       i++;
-      while (i < lines.length && (/^\d+\.\s/.test(lines[i]) || /^\s+/.test(lines[i]))) {
-        listLines.push(lines[i]);
-        listOffset += lines[i].length + 1;
+      // safe: `i < lines.length` is the first `&&` operand, short-circuiting before every `lines[i]` read below
+      while (i < lines.length && (/^\d+\.\s/.test(lines[i]!) || /^\s+/.test(lines[i]!))) {
+        listLines.push(lines[i]!);
+        listOffset += lines[i]!.length + 1;
         i++;
       }
       blocks.push({
@@ -159,9 +164,10 @@ function parseBlocks(content: string): Block[] {
     const paraLines = [line];
     let paraOffset = line.length + 1;
     i++;
-    while (i < lines.length && lines[i].trim() !== "" && !lines[i].match(/^(#{1,4}\s|[-*_]{3,}|```|>|[-*+]\s|\d+\.\s)/)) {
-      paraLines.push(lines[i]);
-      paraOffset += lines[i].length + 1;
+    // safe: `i < lines.length` is the first `&&` operand, short-circuiting before every `lines[i]` read below
+    while (i < lines.length && lines[i]!.trim() !== "" && !lines[i]!.match(/^(#{1,4}\s|[-*_]{3,}|```|>|[-*+]\s|\d+\.\s)/)) {
+      paraLines.push(lines[i]!);
+      paraOffset += lines[i]!.length + 1;
       i++;
     }
     blocks.push({
@@ -363,7 +369,7 @@ function wordWrapSegments(segments: LineSegment[], width: number): RenderedLine[
     if (lineSegments.length > 0) {
       lines.push({
         lineNumber: lineNumber++,
-        sourceOffset: lineSegments[0].sourceOffset,
+        sourceOffset: lineSegments[0]!.sourceOffset, // safe: guarded by "if (lineSegments.length > 0)" above
         sourceLength: lineSegments.reduce((sum, s) => sum + s.sourceLength, 0),
         segments: lineSegments,
         indent: 0,
@@ -437,7 +443,7 @@ function renderBlocks(blocks: Block[], terminalWidth: number): RenderedLine[] {
             lineNumber: lineNumber++,
             sourceOffset: offset,
             sourceLength: codeLine.length,
-            segments: [{ text: codeLine, sourceOffset: offset, sourceLength: codeLine.length, style: MARKDOWN_STYLES.codeBlock }],
+            segments: [{ text: codeLine, sourceOffset: offset, sourceLength: codeLine.length, style: MARKDOWN_STYLES.codeBlock! }], // safe: "codeBlock" is a hardcoded key defined in the MARKDOWN_STYLES object literal (types.ts)
             indent: 0,
             isBlank: false,
           });

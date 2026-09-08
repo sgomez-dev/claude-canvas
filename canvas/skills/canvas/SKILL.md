@@ -36,6 +36,7 @@ Canvas provides interactive terminal displays (TUIs) that Claude can spawn and c
 | `calendar` | Display calendars, pick meeting times | `display`, `meeting-picker` |
 | `document` | View/edit markdown documents | `display`, `edit`, `email-preview` |
 | `flight` | Flight comparison and seat selection | `booking` |
+| `diff` | Review a unified diff hunk-by-hunk | `review` |
 
 ## Quick Start
 
@@ -58,7 +59,7 @@ bun run src/cli.ts spawn [kind] --scenario [name] --config '[json]'
 ```
 
 **Parameters:**
-- `kind`: Canvas type (calendar, document, flight)
+- `kind`: Canvas type (calendar, document, flight, diff)
 - `--scenario`: Interaction mode (e.g., display, meeting-picker, edit)
 - `--config`: JSON configuration for the canvas
 - `--id`: Optional canvas instance ID for IPC
@@ -97,3 +98,4 @@ return `{"status":"ok","data":null}` for any key today.
 | `calendar` | Calendar display and meeting picker details |
 | `document` | Document rendering and text selection |
 | `flight` | Flight comparison and seat map details |
+| `diff` | Diff review details (coming soon) |

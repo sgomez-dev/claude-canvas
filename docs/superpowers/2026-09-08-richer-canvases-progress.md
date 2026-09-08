@@ -117,6 +117,28 @@ pane. Confirmed load-bearing: with `{ isActive: focused }` removed from one
 view, two of those four tests fail because both views answer the same
 keystroke.
 
+**Ruling 8: assert a focus change and focus routing separately.** The first
+version of the focus test Tabbed to region B and then immediately drove it,
+and failed on all three CI legs while passing locally. `isActive` takes
+effect when Ink re-registers its input handlers, which happens in a passive
+effect after the render that changed focus -- so a keystroke arriving in the
+same tick as the Tab is still routed by the previous assignment. That is a
+real property, not a bug: no human types inside one tick, but a test firing
+keystrokes back to back does.
+
+So the two properties are now asserted apart: that Tab moves the indicator
+(from the render, deterministic) and that the focused view is the one that
+answers (mounted with focus already there, no change in flight). 25
+consecutive runs clean, and removing `isActive` still fails two of the five
+tests, so the guard survived the restructuring. Cost if wrong: nothing
+asserts the specific sequence "Tab, then type immediately", which no
+interactive user can produce.
+
+This is the third time in this project that a test asserted on a deadline
+rather than a condition and was caught only by CI. Worth reading as a
+pattern: the harness makes it very easy to write, and only a loaded runner
+tells you.
+
 ### Found during the extraction, not fixed
 
 **`form` has no viewport.** It is the one primitive that never got one: a

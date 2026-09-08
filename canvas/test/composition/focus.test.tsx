@@ -31,8 +31,14 @@ const TABLE_ROWS = Array.from({ length: 30 }, (_, i) => ({ n: String(i + 1) }));
  * cycling focus, and the focus owner routing nothing itself -- each view
  * gates its own `useInput` on `isActive`.
  */
-function TwoPickers({ onSubmit }: { onSubmit(regionId: string, r: PickerResult): void }) {
-  const [focus, setFocus] = useState(0);
+function TwoPickers({
+  onSubmit,
+  initialFocus = 0,
+}: {
+  onSubmit(regionId: string, r: PickerResult): void;
+  initialFocus?: number;
+}) {
+  const [focus, setFocus] = useState(initialFocus);
   useInput((_input, key) => {
     if (key.tab) setFocus((f) => (f + (key.shift ? 1 : 1)) % 2);
   });
@@ -90,20 +96,42 @@ test("only the focused view consumes keys", async () => {
   r.dispose();
 });
 
-test("Tab moves focus, and the newly focused view is the one that answers", async () => {
-  const submitted: Array<{ region: string; result: PickerResult }> = [];
-  const r = renderCanvas(
-    <TwoPickers onSubmit={(region, result) => submitted.push({ region, result })} />,
-    { columns: 50, rows: 30 }
-  );
-  await r.settle();
+test("Tab moves the focus indicator", async () => {
+  const r = renderCanvas(<TwoPickers onSubmit={() => {}} />, { columns: 50, rows: 30 });
+  expect(await r.settle()).toContain("> region A");
 
   r.stdin.write("\t");
+  const frame = await r.settle();
+  expect(frame).toContain("> region B");
+  expect(frame).not.toContain("> region A");
+  r.dispose();
+});
+
+// Mounted with focus already on B rather than Tabbing to it, deliberately.
+//
+// `isActive` takes effect when Ink re-registers the input handlers, which
+// happens in a passive effect after the render that changed focus -- so a
+// keystroke arriving in the same tick as the Tab is still routed by the
+// previous assignment. No human types that fast, but a test firing
+// keystrokes back to back does, and asserting through a Tab made this race
+// CI-only: it passed locally and failed on all three runners.
+//
+// The two properties are therefore asserted separately: that Tab moves
+// focus (above, from the render) and that the focused view is the one that
+// answers (here, with no focus change in flight).
+test("the focused view is the one that answers", async () => {
+  const submitted: Array<{ region: string; result: PickerResult }> = [];
+  const r = renderCanvas(
+    <TwoPickers
+      initialFocus={1}
+      onSubmit={(region, result) => submitted.push({ region, result })}
+    />,
+    { columns: 50, rows: 30 }
+  );
   expect(await r.settle()).toContain("> region B");
 
-  // The same keystrokes now drive B, and A must not have moved: if both
-  // views were live, A's cursor would have advanced too and the Enter would
-  // have produced two submissions.
+  // If both views were live, A's cursor would advance too and the Enter
+  // would produce two submissions.
   r.stdin.write("j");
   await r.settle();
   r.stdin.write("\r");

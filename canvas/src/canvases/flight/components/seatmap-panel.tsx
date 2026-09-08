@@ -60,7 +60,9 @@ export function SeatmapPanel({
 
   // Render a single seat letter row (shows all airplane rows for one seat letter)
   const renderSeatLetterRow = (letterIndex: number) => {
-    const letter = seatmap.seatsPerRow[letterIndex];
+    // letterIndex is always < seatmap.seatsPerRow.length: this function is only
+    // called below with i in [0, seatmap.seatsPerRow.length), so index letterIndex exists.
+    const letter = seatmap.seatsPerRow[letterIndex]!;
     const isWindowSeat = letterIndex === 0 || letterIndex === seatmap.seatsPerRow.length - 1;
     const parts: React.JSX.Element[] = [];
 
@@ -84,7 +86,11 @@ export function SeatmapPanel({
 
       // Determine display
       let char = "-";
-      let color = CYBER_COLORS.neonCyan;
+      // Widened to `string`: color is reassigned below to other CYBER_COLORS
+      // values ("black", neonRed, neonYellow), so the literal type "cyan"
+      // inferred from CYBER_COLORS.neonCyan (an `as const` object) is too
+      // narrow for this variable's actual usage.
+      let color: string = CYBER_COLORS.neonCyan;
       let bgColor: string | undefined;
 
       if (isSelected) {
@@ -118,7 +124,9 @@ export function SeatmapPanel({
   // Build all seat letter rows, inserting aisle where needed
   const seatRows: React.JSX.Element[] = [];
   for (let i = 0; i < seatmap.seatsPerRow.length; i++) {
-    const letter = seatmap.seatsPerRow[i];
+    // i ranges over [0, seatmap.seatsPerRow.length) by the loop condition
+    // above, so index i always exists in seatsPerRow.
+    const letter = seatmap.seatsPerRow[i]!;
     seatRows.push(renderSeatLetterRow(i));
 
     // Add aisle after this letter if specified

@@ -81,3 +81,54 @@ test("frame of exactly MAX_FRAME_BYTES is accepted, not rejected", () => {
   // Should not throw on the header alone; should wait for more bytes
   expect(d.push(header)).toEqual([]);
 });
+
+// The 4-byte length prefix can straddle a chunk boundary: a socket is free
+// to deliver those four bytes in four separate events. The decoder now
+// reads the prefix byte by byte across chunks rather than assuming the
+// first chunk holds all of it.
+test("reassembles a frame whose length prefix arrives one byte per chunk", () => {
+  const buf = encodeFrame({ type: "selected", data: { a: 1 } });
+  const d = new FrameDecoder();
+  for (let i = 0; i < 4; i++) expect(d.push(buf.slice(i, i + 1))).toEqual([]);
+  expect(d.push(buf.slice(4))).toEqual([{ type: "selected", data: { a: 1 } }]);
+});
+
+test("decodes a multi-frame stream delivered one byte at a time", () => {
+  const a = encodeFrame({ type: "ping" });
+  const b = encodeFrame({ type: "update", config: { n: 2 } });
+  const stream = new Uint8Array(a.length + b.length);
+  stream.set(a, 0);
+  stream.set(b, a.length);
+
+  const d = new FrameDecoder();
+  const got: unknown[] = [];
+  for (let i = 0; i < stream.length; i++) got.push(...d.push(stream.slice(i, i + 1)));
+  expect(got).toEqual([{ type: "ping" }, { type: "update", config: { n: 2 } }]);
+});
+
+// The chunk-list rewrite must not join the whole backlog when one frame
+// completes: a frame still arriving behind a completed one has to stay
+// buffered untouched.
+test("a completed frame is returned while the next one is still arriving", () => {
+  const a = encodeFrame({ type: "ping" });
+  const b = encodeFrame({ type: "pong" });
+  const d = new FrameDecoder();
+  expect(d.push(a)).toEqual([{ type: "ping" }]);
+  expect(d.push(b.slice(0, 3))).toEqual([]);
+  expect(d.push(b.slice(3, 5))).toEqual([]);
+  expect(d.push(b.slice(5))).toEqual([{ type: "pong" }]);
+});
+
+test("a large frame survives arriving in many small chunks intact", () => {
+  // 2 MB of distinguishable content in 4 KB pieces: 500+ chunks, which is
+  // the shape that used to cost a re-copy of the whole backlog per push.
+  const payload = Array.from({ length: 40_000 }, (_, i) => `row-${i}`).join("\n");
+  const buf = encodeFrame({ type: "update", config: { payload } });
+  const d = new FrameDecoder();
+  const got: unknown[] = [];
+  for (let off = 0; off < buf.byteLength; off += 4096) {
+    got.push(...d.push(buf.slice(off, Math.min(off + 4096, buf.byteLength))));
+  }
+  expect(got).toHaveLength(1);
+  expect((got[0] as { config: { payload: string } }).config.payload).toBe(payload);
+});

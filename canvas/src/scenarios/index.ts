@@ -4,3 +4,4 @@ export * from "./registry";
 export * from "./calendar/display";
 export * from "./calendar/meeting-picker";
 export * from "./flight/booking";
+export * from "./diff/review";

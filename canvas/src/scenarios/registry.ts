@@ -7,6 +7,7 @@ import { documentDisplayScenario } from "./document/display";
 import { documentEditScenario } from "./document/edit";
 import { emailPreviewScenario } from "./document/email-preview";
 import { flightBookingScenario } from "./flight/booking";
+import { diffReviewScenario } from "./diff/review";
 
 // Registry of all scenarios keyed by "canvasKind:scenarioName"
 const registry = new Map<string, ScenarioDefinition>();
@@ -22,6 +23,9 @@ registry.set("document:email-preview", emailPreviewScenario);
 
 // Register flight scenarios
 registry.set("flight:booking", flightBookingScenario);
+
+// Register diff scenarios
+registry.set("diff:review", diffReviewScenario);
 
 export function getScenario(
   canvasKind: string,

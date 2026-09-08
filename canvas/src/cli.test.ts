@@ -42,17 +42,25 @@ test("wait timeout rejects nonsense", () => {
 
 // Task 5's review flagged listRecords against a not-yet-created canvases
 // directory as untested, despite being the literal first-run path for
-// `canvas list`. Point LOCALAPPDATA (this suite runs on win32) at a
-// directory that has never been created — nothing writes to it, and
-// nothing else on the machine shares this random name — so canvasesDir()
-// resolves to a real ENOENT rather than one that happens to already exist.
+// `canvas list`. dataDir() only consults LOCALAPPDATA on win32 (darwin uses
+// Library/Application Support, linux uses XDG_STATE_HOME/.local/state), so
+// setting LOCALAPPDATA alone only exercises this path when the test runner
+// itself happens to be on Windows — on darwin/linux it would silently check
+// the real (possibly non-empty) canvases dir instead, asserting nothing
+// meaningful. Force process.platform to "win32" for the duration of this
+// test (same capture/restore pattern as runtime/paths.test.ts) so it
+// resolves to a real ENOENT — and exercises the empty-directory path — on
+// every OS, not just when the runner happens to be Windows.
 test("list returns an empty array, not a throw, when the canvases dir was never created", async () => {
+  const originalPlatformDescriptor = Object.getOwnPropertyDescriptor(process, "platform");
   const original = process.env.LOCALAPPDATA;
   const fresh = join(tmpdir(), `claude-canvas-fresh-registry-${Date.now()}-${Math.random().toString(36).slice(2)}`);
-  process.env.LOCALAPPDATA = fresh;
   try {
+    Object.defineProperty(process, "platform", { value: "win32" });
+    process.env.LOCALAPPDATA = fresh;
     expect(await listCanvases()).toEqual({ status: "ok", canvases: [] });
   } finally {
+    Object.defineProperty(process, "platform", originalPlatformDescriptor ?? { value: "win32" });
     if (original === undefined) delete process.env.LOCALAPPDATA;
     else process.env.LOCALAPPDATA = original;
   }

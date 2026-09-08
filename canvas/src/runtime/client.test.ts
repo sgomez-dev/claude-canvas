@@ -128,9 +128,16 @@ test("requestClose still delivers the close frame when inbound data is queued un
       await publish(`c-race-${i}`, s);
       await requestClose(`c-race-${i}`);
     }
-    // Give the last trial's close frame time to arrive at the server even
-    // though requestClose's own promise has already resolved.
-    await new Promise((r) => setTimeout(r, 100));
+    // The last trial's close frame can still be in flight to the server even
+    // though requestClose's own promise has already resolved (it resolves
+    // once the client-side socket is closed, not once the server has
+    // processed the frame). A fixed wait here is exactly the flaky pattern
+    // this test exists to avoid elsewhere: poll until the count catches up,
+    // rather than assuming any particular delay is enough on every machine.
+    const deadline = Date.now() + 2000;
+    while (closes < trials && Date.now() < deadline) {
+      await new Promise((r) => setTimeout(r, 15));
+    }
     expect(closes).toBe(trials);
   } finally {
     clearInterval(flood);

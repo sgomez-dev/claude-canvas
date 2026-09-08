@@ -5,7 +5,8 @@ description: Spawn interactive terminal canvases for calendars, documents, and f
 
 # Canvas Command
 
-Spawn and control interactive terminal displays (TUIs) in tmux split panes.
+Spawn and control interactive terminal displays (TUIs) in split panes, using
+tmux or Windows Terminal, whichever is available.
 
 ## Usage
 
@@ -68,15 +69,30 @@ bun run src/cli.ts spawn flight --config '{"flights": [...]}'
 
 ### Step 4: Handle Results
 
-Wait for user interaction and handle the result:
+Use `wait <id>` to block for the user's interaction (returns within ~55s no
+matter what — call it again if it comes back `pending`):
 
-- **Selected**: User made a selection (time slot, text, flight+seat)
-- **Cancelled**: User pressed Escape or quit
-- **Error**: Something went wrong
+```bash
+bun run src/cli.ts wait cal-1
+```
+
+`wait` prints one of:
+
+- `{"status":"selected","data":...}` — user made a selection (time slot,
+  text, flight+seat)
+- `{"status":"cancelled"}` — user pressed Escape or quit
+- `{"status":"pending"}` — timed out, canvas still alive; call `wait` again
+- `{"status":"disconnected"}` — canvas died while waiting
+- `{"status":"error","message":...}` — something went wrong
+
+For the `document` canvas specifically, selection is not delivered through
+`wait` — poll it on demand with `get <id> selection` instead. Once done with
+a canvas, close it with `close <id>` (never kill the process — see
+`canvas` skill).
 
 ## Requirements
 
-- Must be running inside a tmux session
+- Must be running inside a tmux session (tmux 3.1+) or Windows Terminal
 - Terminal should support mouse input for interactive scenarios
 
 ## Skills Reference

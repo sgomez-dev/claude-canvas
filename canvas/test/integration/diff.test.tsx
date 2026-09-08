@@ -199,3 +199,91 @@ test("escape cancels without sending a result", async () => {
   conn.close();
   r.dispose();
 });
+
+// Regression: Escape previously did nothing in the parse-error state — the
+// useInput handler's very first line was `if (files.length === 0) return;`,
+// so key.escape was never reached once parsing failed, making the pane
+// un-exitable by keyboard. (The sendError-on-parse-failure half of this fix
+// is not separately asserted over the socket here: like the `ready`
+// broadcast documented in use-canvas-server.test.tsx, it fires as soon as
+// the IPC server comes up, which in this in-process test harness reliably
+// wins the race against the test's own openConnection() call connecting
+// afterward — asserting delivery would pin a race, not a behavior.)
+test("Escape still cancels from the parse-error state", async () => {
+  const id = "diff-it-6";
+  ids.push(id);
+  const r = renderCanvas(
+    <Diff id={id} config={{ diffText: "not a diff" }} scenario="review" enabled={true} />,
+    { columns: 80, rows: 24 }
+  );
+  await r.settle();
+  await new Promise((res) => setTimeout(res, 50));
+
+  const conn = await openConnection(id);
+
+  r.stdin.write("\x1b"); // Esc must still work in the error state
+  await r.settle();
+
+  const cancelMsg = await conn.next(2000);
+  expect(cancelMsg).toEqual({ type: "cancelled", reason: "escape" });
+
+  conn.close();
+  r.dispose();
+});
+
+// Regression: Escape previously did nothing in the empty-diff state either,
+// for the same reason (files.length === 0 gated the whole useInput handler
+// before key.escape was checked).
+test("Escape cancels from the empty-diff state", async () => {
+  const id = "diff-it-7";
+  ids.push(id);
+  const r = renderCanvas(
+    <Diff id={id} config={{ diffText: "" }} scenario="review" enabled={true} />,
+    { columns: 80, rows: 24 }
+  );
+  await r.settle();
+  await new Promise((res) => setTimeout(res, 50));
+
+  const conn = await openConnection(id);
+
+  r.stdin.write("\x1b");
+  await r.settle();
+
+  const msg = await conn.next(2000);
+  expect(msg).toEqual({ type: "cancelled", reason: "escape" });
+
+  conn.close();
+  r.dispose();
+});
+
+// Regression: without a submittedRef guard, Enter-then-Enter in quick
+// succession (before unmount actually completes) could fire sendSelected
+// twice.
+test("Enter twice in quick succession only sends one outcome message", async () => {
+  const id = "diff-it-8";
+  ids.push(id);
+  const r = renderCanvas(
+    <Diff id={id} config={{ diffText: ONE_HUNK_DIFF }} scenario="review" enabled={true} />,
+    { columns: 80, rows: 24 }
+  );
+  await r.settle();
+  await new Promise((res) => setTimeout(res, 50));
+
+  const conn = await openConnection(id);
+
+  r.stdin.write("\r");
+  r.stdin.write("\r");
+  await r.settle();
+
+  const msg = await conn.next(2000);
+  expect(msg).toEqual({
+    type: "selected",
+    data: { decisions: [{ hunkId: "a.txt#0", decision: "rejected" }] },
+  });
+  // No second message should follow.
+  const second = await conn.next(300);
+  expect(second).toBeNull();
+
+  conn.close();
+  r.dispose();
+});

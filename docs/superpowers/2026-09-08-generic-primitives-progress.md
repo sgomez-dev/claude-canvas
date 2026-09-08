@@ -439,6 +439,39 @@ convincing false results:
   `send-keys` missed, turning five cases into `pending`. The echo goes to
   stderr, with a comment saying why.
 
+## Windows-only failure after the gap-closing push (CI run 34276286536)
+
+ubuntu and macos green, windows red, one test: `a config error reaches the
+controller instead of being lost`, failing on `awaitRecord(id, 5000)`
+returning null after the full 5 s.
+
+Not a Windows quirk in the end -- a real race that only Windows' filesystem
+timing exposed, and the strongest argument yet for the 3-OS matrix:
+
+- Neither `Bun.write` nor `writeFileSync` is atomic, so a reader can observe
+  a half-written record.
+- `readRecord` **deleted** anything that failed to parse.
+
+Together: a read that raced a write destroyed a good record, and nothing
+ever rewrote it, so `awaitRecord` polled for a file its own first read had
+unlinked. On macOS and Linux the write window was too narrow to hit; on
+Windows it was not.
+
+**Ruling 16: writes are atomic and reads are non-destructive.** Both halves,
+not either. Records are written to a temp file and renamed into place --
+rename replaces the destination atomically on POSIX and via
+MOVEFILE_REPLACE_EXISTING on Windows -- and permissions are applied to the
+temp file before it becomes visible under its real name, so a token is never
+even briefly world-readable. `readRecord` no longer unlinks an unparseable
+record: reading is not the place to destroy state. With atomic writes an
+unparseable record means genuine corruption, and `listRecords` -- which runs
+when nothing is mid-write -- prunes it, along with any temp file a crashed
+write left behind.
+
+Four tests: an unparseable record survives being read, `listRecords` prunes
+it, `listRecords` cleans a stray temp file, and 60 interleaved
+rewrite-then-read cycles never observe a partial record or leave a temp file.
+
 *** PHASE 2 IMPLEMENTATION COMPLETE. Not reviewed by a second pass: this
 ledger and the code in commits 158e74a..ddd263a are one agent's work with no
 independent review round, unlike Phase 1's 18 task reviews plus a

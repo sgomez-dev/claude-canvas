@@ -1,5 +1,17 @@
 import { test, expect, afterEach } from "bun:test";
-import { writeRecord, readRecord, listRecords, deleteRecord, newToken, isAlive, type CanvasRecord } from "./registry";
+import {
+  writeRecord,
+  writeRecordSync,
+  readRecord,
+  listRecords,
+  deleteRecord,
+  newToken,
+  isAlive,
+  type CanvasRecord,
+} from "./registry";
+import { canvasesDir, recordPath } from "./paths";
+import { mkdir, readdir } from "node:fs/promises";
+import { join } from "node:path";
 import { InvalidIdentifierError } from "./validate";
 
 const ids: string[] = [];
@@ -61,4 +73,63 @@ test("isAlive is true for this process", () => {
 
 test("rejects an invalid id", async () => {
   await expect(readRecord("../escape")).rejects.toThrow(InvalidIdentifierError);
+});
+
+// Records are written to a temp file and renamed into place. Neither
+// Bun.write nor writeFileSync is atomic, and readRecord used to DELETE
+// anything that failed to parse -- so a read that raced a write destroyed a
+// good record and nothing rewrote it. That failed on windows-latest only
+// (CI run 34276286536): awaitRecord polled for 5 s for a record its own
+// first read had already unlinked.
+test("an unparseable record is not destroyed by reading it", async () => {
+  const id = "reg-corrupt";
+  ids.push(id);
+  await mkdir(canvasesDir(), { recursive: true });
+  await Bun.write(recordPath(id), "{ this is not json");
+
+  expect(await readRecord(id)).toBeNull();
+  // Still there: reading is not the place to destroy state.
+  expect(await Bun.file(recordPath(id)).exists()).toBe(true);
+});
+
+test("listRecords prunes an unparseable record, since nothing is mid-write there", async () => {
+  const id = "reg-corrupt-2";
+  ids.push(id);
+  await mkdir(canvasesDir(), { recursive: true });
+  await Bun.write(recordPath(id), "{ this is not json");
+
+  await listRecords();
+  expect(await Bun.file(recordPath(id)).exists()).toBe(false);
+});
+
+test("listRecords cleans up a temp file left by a crashed write", async () => {
+  await mkdir(canvasesDir(), { recursive: true });
+  const stray = join(canvasesDir(), `reg-stray.json.${process.pid}.tmp`);
+  await Bun.write(stray, "{}");
+
+  await listRecords();
+  expect(await Bun.file(stray).exists()).toBe(false);
+});
+
+test("a record is never observable half-written", async () => {
+  const id = "reg-atomic";
+  ids.push(id);
+  const base: CanvasRecord = {
+    id, kind: "document", scenario: "display", port: 1, token: newToken(),
+    pid: process.pid, startedAt: new Date().toISOString(), host: "test",
+  };
+  await writeRecord(base);
+
+  // Interleave rewrites with reads. Every read must see a complete record:
+  // with an in-place write, one of these can catch a truncated file, and
+  // with the old readRecord that also deleted it.
+  for (let i = 0; i < 60; i++) {
+    writeRecordSync({ ...base, port: 1000 + i });
+    const r = await readRecord(id);
+    expect(r).not.toBeNull();
+    expect(r!.token).toBe(base.token);
+  }
+  // And no temp file is left behind.
+  const names = await readdir(canvasesDir());
+  expect(names.filter((n) => n.includes(id) && n.endsWith(".tmp"))).toEqual([]);
 });

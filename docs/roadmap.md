@@ -13,7 +13,9 @@ Four sub-projects. The order is forced by dependencies, not preference.
 
 ### Phase 1 — Foundations: one IPC, running on any OS
 
-**Status: in design.**
+**Status: complete.** All 18 tasks landed: `bun test` passes (124+ tests) and
+`tsc --noEmit` reports 0 errors. See the final whole-branch review's fix wave
+(2026-09-08) for the last of the cleanup.
 
 The bottleneck for everything else. Two problems that turn out to be one
 decision: choosing how a canvas talks to Claude *is* choosing the transport,
@@ -56,7 +58,7 @@ Reuse the conventions already established in the `claude-skills` repo:
 | Transport | TCP on `127.0.0.1`, ephemeral port | Identical on every platform with no per-OS branches, and no reliance on undocumented Bun behaviour. Critically, it is testable without tmux or Windows Terminal — which is what makes CI possible at all. |
 | Transport authentication | Registry file + token | Loopback TCP is open to any local process, so the token is required. Authentication is missing entirely today regardless. |
 | Canvas discovery | One registry file per canvas id | Holds `{id, kind, scenario, port, token, pid, startedAt}` in the user data directory. One file per canvas rather than a shared one, so concurrent canvases cannot race on writes. |
-| Canvas host | `CanvasHost` interface with runtime detection | Backends: `tmux`, `wt` (Windows Terminal `split-pane`), and a new-window fallback. Both verified by spike on 2026-09-07. |
+| Canvas host | `CanvasHost` interface with runtime detection | Backends: `tmux` and `wt` (Windows Terminal `split-pane`). Both verified by spike on 2026-09-07. If neither is detected, `detectHost()` throws `NoHostError` — there is no new-window fallback backend. |
 | Spawning | argv as an array **plus** a strict whitelist on `id`/`kind`/`scenario` | argv arrays alone are **not** sufficient: `wt.exe` re-parses its own command line and splits on `;` even inside a correctly quoted argv element, so a whitelist of `^[A-Za-z0-9_-]{1,64}$` is what actually closes the hole on Windows. |
 | Pane lifecycle | The canvas exits 0 by itself; the tool never kills it | `wt.exe` has no pane handle and no close verb, and killing the process leaves a zombie pane that no command can remove. So closing must be an IPC request, and exiting non-zero is a defect. |
 | Existing canvases | Migrate all three unchanged | They are the honest test that the foundations hold. Whether `flight` deserves to exist is a Phase 3 question. |

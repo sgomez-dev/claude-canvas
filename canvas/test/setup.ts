@@ -11,5 +11,5 @@ process.env.FORCE_COLOR = "1";
 // timezone isn't UTC, every snapshot would diverge from the committed
 // baseline with zero code change. Pin TZ so the rendered clock is stable
 // across dev machines (this project's is CET/CEST) and CI (ubuntu-latest,
-// windows-latest).
+// windows-latest, macos-latest).
 process.env.TZ = "UTC";

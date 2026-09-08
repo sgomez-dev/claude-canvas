@@ -9,7 +9,7 @@ A TUI toolkit that gives Claude Code its own display. Spawn interactive terminal
 ## Requirements
 
 - [Bun](https://bun.sh) — used to run skill tools
-- [tmux](https://github.com/tmux/tmux) — canvases spawn in split panes
+- [tmux](https://github.com/tmux/tmux) 3.1+ or Windows Terminal — canvases spawn in split panes
 
 ## Installation
 

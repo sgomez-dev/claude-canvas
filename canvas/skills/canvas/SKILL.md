@@ -79,12 +79,14 @@ Every command prints one JSON object. `wait` returns one of
 `{"status":"pending"}` (timed out, canvas still alive — call `wait` again),
 `{"status":"disconnected"}`, or `{"status":"error","message":...}`.
 
-`get <id> <key>` reads state (`selection`, `content`, `config`);
+`get <id> <key>` reads state. Only `document` currently implements `onGet`
+and answers `selection`, `content`, and `config`; `flight` and `calendar`
+return `{"status":"ok","data":null}` for any key today.
 `close <id>` asks the canvas to exit; `list` shows live canvases.
 
 ## Requirements
 
-- **tmux or Windows Terminal**: Canvas spawning requires one of these two host backends
+- **tmux 3.1+ or Windows Terminal**: Canvas spawning requires one of these two host backends
 - **Terminal with mouse support**: For click-based interactions
 - **Bun**: Runtime for executing canvas commands
 

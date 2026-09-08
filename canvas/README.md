@@ -59,7 +59,7 @@ Every command prints one JSON object on stdout. `wait` returns one of
 
 ## Requirements
 
-- **tmux or Windows Terminal** - Canvas spawning requires one of these two host backends
+- **tmux 3.1+ or Windows Terminal** - Canvas spawning requires one of these two host backends
 - **Bun** - Runtime for CLI commands
 - **Terminal with mouse support** - For interactive scenarios
 

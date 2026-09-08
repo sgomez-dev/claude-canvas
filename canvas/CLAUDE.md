@@ -53,6 +53,10 @@ prints one JSON result on stdout:
 { type: "pong" }
 ```
 
+`ready` is broadcast the instant the server comes up, before any controller
+client can possibly have connected yet — it is not currently observable by
+external clients (informational only; known and covered by tests).
+
 `wait <id>` polls this connection and surfaces one outcome per call:
 `{"status":"selected","data":...}`, `{"status":"cancelled"}`,
 `{"status":"pending"}` (timed out, canvas still alive — call `wait` again),

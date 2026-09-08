@@ -9,6 +9,7 @@ import { emailPreviewScenario } from "./document/email-preview";
 import { flightBookingScenario } from "./flight/booking";
 import { diffReviewScenario } from "./diff/review";
 import { pickerSelectScenario } from "./picker/select";
+import { formFillScenario } from "./form/fill";
 
 // Registry of all scenarios keyed by "canvasKind:scenarioName"
 const registry = new Map<string, ScenarioDefinition>();
@@ -30,6 +31,9 @@ registry.set("diff:review", diffReviewScenario);
 
 // Register picker scenarios
 registry.set("picker:select", pickerSelectScenario);
+
+// Register form scenarios
+registry.set("form:fill", formFillScenario);
 
 export function getScenario(
   canvasKind: string,

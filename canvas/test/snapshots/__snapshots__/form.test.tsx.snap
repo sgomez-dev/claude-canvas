@@ -1,0 +1,67 @@
+// Bun Snapshot v1, https://bun.sh/docs/test/snapshots
+
+exports[`form renders all five field types 1`] = `
+"\x1B[36m╭──────────────────────────────────────────────────────────╮\x1B[39m
+\x1B[36m│\x1B[39m \x1B[1mReport a bug\x1B[22m                                             \x1B[36m│\x1B[39m
+\x1B[36m│\x1B[39m \x1B[36m> Summary *\x1B[39m                                              \x1B[36m│\x1B[39m
+\x1B[36m│\x1B[39m   Details                                                \x1B[36m│\x1B[39m
+\x1B[36m│\x1B[39m   \x1B[2mWhat happened?\x1B[22m                                         \x1B[36m│\x1B[39m
+\x1B[36m│\x1B[39m   Severity                                               \x1B[36m│\x1B[39m
+\x1B[36m│\x1B[39m   < Low >                                                \x1B[36m│\x1B[39m
+\x1B[36m│\x1B[39m   Is it a regression?                                    \x1B[36m│\x1B[39m
+\x1B[36m│\x1B[39m   [ ]                                                    \x1B[36m│\x1B[39m
+\x1B[36m│\x1B[39m   Occurrences                                            \x1B[36m│\x1B[39m
+\x1B[36m│\x1B[39m                                                          \x1B[36m│\x1B[39m
+\x1B[36m│\x1B[39m   [ Submit ]                                             \x1B[36m│\x1B[39m
+\x1B[36m│\x1B[39m                                                          \x1B[36m│\x1B[39m
+\x1B[36m│\x1B[39m \x1B[2mTab/Shift+Tab: move  Enter: submit (on the button)  Esc:\x1B[22m \x1B[36m│\x1B[39m
+\x1B[36m│\x1B[39m \x1B[2m cancel\x1B[22m                                                  \x1B[36m│\x1B[39m
+\x1B[36m╰──────────────────────────────────────────────────────────╯\x1B[39m"
+`;
+
+exports[`form renders a cycled select and a checked checkbox 1`] = `
+"\x1B[36m╭──────────────────────────────────────────────────────────╮\x1B[39m
+\x1B[36m│\x1B[39m \x1B[1mReport a bug\x1B[22m                                             \x1B[36m│\x1B[39m
+\x1B[36m│\x1B[39m   Summary *                                              \x1B[36m│\x1B[39m
+\x1B[36m│\x1B[39m   Details                                                \x1B[36m│\x1B[39m
+\x1B[36m│\x1B[39m   \x1B[2mWhat happened?\x1B[22m                                         \x1B[36m│\x1B[39m
+\x1B[36m│\x1B[39m   Severity                                               \x1B[36m│\x1B[39m
+\x1B[36m│\x1B[39m   < High >                                               \x1B[36m│\x1B[39m
+\x1B[36m│\x1B[39m \x1B[36m> Is it a regression?\x1B[39m                                    \x1B[36m│\x1B[39m
+\x1B[36m│\x1B[39m   [x]                                                    \x1B[36m│\x1B[39m
+\x1B[36m│\x1B[39m   Occurrences                                            \x1B[36m│\x1B[39m
+\x1B[36m│\x1B[39m                                                          \x1B[36m│\x1B[39m
+\x1B[36m│\x1B[39m   [ Submit ]                                             \x1B[36m│\x1B[39m
+\x1B[36m│\x1B[39m                                                          \x1B[36m│\x1B[39m
+\x1B[36m│\x1B[39m \x1B[2mTab/Shift+Tab: move  Enter: submit (on the button)  Esc:\x1B[22m \x1B[36m│\x1B[39m
+\x1B[36m│\x1B[39m \x1B[2m cancel\x1B[22m                                                  \x1B[36m│\x1B[39m
+\x1B[36m╰──────────────────────────────────────────────────────────╯\x1B[39m"
+`;
+
+exports[`form renders required fields flagged after a failed submit 1`] = `
+"\x1B[36m╭──────────────────────────────────────────────────────────╮\x1B[39m
+\x1B[36m│\x1B[39m \x1B[1mReport a bug\x1B[22m                                             \x1B[36m│\x1B[39m
+\x1B[36m│\x1B[39m \x1B[31m> Summary *  <- required\x1B[39m                                 \x1B[36m│\x1B[39m
+\x1B[36m│\x1B[39m   Details                                                \x1B[36m│\x1B[39m
+\x1B[36m│\x1B[39m   \x1B[2mWhat happened?\x1B[22m                                         \x1B[36m│\x1B[39m
+\x1B[36m│\x1B[39m   Severity                                               \x1B[36m│\x1B[39m
+\x1B[36m│\x1B[39m   < Low >                                                \x1B[36m│\x1B[39m
+\x1B[36m│\x1B[39m   Is it a regression?                                    \x1B[36m│\x1B[39m
+\x1B[36m│\x1B[39m   [ ]                                                    \x1B[36m│\x1B[39m
+\x1B[36m│\x1B[39m   Occurrences                                            \x1B[36m│\x1B[39m
+\x1B[36m│\x1B[39m                                                          \x1B[36m│\x1B[39m
+\x1B[36m│\x1B[39m   [ Submit ]                                             \x1B[36m│\x1B[39m
+\x1B[36m│\x1B[39m                                                          \x1B[36m│\x1B[39m
+\x1B[36m│\x1B[39m \x1B[2mTab/Shift+Tab: move  Enter: submit (on the button)  Esc:\x1B[22m \x1B[36m│\x1B[39m
+\x1B[36m│\x1B[39m \x1B[2m cancel\x1B[22m                                                  \x1B[36m│\x1B[39m
+\x1B[36m╰──────────────────────────────────────────────────────────╯\x1B[39m"
+`;
+
+exports[`form renders a config error state for a select with no options 1`] = `
+"\x1B[31m╭──────────────────────────────────────────────────────────╮\x1B[39m
+\x1B[31m│\x1B[39m                                                          \x1B[31m│\x1B[39m
+\x1B[31m│\x1B[39m \x1B[31mform config: select field "s" needs a non-empty \x1B[39m         \x1B[31m│\x1B[39m
+\x1B[31m│\x1B[39m \x1B[31m'options' array\x1B[39m                                          \x1B[31m│\x1B[39m
+\x1B[31m│\x1B[39m                                                          \x1B[31m│\x1B[39m
+\x1B[31m╰──────────────────────────────────────────────────────────╯\x1B[39m"
+`;

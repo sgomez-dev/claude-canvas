@@ -11,6 +11,8 @@ import { Diff } from "./diff";
 import type { DiffReviewConfig } from "./diff/types";
 import { Picker } from "./picker";
 import type { PickerConfig } from "./picker/types";
+import { Form } from "./form";
+import type { FormConfig } from "./form/types";
 import { logPath } from "../runtime/paths";
 
 // Defense in depth: cli.ts already rejects an unknown kind before this ever
@@ -83,6 +85,12 @@ export async function renderCanvas(
       return renderDiff(
         id,
         config as DiffReviewConfig | undefined,
+        options
+      );
+    case "form":
+      return renderForm(
+        id,
+        config as FormConfig | undefined,
         options
       );
     case "picker":
@@ -184,6 +192,25 @@ async function renderPicker(
       config={config}
       enabled={options?.enabled ?? false}
       scenario={options?.scenario || "select"}
+    />,
+    {
+      exitOnCtrlC: true,
+    }
+  );
+  await waitUntilExit();
+}
+
+async function renderForm(
+  id: string,
+  config?: FormConfig,
+  options?: RenderOptions
+): Promise<void> {
+  const { waitUntilExit } = render(
+    <Form
+      id={id}
+      config={config}
+      enabled={options?.enabled ?? false}
+      scenario={options?.scenario || "fill"}
     />,
     {
       exitOnCtrlC: true,

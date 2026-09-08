@@ -1,7 +1,81 @@
-import React, { useRef, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { Box, Text, useInput, useApp } from "ink";
 import { useCanvasServer } from "../runtime/use-canvas-server";
 import type { FormConfig, FormField, FormResult } from "./form/types";
+
+const FIELD_TYPES = ["text", "textarea", "select", "checkbox", "number"] as const;
+
+interface ValidatedForm {
+  fields: FormField[];
+  error: string | null;
+}
+
+// Validates the *raw* config before anything indexes into it, mirroring
+// picker.tsx's combined `{options, mode, error}` memo. The spec is explicit
+// that a `select` field with an empty `options` array is a config error
+// reported via sendError, "the same posture as picker's empty-list case,
+// since a select is structurally a picker embedded in a field" -- and an
+// unreported config error is the worst outcome here: the canvas opens, the
+// controller's `wait` blocks for its full 55 s, and the reply is a bare
+// "pending" that says nothing about what was wrong.
+function validateForm(config: FormConfig | undefined): ValidatedForm {
+  const raw: unknown = config?.fields;
+  if (!Array.isArray(raw)) {
+    return { fields: [], error: "form config: 'fields' must be an array" };
+  }
+  if (raw.length === 0) {
+    return { fields: [], error: "form config: 'fields' must not be empty" };
+  }
+  const seen = new Set<string>();
+  for (let i = 0; i < raw.length; i++) {
+    const f: unknown = raw[i];
+    if (f === null || typeof f !== "object") {
+      return { fields: [], error: `form config: fields[${i}] is not an object` };
+    }
+    const { id, label, type } = f as { id?: unknown; label?: unknown; type?: unknown };
+    if (typeof id !== "string" || id.length === 0) {
+      return { fields: [], error: `form config: fields[${i}] is missing 'id'` };
+    }
+    if (typeof label !== "string" || label.length === 0) {
+      return { fields: [], error: `form config: field ${JSON.stringify(id)} is missing 'label'` };
+    }
+    if (typeof type !== "string" || !(FIELD_TYPES as readonly string[]).includes(type)) {
+      return {
+        fields: [],
+        error:
+          `form config: field ${JSON.stringify(id)} has unsupported type ${JSON.stringify(type)}. ` +
+          `Expected one of: ${FIELD_TYPES.join(", ")}.`,
+      };
+    }
+    if (seen.has(id)) {
+      // Two fields sharing an id would collide in the `values` record, so
+      // one would silently overwrite the other's answer.
+      return { fields: [], error: `form config: duplicate field id ${JSON.stringify(id)}` };
+    }
+    seen.add(id);
+    if (type === "select") {
+      const options: unknown = (f as { options?: unknown }).options;
+      if (!Array.isArray(options) || options.length === 0) {
+        return {
+          fields: [],
+          error: `form config: select field ${JSON.stringify(id)} needs a non-empty 'options' array`,
+        };
+      }
+      for (let j = 0; j < options.length; j++) {
+        const o: unknown = options[j];
+        const value = o !== null && typeof o === "object" ? (o as { value?: unknown }).value : undefined;
+        const optLabel = o !== null && typeof o === "object" ? (o as { label?: unknown }).label : undefined;
+        if (typeof value !== "string" || typeof optLabel !== "string") {
+          return {
+            fields: [],
+            error: `form config: select field ${JSON.stringify(id)} options[${j}] needs string 'value' and 'label'`,
+          };
+        }
+      }
+    }
+  }
+  return { fields: raw as FormField[], error: null };
+}
 
 export interface FormProps {
   id: string;
@@ -20,16 +94,31 @@ function initialValue(field: FormField): FieldState {
 
 function isMissing(field: FormField, value: FieldState): boolean {
   if (!("required" in field) || !field.required) return false;
-  if (field.type === "text" || field.type === "textarea" || field.type === "number") {
+  if (field.type === "number") {
+    // A required number field must hold an actual number. Empty counts as
+    // missing, and so does anything that does not parse to a finite one --
+    // a lone "-" typed on the way to "-5" is not a value, and used to reach
+    // Number() at submit time and travel to the controller as NaN, which
+    // JSON.stringify serializes to `null`.
+    if (typeof value !== "string") return true;
+    return value.trim().length === 0 || !Number.isFinite(Number(value));
+  }
+  if (field.type === "text" || field.type === "textarea") {
     return typeof value === "string" && value.trim().length === 0;
   }
-  return false; // select always has a value once options are non-empty; checkbox has no required
+  // select always has a value (validateForm rejects an empty options list);
+  // checkbox has no required variant -- an unchecked box is a valid false.
+  return false;
 }
 
 function clampNumber(raw: string, min: number | undefined, max: number | undefined): string {
   if (raw.trim().length === 0) return raw;
   let n = Number(raw);
-  if (Number.isNaN(n)) return raw;
+  // An unparseable entry (the classic case being a lone "-") is cleared
+  // rather than preserved. Returning `raw` here is what let NaN survive all
+  // the way to the submitted result; clearing it also makes a required
+  // field correctly register as missing instead of submitting garbage.
+  if (!Number.isFinite(n)) return "";
   if (min !== undefined && n < min) n = min;
   if (max !== undefined && n > max) n = max;
   return String(n);
@@ -37,7 +126,7 @@ function clampNumber(raw: string, min: number | undefined, max: number | undefin
 
 export function Form({ id, config, scenario = "fill", enabled }: FormProps): React.JSX.Element {
   const { exit } = useApp();
-  const fields = config?.fields ?? [];
+  const { fields, error } = useMemo<ValidatedForm>(() => validateForm(config), [config]);
 
   const [values, setValues] = useState<Record<string, FieldState>>(() => {
     const init: Record<string, FieldState> = {};
@@ -68,6 +157,13 @@ export function Form({ id, config, scenario = "fill", enabled }: FormProps): Rea
 
   const [errors, setErrors] = useState<Set<string>>(new Set());
 
+  // Guards against a second outcome message (Enter-then-Escape, or a
+  // double Enter) firing before the component has actually unmounted.
+  // picker.tsx and diff.tsx both have this; form.tsx shipped without it, so
+  // submitting and then pressing Escape sent BOTH `selected` and
+  // `cancelled` and the controller acted on whichever it read first.
+  const submittedRef = useRef(false);
+
   const ipc = useCanvasServer({
     id,
     kind: "form",
@@ -76,12 +172,30 @@ export function Form({ id, config, scenario = "fill", enabled }: FormProps): Rea
     onClose: () => {},
   });
 
+  // Reports a config validation failure to the controller exactly once,
+  // when `error` transitions from null to non-null. Gated on
+  // `ipc.isConnected` for the same reason as picker.tsx's and diff.tsx's
+  // equivalent effects: the IPC server starts asynchronously, so an
+  // unconditional send on mount would race its startup and broadcast to
+  // zero connections, dropping the message forever.
+  const sentRef = useRef(false);
+  useEffect(() => {
+    if (error && ipc.isConnected && !sentRef.current) {
+      sentRef.current = true;
+      ipc.sendError(error);
+    }
+  }, [error, ipc.isConnected, ipc.sendError]);
+
   function moveFocus(delta: number) {
     const currentField = fields[focusIndexRef.current];
     if (currentField?.type === "number") {
       setValues((prev) => ({
         ...prev,
-        [currentField.id]: clampNumber(prev[currentField.id] as string, currentField.min, currentField.max),
+        [currentField.id]: clampNumber(
+          (prev[currentField.id] as string) ?? "",
+          currentField.min,
+          currentField.max
+        ),
       }));
     }
     const total = fields.length + 1; // + Submit
@@ -89,6 +203,7 @@ export function Form({ id, config, scenario = "fill", enabled }: FormProps): Rea
   }
 
   function attemptSubmit() {
+    if (submittedRef.current) return;
     const missing = new Set<string>();
     for (const f of fields) {
       if (isMissing(f, valuesRef.current[f.id] ?? initialValue(f))) missing.add(f.id);
@@ -106,22 +221,36 @@ export function Form({ id, config, scenario = "fill", enabled }: FormProps): Rea
         outValues[f.id] = Boolean(v);
       } else if (f.type === "number") {
         const raw = v as string;
-        outValues[f.id] = raw.trim().length === 0 ? 0 : Number(clampNumber(raw, f.min, f.max));
+        const n = Number(clampNumber(raw, f.min, f.max));
+        // Defensive: clampNumber already clears anything unparseable and
+        // isMissing already rejects it for a required field, so a
+        // non-finite value can only reach here from an optional field left
+        // in a partial state. 0 matches the existing empty-field behavior;
+        // what must never happen is NaN, which serializes to null on the
+        // wire and silently becomes a null in Claude's hands.
+        outValues[f.id] = Number.isFinite(n) ? n : 0;
       } else {
         outValues[f.id] = v as string;
       }
     }
+    submittedRef.current = true;
     const result: FormResult = { values: outValues };
     ipc.sendSelected(result);
     exit();
   }
 
   useInput((input, key) => {
+    // Escape must always work, in every state (config error, mid-entry,
+    // post-validation-failure) so the pane is never un-exitable by
+    // keyboard. Copies picker.tsx's and diff.tsx's exact ordering.
     if (key.escape) {
+      if (submittedRef.current) return;
+      submittedRef.current = true;
       ipc.sendCancelled("escape");
       exit();
       return;
     }
+    if (fields.length === 0) return;
     if (key.tab) {
       moveFocus(key.shift ? -1 : 1);
       return;
@@ -199,10 +328,10 @@ export function Form({ id, config, scenario = "fill", enabled }: FormProps): Rea
     }
   });
 
-  if (fields.length === 0) {
+  if (error) {
     return (
-      <Box borderStyle="round" borderColor="red" padding={1}>
-        <Text color="red">No fields to fill in.</Text>
+      <Box flexDirection="column" borderStyle="round" borderColor="red" padding={1}>
+        <Text color="red">{error}</Text>
       </Box>
     );
   }
@@ -218,10 +347,17 @@ export function Form({ id, config, scenario = "fill", enabled }: FormProps): Rea
         const requiredMark = "required" in f && f.required ? " *" : "";
         return (
           <Box key={f.id} flexDirection="column">
+            {/* A missing required field carries a text marker, not just a
+                red label. picker.tsx already fixed this exact weakness for
+                its cursor gutter -- a state expressed solely through
+                `color` is invisible in a no-color terminal, and the spec's
+                hard rule here is that a failed submit must report WHICH
+                fields are missing. */}
             <Text color={labelColor}>
               {isFocused ? "> " : "  "}
               {f.label}
               {requiredMark}
+              {hasError ? "  <- required" : ""}
             </Text>
             <Box marginLeft={2}>
               {f.type === "checkbox" ? (

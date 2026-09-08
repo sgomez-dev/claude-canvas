@@ -18,3 +18,7 @@ test("diff:review is registered", () => {
 test("picker:select is registered", () => {
   expect(getScenario("picker", "select")).toBeDefined();
 });
+
+test("form:fill is registered", () => {
+  expect(getScenario("form", "fill")).toBeDefined();
+});

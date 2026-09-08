@@ -13,6 +13,8 @@ import { Picker } from "./picker";
 import type { PickerConfig } from "./picker/types";
 import { Form } from "./form";
 import type { FormConfig } from "./form/types";
+import { Table } from "./table";
+import type { TableConfig } from "./table/types";
 import { logPath } from "../runtime/paths";
 
 // Defense in depth: cli.ts already rejects an unknown kind before this ever
@@ -85,6 +87,12 @@ export async function renderCanvas(
       return renderDiff(
         id,
         config as DiffReviewConfig | undefined,
+        options
+      );
+    case "table":
+      return renderTable(
+        id,
+        config as TableConfig | undefined,
         options
       );
     case "form":
@@ -211,6 +219,25 @@ async function renderForm(
       config={config}
       enabled={options?.enabled ?? false}
       scenario={options?.scenario || "fill"}
+    />,
+    {
+      exitOnCtrlC: true,
+    }
+  );
+  await waitUntilExit();
+}
+
+async function renderTable(
+  id: string,
+  config?: TableConfig,
+  options?: RenderOptions
+): Promise<void> {
+  const { waitUntilExit } = render(
+    <Table
+      id={id}
+      config={config}
+      enabled={options?.enabled ?? false}
+      scenario={options?.scenario || "display"}
     />,
     {
       exitOnCtrlC: true,

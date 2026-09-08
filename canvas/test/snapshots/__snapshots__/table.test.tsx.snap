@@ -1,0 +1,31 @@
+// Bun Snapshot v1, https://bun.sh/docs/test/snapshots
+
+exports[`table renders columns, auto-sized and truncated cells 1`] = `
+"\x1B[36m╭────────────────────────────────────────────────────────────────────╮\x1B[39m
+\x1B[36m│\x1B[39m \x1B[1mFailing tests\x1B[22m                                                      \x1B[36m│\x1B[39m
+\x1B[36m│\x1B[39m \x1B[1mID   Name          Detail       \x1B[22m                                   \x1B[36m│\x1B[39m
+\x1B[36m│\x1B[39m 1    protocol      frame decod…                                    \x1B[36m│\x1B[39m
+\x1B[36m│\x1B[39m 2    registry      stale record                                    \x1B[36m│\x1B[39m
+\x1B[36m│\x1B[39m 3    socket-writer partial wri…                                    \x1B[36m│\x1B[39m
+\x1B[36m│\x1B[39m 4    cli           short                                           \x1B[36m│\x1B[39m
+\x1B[36m│\x1B[39m                                                                    \x1B[36m│\x1B[39m
+\x1B[36m│\x1B[39m \x1B[2m↑/↓/PgUp/PgDn: scroll  Esc: close\x1B[22m                                  \x1B[36m│\x1B[39m
+\x1B[36m╰────────────────────────────────────────────────────────────────────╯\x1B[39m"
+`;
+
+exports[`table renders an explicit no-data state rather than a blank frame 1`] = `
+"\x1B[36m╭────────────────────────────────────────────────────────────────────╮\x1B[39m
+\x1B[36m│\x1B[39m                                                                    \x1B[36m│\x1B[39m
+\x1B[36m│\x1B[39m \x1B[1mFailing tests\x1B[22m                                                      \x1B[36m│\x1B[39m
+\x1B[36m│\x1B[39m \x1B[2mNo data.\x1B[22m                                                           \x1B[36m│\x1B[39m
+\x1B[36m│\x1B[39m                                                                    \x1B[36m│\x1B[39m
+\x1B[36m╰────────────────────────────────────────────────────────────────────╯\x1B[39m"
+`;
+
+exports[`table renders a config error state for an empty columns list 1`] = `
+"\x1B[31m╭────────────────────────────────────────────────────────────────────╮\x1B[39m
+\x1B[31m│\x1B[39m                                                                    \x1B[31m│\x1B[39m
+\x1B[31m│\x1B[39m \x1B[31mtable config: 'columns' must not be empty\x1B[39m                          \x1B[31m│\x1B[39m
+\x1B[31m│\x1B[39m                                                                    \x1B[31m│\x1B[39m
+\x1B[31m╰────────────────────────────────────────────────────────────────────╯\x1B[39m"
+`;

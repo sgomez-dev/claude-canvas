@@ -22,3 +22,7 @@ test("picker:select is registered", () => {
 test("form:fill is registered", () => {
   expect(getScenario("form", "fill")).toBeDefined();
 });
+
+test("table:display is registered", () => {
+  expect(getScenario("table", "display")).toBeDefined();
+});

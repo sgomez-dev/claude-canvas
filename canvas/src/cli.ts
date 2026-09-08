@@ -16,7 +16,15 @@ type Writer = (s: string) => boolean;
 // pane's own exit-0 handling never ran, leaving an unremovable pane on
 // Windows. Checking membership here, before any pane is spawned or
 // renderCanvas is called, is what actually prevents that.
-const KNOWN_KINDS = new Set(["calendar", "document", "flight", "diff", "picker", "form"]);
+const KNOWN_KINDS = new Set([
+  "calendar",
+  "document",
+  "flight",
+  "diff",
+  "picker",
+  "form",
+  "table",
+]);
 
 function assertKnownKind(kind: string): string {
   if (!KNOWN_KINDS.has(kind)) {

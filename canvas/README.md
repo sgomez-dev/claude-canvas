@@ -31,7 +31,7 @@ claude --plugin-dir /path/to/claude-canvas/canvas
 # Show calendar in current terminal
 bun run src/cli.ts show calendar
 
-# Spawn meeting picker in tmux split
+# Spawn meeting picker in a new pane
 bun run src/cli.ts spawn calendar --scenario meeting-picker --config '{"calendars": [...]}'
 
 # Spawn document editor

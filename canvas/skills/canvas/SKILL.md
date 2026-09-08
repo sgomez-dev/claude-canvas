@@ -45,13 +45,13 @@ cd ${CLAUDE_PLUGIN_ROOT}
 # Run canvas in current terminal
 bun run src/cli.ts show calendar
 
-# Spawn canvas in new tmux split
+# Spawn canvas in a new pane
 bun run src/cli.ts spawn calendar --scenario meeting-picker --config '{...}'
 ```
 
 ## Spawning Canvases
 
-**Always use `spawn` for interactive scenarios** - this opens the canvas in a tmux split pane while keeping the conversation terminal available.
+**Always use `spawn` for interactive scenarios** - this opens the canvas in a split pane (tmux or Windows Terminal) while keeping the conversation terminal available.
 
 ```bash
 bun run src/cli.ts spawn [kind] --scenario [name] --config '[json]'

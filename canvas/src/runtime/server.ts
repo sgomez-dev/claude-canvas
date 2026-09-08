@@ -14,6 +14,21 @@ export interface CanvasServerOptions {
   token?: string;
   onMessage(msg: ControllerMessage, reply: (m: CanvasMessage) => void): void;
   onError?(e: Error): void;
+  /**
+   * Called immediately after a connection completes the hello handshake,
+   * with a reply function bound to that one connection.
+   *
+   * This exists because `broadcast` only reaches connections that are
+   * ALREADY authenticated, and nothing else could observe when that became
+   * true. A caller wanting to hand a message to a controller as it attaches
+   * previously had to guess with a timer, and a guess that fires early
+   * drops the message silently.
+   *
+   * That is also the shape the ledger's gap 1 fix needs: replaying a
+   * retained outcome to a controller that connects after the outcome was
+   * produced. Nothing in production wires this yet.
+   */
+  onAuthenticated?(reply: (m: CanvasMessage) => void): void;
 }
 
 interface ConnState {
@@ -119,6 +134,14 @@ export async function startCanvasServer(o: CanvasServerOptions): Promise<CanvasS
             }
             state.authed = true;
             send(socket, { type: "hello-ok" });
+            // Wrapped for the same reason onMessage is: this is
+            // caller-supplied, and a throw inside a runtime-invoked socket
+            // callback would take the process down with a non-zero exit.
+            try {
+              o.onAuthenticated?.((reply) => send(socket, reply));
+            } catch (e) {
+              o.onError?.(e as Error);
+            }
             continue;
           }
           // o.onMessage is caller-supplied; a throw here is otherwise

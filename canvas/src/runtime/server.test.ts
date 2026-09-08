@@ -181,3 +181,72 @@ test("keeps authentication per-connection: one bad socket cannot ride another's 
     s.stop();
   }
 });
+
+// onAuthenticated exists because `broadcast` only reaches connections that
+// are ALREADY authenticated, and nothing else could observe when that
+// became true. Its absence is why client.test.ts and integration.test.ts
+// had to guess with a timer, and why one of those guesses lost the race on
+// macos-latest in CI run 34271005232.
+test("onAuthenticated fires after hello-ok, with a reply bound to that connection", async () => {
+  const order: string[] = [];
+  const s = await startCanvasServer({
+    onMessage() {},
+    onAuthenticated(reply) {
+      order.push("authenticated");
+      reply({ type: "cancelled", reason: "replayed" });
+    },
+  });
+  try {
+    const got = await talk(s.port, [encodeFrame({ type: "hello", token: s.token })]);
+    // hello-ok must arrive first: a controller that saw an outcome before
+    // its handshake was acknowledged would have no way to know it was
+    // authenticated at all.
+    expect(got.map((m) => m.type)).toEqual(["hello-ok", "cancelled"]);
+    expect(order).toEqual(["authenticated"]);
+  } finally {
+    s.stop();
+  }
+});
+
+test("onAuthenticated does not fire for a connection that fails the handshake", async () => {
+  let fired = 0;
+  const s = await startCanvasServer({
+    onMessage() {},
+    onAuthenticated() {
+      fired++;
+    },
+  });
+  try {
+    await talk(s.port, [encodeFrame({ type: "hello", token: "wrong-token" })]);
+    expect(fired).toBe(0);
+  } finally {
+    s.stop();
+  }
+});
+
+test("a throwing onAuthenticated is routed to onError, not out of the socket callback", async () => {
+  const errors: string[] = [];
+  const s = await startCanvasServer({
+    // ping/pong is the caller's behaviour, not the server's, so it has to
+    // be wired here for the liveness assertion below to mean anything.
+    onMessage(msg, reply) {
+      if (msg.type === "ping") reply({ type: "pong" });
+    },
+    onAuthenticated() {
+      throw new Error("callback exploded");
+    },
+    onError: (e) => errors.push(e.message),
+  });
+  try {
+    const got = await talk(s.port, [
+      encodeFrame({ type: "hello", token: s.token }),
+      encodeFrame({ type: "ping" }),
+    ]);
+    // The connection survives the throw: hello-ok landed and ping is still
+    // answered. A canvas process must always be able to exit 0.
+    expect(got.map((m) => m.type)).toEqual(["hello-ok", "pong"]);
+    expect(errors).toEqual(["callback exploded"]);
+  } finally {
+    s.stop();
+  }
+});

@@ -26,11 +26,24 @@ test("getValue performs the handshake and returns the value", async () => {
   }
 });
 
+// Both of these used to race: they broadcast on a fixed 30 ms timer while
+// waitForOutcome was still doing a TCP connect, a filesystem read of the
+// registry record, and the hello round trip. `broadcast` only reaches
+// ALREADY-AUTHENTICATED connections, so a timer that fires first drops the
+// message silently and the wait runs to its full 2000 ms timeout. That is
+// what failed on macos-latest in CI run 34271005232, at 2037 ms -- the
+// `cancelled` case lost the race that the `selected` case happened to win.
+//
+// onAuthenticated fires at exactly the moment the handshake completes, with
+// a reply bound to that connection, so there is no window to lose and no
+// sleep in the test at all.
 test("waitForOutcome resolves selected", async () => {
-  const s = await startCanvasServer({ onMessage() {} });
+  const s = await startCanvasServer({
+    onMessage() {},
+    onAuthenticated: (reply) => reply({ type: "selected", data: { slot: 3 } }),
+  });
   try {
     await publish("c-sel", s);
-    setTimeout(() => s.broadcast({ type: "selected", data: { slot: 3 } }), 30);
     expect(await waitForOutcome("c-sel", 2000)).toEqual({ status: "selected", data: { slot: 3 } });
   } finally {
     s.stop();
@@ -38,10 +51,12 @@ test("waitForOutcome resolves selected", async () => {
 });
 
 test("waitForOutcome resolves cancelled", async () => {
-  const s = await startCanvasServer({ onMessage() {} });
+  const s = await startCanvasServer({
+    onMessage() {},
+    onAuthenticated: (reply) => reply({ type: "cancelled", reason: "escape" }),
+  });
   try {
     await publish("c-can", s);
-    setTimeout(() => s.broadcast({ type: "cancelled", reason: "escape" }), 30);
     expect(await waitForOutcome("c-can", 2000)).toEqual({ status: "cancelled", reason: "escape" });
   } finally {
     s.stop();

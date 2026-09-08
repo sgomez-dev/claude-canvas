@@ -372,6 +372,58 @@ terminal (picker.tsx's precedent), so the cursor is redundant as a focus
 indicator -- but it is not redundant as an *extent* indicator, which is the
 actual defect. Cost if wrong: one glyph per focused field.
 
+---
+
+## Post-push CI failure and its fix (run 34271005232)
+
+The first push went green on all three legs (run 34270256655 — the first
+green run this repository has ever had). The second push failed on
+**macos-latest only**, with ubuntu and windows passing:
+
+```
+(fail) waitForOutcome resolves cancelled [2037.10ms]
+211 pass, 1 fail
+```
+
+Not a regression from the pushed commits. A latent race in a Phase 1 test
+(Task 7, `client.test.ts`), surfaced by scheduling luck:
+
+`server.broadcast` only reaches connections that are **already
+authenticated** —
+
+```ts
+broadcast(msg) { for (const [socket, state] of conns) if (state.authed) send(socket, msg); }
+```
+
+— and the test broadcast on a fixed 30 ms timer while `waitForOutcome` was
+still doing a TCP connect, a filesystem read of the registry record, and the
+hello round trip. When the timer wins, the message is dropped silently and
+the wait runs to its full 2000 ms timeout, which is exactly the 2037 ms in
+the log. The sibling `waitForOutcome resolves selected` test has the
+identical shape and merely won the race that day; `integration.test.ts` had
+a third instance on a 40 ms timer.
+
+**Ruling 8: fixed by removing the guess, not by lengthening it.** A longer
+timer lowers the failure rate without eliminating it and slows the suite,
+and this repository has already paid for that lesson once (6a14420, "remove
+timing-dependent flakiness in two tests"). `CanvasServerOptions` gains
+`onAuthenticated(reply)`, called immediately after `hello-ok` with a reply
+bound to that one connection, so all three tests now send at the exact
+moment the handshake completes and contain no sleep at all. Verified with 25
+consecutive runs of the runtime suite: 0 failures.
+
+This hook is not test-only scaffolding. It is precisely what gap 1's fix
+needs — the server previously had no way to tell anyone that a controller
+had attached, which is the root cause of `sendError` being broadcast to zero
+connections. Nothing in production wires it yet; three tests cover it
+(fires after hello-ok and in that order, does not fire for a failed
+handshake, and a throwing callback is routed to onError while the connection
+survives — a canvas must always be able to exit 0).
+
+The other four broadcast call sites in the tests were checked and are safe:
+each follows an awaited `openConnection`, which resolves only after
+`hello-ok`.
+
 *** PHASE 2 IMPLEMENTATION COMPLETE. Not reviewed by a second pass: this
 ledger and the code in commits 158e74a..ddd263a are one agent's work with no
 independent review round, unlike Phase 1's 18 task reviews plus a

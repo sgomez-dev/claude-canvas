@@ -15,12 +15,21 @@ test("full round trip: ready, update, get, selected, close", async () => {
   let config: unknown = { content: "v1" };
   let closed = false;
 
+  // Armed just before waitForOutcome runs, so the outcome is handed to
+  // waitForOutcome's own connection the instant it authenticates. The
+  // previous form broadcast on a fixed 40 ms timer, which races the
+  // handshake for the same reason client.test.ts's two did -- broadcast
+  // only reaches already-authenticated connections.
+  let armed = false;
   const server = await startCanvasServer({
     onMessage(msg, reply) {
       seen.push(msg);
       if (msg.type === "update") config = msg.config;
       if (msg.type === "get") reply({ type: "value", key: msg.key, data: config });
       if (msg.type === "close") closed = true;
+    },
+    onAuthenticated(reply) {
+      if (armed) reply({ type: "selected", data: { offset: 7 } });
     },
   });
 
@@ -39,9 +48,9 @@ test("full round trip: ready, update, get, selected, close", async () => {
     await new Promise((r) => setTimeout(r, 40));
     expect(await getValue(id, "content")).toEqual({ content: "v2" });
 
-    const outcome = waitForOutcome(id, 3000);
-    setTimeout(() => server.broadcast({ type: "selected", data: { offset: 7 } }), 40);
-    expect(await outcome).toEqual({ status: "selected", data: { offset: 7 } });
+    armed = true;
+    expect(await waitForOutcome(id, 3000)).toEqual({ status: "selected", data: { offset: 7 } });
+    armed = false;
 
     conn.send({ type: "close" });
     await new Promise((r) => setTimeout(r, 40));

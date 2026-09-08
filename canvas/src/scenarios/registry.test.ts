@@ -14,3 +14,7 @@ test("flight booking scenario is registered", () => {
 test("diff:review is registered", () => {
   expect(getScenario("diff", "review")).toBeDefined();
 });
+
+test("picker:select is registered", () => {
+  expect(getScenario("picker", "select")).toBeDefined();
+});

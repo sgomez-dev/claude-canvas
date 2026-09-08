@@ -98,6 +98,11 @@ async function waitForRecord(id: string, tries = 30) {
   throw new Error(`registry record for "${id}" never appeared`);
 }
 
+const OUTCOME_TYPES = new Set(["selected", "cancelled", "error"]);
+function outcomesIn(messages: unknown[]): unknown[] {
+  return messages.filter((m) => OUTCOME_TYPES.has((m as { type: string }).type));
+}
+
 test("enabled hook starts a real server, registers it, and round-trips every message kind", async () => {
   const restoreEnv = withEnv("TMUX", "/tmp/fake,1,0");
   const id = "hook-on";
@@ -142,12 +147,16 @@ test("enabled hook starts a real server, registers it, and round-trips every mes
     client.send({ type: "hello", token: record.token });
     await new Promise((res) => setTimeout(res, 60));
     expect(client.messages).toContainEqual({ type: "hello-ok" });
-    // The hook's own "ready" broadcast fires immediately once the record is
-    // written, before this test's client has connected -- the same race
-    // openConnection's callers accept in production (a controller only
-    // dials in once the registry record exists, by which point "ready" may
-    // already have been sent to nobody). Not asserted here for that reason;
-    // the get/update/send round-trips below are what this test pins.
+    // `ready` used to be unassertable: the hook broadcast it the instant
+    // the record was written, before any controller could have read the
+    // port, so it reached nobody. It is now retained and replayed to a
+    // controller as it authenticates, which is what makes it observable at
+    // all. Capabilities are deliberately not asserted -- trueColor comes
+    // from COLORTERM and the dimensions from the terminal, so pinning them
+    // would pin the machine.
+    const ready = client.messages.find((m) => (m as { type: string }).type === "ready");
+    expect(ready).toBeDefined();
+    expect((ready as unknown as { scenario: string }).scenario).toBe("display");
 
     client.send({ type: "get", key: "content" });
     await new Promise((res) => setTimeout(res, 60));
@@ -158,13 +167,17 @@ test("enabled hook starts a real server, registers it, and round-trips every mes
     await new Promise((res) => setTimeout(res, 60));
     expect(updateSeen).toEqual({ x: 1 });
 
+    // First outcome wins, and the two after it are dropped. A canvas has
+    // exactly one answer; letting a later call overwrite it would mean a
+    // controller's `wait` returned whichever of two contradictory outcomes
+    // it happened to read, and the persisted copy could disagree with the
+    // broadcast one.
     handle!.sendSelected({ picked: 2 });
     handle!.sendCancelled("nvm");
     handle!.sendError("oops");
     await new Promise((res) => setTimeout(res, 60));
     expect(client.messages).toContainEqual({ type: "selected", data: { picked: 2 } });
-    expect(client.messages).toContainEqual({ type: "cancelled", reason: "nvm" });
-    expect(client.messages).toContainEqual({ type: "error", message: "oops" });
+    expect(outcomesIn(client.messages)).toHaveLength(1);
   } finally {
     client?.close();
     r.dispose();

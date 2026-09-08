@@ -5,6 +5,7 @@ import type { TableConfig } from "../../src/canvases/table/types";
 import { renderCanvas } from "../harness/render";
 import { deleteRecord } from "../../src/runtime/registry";
 import { openConnection, getValue } from "../../src/runtime/client";
+import { nextOutcome } from "../harness/ipc";
 
 const ids: string[] = [];
 afterEach(async () => {
@@ -113,8 +114,8 @@ test("escape reports cancelled over a real socket, never selected", async () => 
   r.stdin.write(ESC);
   await r.settle();
 
-  expect(await conn.next(2000)).toEqual({ type: "cancelled", reason: "escape" });
-  expect(await conn.next(300)).toBeNull();
+  expect(await nextOutcome(conn, 2000)).toEqual({ type: "cancelled", reason: "escape" });
+  expect(await nextOutcome(conn, 300)).toBeNull();
   conn.close();
   r.dispose();
 });
@@ -131,8 +132,8 @@ test("a second escape does not send a second outcome", async () => {
   r.stdin.write(ESC);
   await r.settle();
 
-  expect(await conn.next(2000)).toEqual({ type: "cancelled", reason: "escape" });
-  expect(await conn.next(300)).toBeNull();
+  expect(await nextOutcome(conn, 2000)).toEqual({ type: "cancelled", reason: "escape" });
+  expect(await nextOutcome(conn, 300)).toBeNull();
   conn.close();
   r.dispose();
 });

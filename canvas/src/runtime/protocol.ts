@@ -127,6 +127,18 @@ export type ControllerMessage =
   | { type: "close" }
   | { type: "ping" };
 
+/**
+ * The subset of CanvasMessage that ends a canvas's interaction. Exactly one
+ * of these is ever produced, and it is the thing a controller's `wait` is
+ * waiting for -- so it is also the thing that has to survive the canvas
+ * exiting, which is why it has its own name and gets persisted into the
+ * registry record.
+ */
+export type OutcomeMessage =
+  | { type: "selected"; data: unknown }
+  | { type: "cancelled"; reason?: string }
+  | { type: "error"; message: string };
+
 export type CanvasMessage =
   | { type: "hello-ok" }
   | { type: "error"; message: string }

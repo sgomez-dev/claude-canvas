@@ -84,6 +84,6 @@ an array or empty, a field missing `id` or `label`, an unsupported `type`,
 duplicate field ids, or a `select` whose `options` are missing, empty or
 malformed.
 
-**Caveat:** the error is displayed in the pane, but a `wait` that connects
-afterwards will not see it — see `canvas` skill, "Known gap: outcomes are
-not buffered". Validate configs before spawning.
+A config error reaches you as
+`{"status":"error","message":"..."}` from `wait`, even though it is reported
+before you connect — see `canvas` skill, "Outcomes cannot be missed".

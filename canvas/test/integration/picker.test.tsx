@@ -5,6 +5,7 @@ import type { PickerResult } from "../../src/canvases/picker/types";
 import { renderCanvas } from "../harness/render";
 import { deleteRecord } from "../../src/runtime/registry";
 import { openConnection } from "../../src/runtime/client";
+import { nextOutcome } from "../harness/ipc";
 
 const ids: string[] = [];
 afterEach(async () => {
@@ -50,7 +51,7 @@ test("single mode: pressing Enter on the highlighted option selects it", async (
   r.stdin.write("\r"); // Enter, on the first (default-highlighted) option
   await r.settle();
 
-  const msg = await conn.next(2000);
+  const msg = await nextOutcome(conn, 2000);
   expect(msg).toEqual({ type: "selected", data: { selectedIds: ["a"] } });
   conn.close();
   r.dispose();
@@ -78,7 +79,7 @@ test("single mode: moving down then selecting picks the second option", async ()
   r.stdin.write("\r");
   await r.settle();
 
-  const msg = await conn.next(2000);
+  const msg = await nextOutcome(conn, 2000);
   expect(msg).toEqual({ type: "selected", data: { selectedIds: ["b"] } });
   conn.close();
   r.dispose();
@@ -108,7 +109,7 @@ test("multi mode: toggling both options and submitting returns both ids", async 
   r.stdin.write("\r"); // submit
   await r.settle();
 
-  const msg = await conn.next(2000);
+  const msg = await nextOutcome(conn, 2000);
   // Multi-select result ordering is intentionally unspecified, so this
   // asserts membership (as a Set), not array order.
   expect(msg?.type).toBe("selected");
@@ -132,7 +133,7 @@ test("escape cancels without sending a result", async () => {
   r.stdin.write("\x1b");
   await r.settle();
 
-  const msg = await conn.next(2000);
+  const msg = await nextOutcome(conn, 2000);
   expect(msg).toEqual({ type: "cancelled", reason: "escape" });
   conn.close();
   r.dispose();
@@ -157,10 +158,10 @@ test("Enter twice in quick succession only sends one outcome message", async () 
   r.stdin.write("\r");
   await r.settle();
 
-  const msg = await conn.next(2000);
+  const msg = await nextOutcome(conn, 2000);
   expect(msg).toEqual({ type: "selected", data: { selectedIds: ["a"] } });
   // No second message should follow.
-  const second = await conn.next(300);
+  const second = await nextOutcome(conn, 300);
   expect(second).toBeNull();
 
   conn.close();
@@ -187,7 +188,7 @@ test("navigating with a disabled option in the middle skips over it", async () =
   r.stdin.write("\r");
   await r.settle();
 
-  const msg = await conn.next(2000);
+  const msg = await nextOutcome(conn, 2000);
   expect(msg).toEqual({ type: "selected", data: { selectedIds: ["c"] } });
   conn.close();
   r.dispose();
@@ -243,7 +244,7 @@ test("selecting from a later window returns that option's id, not the window off
   r.stdin.write("\r");
   await r.settle();
 
-  expect(await conn.next(2000)).toEqual({ type: "selected", data: { selectedIds: ["opt-10"] } });
+  expect(await nextOutcome(conn, 2000)).toEqual({ type: "selected", data: { selectedIds: ["opt-10"] } });
   conn.close();
   r.dispose();
 });

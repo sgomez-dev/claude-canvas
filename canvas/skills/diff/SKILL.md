@@ -83,6 +83,7 @@ of 1, and binary files (listed as a label, contributing no hunks).
 - `git diff --no-prefix` is **not** supported: the parser expects the `a/`
   and `b/` prefixes.
 
-**Caveat:** a parse error is displayed in the pane, but a `wait` that
-connects afterwards will not see it — see `canvas` skill, "Known gap:
-outcomes are not buffered".
+A parse error reaches you as `{"status":"error","message":"..."}` from
+`wait`, even though it is reported before you connect — see `canvas` skill,
+"Outcomes cannot be missed". Note that a parse error is itself the outcome:
+if the user then presses Escape you still get the error, not a cancellation.

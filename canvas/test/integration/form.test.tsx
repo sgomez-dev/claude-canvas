@@ -5,6 +5,7 @@ import type { FormConfig } from "../../src/canvases/form/types";
 import { renderCanvas } from "../harness/render";
 import { deleteRecord } from "../../src/runtime/registry";
 import { openConnection } from "../../src/runtime/client";
+import { nextOutcome } from "../harness/ipc";
 
 const ids: string[] = [];
 afterEach(async () => {
@@ -74,7 +75,7 @@ test("a completed form submits one value per field, correctly typed", async () =
   await type(r, [TAB, "7"]);               // count
   await type(r, [TAB, ENTER]);             // Submit
 
-  const msg = await conn.next(2000);
+  const msg = await nextOutcome(conn, 2000);
   // checkbox -> boolean, number -> number, everything else -> string, per
   // the spec's per-type result requirement.
   expect(msg).toEqual({
@@ -94,7 +95,7 @@ test("submitting with a required field empty keeps the form open and sends nothi
   // Straight to Submit with `name` still empty.
   await type(r, [TAB, TAB, TAB, TAB, TAB, ENTER]);
 
-  expect(await conn.next(300)).toBeNull();
+  expect(await nextOutcome(conn, 300)).toBeNull();
   const frame = await r.settle();
   expect(frame).toContain("<- required");
   conn.close();
@@ -127,7 +128,7 @@ test("a required number holding only a minus sign never submits as null", async 
   await type(r, ["-"]);
   await type(r, [TAB, ENTER]); // blur clears the unparseable entry, then submit
 
-  expect(await conn.next(300)).toBeNull();
+  expect(await nextOutcome(conn, 300)).toBeNull();
   expect(await r.settle()).toContain("<- required");
   conn.close();
   r.dispose();
@@ -139,7 +140,7 @@ test("escape cancels without sending a result", async () => {
 
   await type(r, [ESC]);
 
-  expect(await conn.next(2000)).toEqual({ type: "cancelled", reason: "escape" });
+  expect(await nextOutcome(conn, 2000)).toEqual({ type: "cancelled", reason: "escape" });
   conn.close();
   r.dispose();
 });
@@ -156,9 +157,9 @@ test("Enter then Escape in quick succession only sends one outcome message", asy
   r.stdin.write(ESC);
   await r.settle();
 
-  const first = await conn.next(2000);
+  const first = await nextOutcome(conn, 2000);
   expect(first).toEqual({ type: "selected", data: { values: { count: 5 } } });
-  expect(await conn.next(300)).toBeNull();
+  expect(await nextOutcome(conn, 300)).toBeNull();
   conn.close();
   r.dispose();
 });

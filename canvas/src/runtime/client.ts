@@ -1,5 +1,11 @@
-import { encodeFrame, FrameDecoder, type CanvasMessage, type ControllerMessage } from "./protocol";
-import { readRecord } from "./registry";
+import {
+  encodeFrame,
+  FrameDecoder,
+  type CanvasMessage,
+  type ControllerMessage,
+  type OutcomeMessage,
+} from "./protocol";
+import { deleteRecord, readRecord } from "./registry";
 import { createQueuedWriter, type QueuedWriter } from "./socket-writer";
 
 export const DEFAULT_WAIT_MS = 55_000;
@@ -172,14 +178,52 @@ export async function requestClose(id: string): Promise<void> {
   });
 }
 
+function toWaitResult(msg: OutcomeMessage): WaitResult {
+  if (msg.type === "selected") return { status: "selected", data: msg.data };
+  if (msg.type === "cancelled") return { status: "cancelled", reason: msg.reason };
+  return { status: "error", message: msg.message };
+}
+
+/**
+ * Reads and removes a persisted outcome, if the canvas left one.
+ *
+ * Removing it is what keeps `wait` from reporting the same choice twice,
+ * and it is the only thing that deletes these records in the normal case --
+ * the canvas deliberately does not delete its own record when it exits with
+ * an unread outcome.
+ */
+async function consumeOutcome(id: string): Promise<OutcomeMessage | null> {
+  let record;
+  try {
+    record = await readRecord(id);
+  } catch {
+    return null;
+  }
+  if (!record?.outcome) return null;
+  await deleteRecord(id);
+  return record.outcome;
+}
+
 export async function waitForOutcome(
   id: string,
   timeoutMs: number = DEFAULT_WAIT_MS
 ): Promise<WaitResult> {
+  // A persisted outcome is checked first and is authoritative. The canvas
+  // writes it before broadcasting and before exiting, so this covers every
+  // case the socket cannot: the user chose before this call connected, or
+  // the canvas has already exited entirely.
+  const persisted = await consumeOutcome(id);
+  if (persisted) return toWaitResult(persisted);
+
   let conn: Connection;
   try {
     conn = await openConnection(id);
   } catch (e) {
+    // The canvas can produce its outcome and exit in the gap between the
+    // check above and this connect, so look once more before reporting a
+    // failure that would discard the answer.
+    const late = await consumeOutcome(id);
+    if (late) return toWaitResult(late);
     return { status: "error", message: (e as Error).message };
   }
   const deadline = Date.now() + timeoutMs;
@@ -189,11 +233,17 @@ export async function waitForOutcome(
       if (remaining <= 0) return { status: "pending" };
       const msg = await conn.next(remaining);
       if (msg === null) {
+        // Same reasoning as above, for a canvas that exited mid-wait.
+        const late = await consumeOutcome(id);
+        if (late) return toWaitResult(late);
         return Date.now() >= deadline ? { status: "pending" } : { status: "disconnected" };
       }
-      if (msg.type === "selected") return { status: "selected", data: msg.data };
-      if (msg.type === "cancelled") return { status: "cancelled", reason: msg.reason };
-      if (msg.type === "error") return { status: "error", message: msg.message };
+      if (msg.type === "selected" || msg.type === "cancelled" || msg.type === "error") {
+        // Delivered over the socket, so drop the persisted copy: leaving it
+        // would make a second `wait` report an outcome already acted on.
+        await consumeOutcome(id);
+        return toWaitResult(msg);
+      }
       // ready / value / pong / hello-ok are not outcomes; keep waiting.
     }
   } finally {

@@ -104,32 +104,32 @@ Prefer a primitive over asking in prose whenever the choice is already
 enumerable: the result comes back as an exact id or a typed value rather
 than free text you have to interpret.
 
-## Known gap: outcomes are not buffered
+## Outcomes cannot be missed
 
-A canvas sends its outcome (`selected`, `cancelled`, `error`) by
-broadcasting to **whoever is connected at that instant**. Nothing is
-retained, so:
+You do not have to race the user. A canvas produces exactly one outcome, and
+it is retained: written into its registry record before it is broadcast and
+before the canvas exits. `wait` reads that record first, so all of these
+work:
 
-- If the user acts before your `wait` connects, the outcome is broadcast to
-  zero connections and lost. The canvas then exits and its registry record
-  is removed, so the follow-up `wait` answers
-  `{"status":"error","message":"no canvas <id>"}` and there is no way to
-  recover what the user chose.
-- A **config error** is effectively never observable. The primitives send it
-  as soon as their own server is up, which is before any controller can have
-  read the port from the registry record. The message is rendered in the
-  pane, so a human sees it; you do not.
-- `spawn` returns as soon as the pane is opened, which can be before the
-  canvas has written its registry record — so a `wait` issued immediately
-  after `spawn` can also answer `no canvas <id>`.
+- The user chooses **before** you call `wait`. You still get the choice.
+- The canvas has **already exited** by the time you call `wait`. You still
+  get the outcome.
+- The canvas reports a **config error**. You get
+  `{"status":"error","message":"..."}` naming what was wrong, rather than a
+  55 s `pending` that tells you nothing.
 
-Until this is fixed, in practice:
+Two consequences worth knowing:
 
-1. **Validate configs before spawning.** A malformed config costs a 55 s
-   `wait` that answers `pending` and tells you nothing.
-2. **Call `wait` promptly** after `spawn`, and if it answers
-   `{"status":"error","message":"no canvas <id>"}` immediately, retry once
-   before concluding the canvas is gone.
+- **An outcome is delivered once.** Reading it consumes it, so a second
+  `wait` on the same id answers `no canvas <id>`. Act on the first answer;
+  do not re-poll for confirmation.
+- **The first outcome wins.** If a canvas reports a config error and the
+  user then presses Escape, you get the error, not the cancellation — the
+  more informative of the two.
+
+`spawn` also no longer reports success until the canvas is actually
+reachable, so a `wait` issued immediately after it will not answer
+`no canvas <id>` for a canvas that was merely still starting.
 
 ## Requirements
 

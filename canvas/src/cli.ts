@@ -3,7 +3,8 @@ import { program } from "commander";
 import { assertIdent } from "./runtime/validate";
 import { configPath } from "./runtime/paths";
 import { getValue, requestClose, waitForOutcome, DEFAULT_WAIT_MS } from "./runtime/client";
-import { listRecords, type CanvasRecord } from "./runtime/registry";
+import { awaitRecord, listRecords, type CanvasRecord } from "./runtime/registry";
+import { logPath } from "./runtime/paths";
 import { detectHost } from "./host";
 
 type Writer = (s: string) => boolean;
@@ -104,6 +105,11 @@ export async function runShow(kind: string, opts: ShowOpts, io: ActionIO = defau
   }
 }
 
+// Generous on purpose: the measured spawn-to-reachable window is 0-1 s on
+// this machine, and a cold Bun start on a loaded Windows box is the slow
+// case this has to tolerate without a false negative.
+const SPAWN_READY_MS = 10_000;
+
 interface SpawnOpts {
   id?: string;
   scenario?: string;
@@ -146,6 +152,23 @@ export async function runSpawn(kind: string, opts: SpawnOpts, io: ActionIO = def
     }
     const host = detectHost();
     const handle = await host.open({ argv, title: `canvas: ${kind}`, ratio: 0.67 });
+
+    // Do not report success until the canvas is actually reachable. Opening
+    // the pane is not the same as the canvas being up: inside it, Bun has
+    // to start, Ink has to mount, the server has to bind and the registry
+    // record has to be written. `spawn` used to return before all of that,
+    // so a `wait` issued immediately after answered "no canvas <id>" for a
+    // canvas that was merely still starting. Measured window on this
+    // machine: 0-1 s, so 10 s is far beyond any healthy start.
+    const record = await awaitRecord(id, SPAWN_READY_MS);
+    if (!record) {
+      throw new Error(
+        `Pane opened, but canvas ${id} did not become reachable within ` +
+          `${SPAWN_READY_MS / 1000}s. It may have failed to start; see ${logPath(id)}. ` +
+          `The pane may still be open and must be closed by hand.`
+      );
+    }
+    if (record.lastError) throw new Error(`Canvas ${id} failed to start: ${record.lastError}`);
     emit({ status: "spawned", id, host: handle.host }, io.write);
   } catch (e) {
     const message = (e as Error).message;

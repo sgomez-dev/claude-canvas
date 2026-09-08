@@ -3,10 +3,10 @@ import { useApp } from "ink";
 import { appendFile, mkdir } from "node:fs/promises";
 import { dirname } from "node:path";
 import { startCanvasServer, type CanvasServer } from "./server";
-import { deleteRecord, writeRecord } from "./registry";
+import { deleteRecord, writeRecord, writeRecordSync, type CanvasRecord } from "./registry";
 import { logPath } from "./paths";
 import { detectHost, baseCapabilities, type TerminalCapabilities } from "../host";
-import type { CanvasMessage } from "./protocol";
+import type { CanvasMessage, OutcomeMessage } from "./protocol";
 
 export interface UseCanvasServerOptions {
   id: string;
@@ -49,6 +49,19 @@ export function useCanvasServer(o: UseCanvasServerOptions): CanvasServerHandle {
   const serverRef = useRef<CanvasServer | null>(null);
   const cbs = useRef(o);
 
+  // The record as written at startup, so the outcome can be merged into it
+  // later without re-deriving every field.
+  const recordRef = useRef<CanvasRecord | null>(null);
+  // The `ready` message, retained so a controller that attaches later can
+  // still be told what it attached to. It used to be broadcast the instant
+  // the server came up -- before any controller could possibly have read
+  // the port from the registry record -- which made it unobservable.
+  const readyRef = useRef<CanvasMessage | null>(null);
+  // The terminal outcome, retained for replay and persisted to disk. First
+  // one wins: the components guard against a second outcome too, and this
+  // is the backstop.
+  const outcomeRef = useRef<OutcomeMessage | null>(null);
+
   useEffect(() => {
     cbs.current = o;
   });
@@ -76,6 +89,14 @@ export function useCanvasServer(o: UseCanvasServerOptions): CanvasServerHandle {
       }
       try {
         const server = await startCanvasServer({
+          // Replays what a controller would otherwise have missed by
+          // attaching after the fact. This is the whole fix for the class
+          // of bug where a user chose before `wait` connected: the outcome
+          // was broadcast to zero connections and lost.
+          onAuthenticated(reply) {
+            if (readyRef.current) reply(readyRef.current);
+            if (outcomeRef.current) reply(outcomeRef.current);
+          },
           onMessage(msg, reply) {
             switch (msg.type) {
               case "update":
@@ -106,7 +127,7 @@ export function useCanvasServer(o: UseCanvasServerOptions): CanvasServerHandle {
           return;
         }
         serverRef.current = server;
-        await writeRecord({
+        const record: CanvasRecord = {
           id,
           kind,
           scenario,
@@ -116,9 +137,14 @@ export function useCanvasServer(o: UseCanvasServerOptions): CanvasServerHandle {
           startedAt: new Date().toISOString(),
           host: hostName,
           wtSession: process.env.WT_SESSION,
-        });
+        };
+        recordRef.current = record;
+        await writeRecord(record);
         setIsConnected(true);
-        server.broadcast({ type: "ready", scenario, capabilities });
+        readyRef.current = { type: "ready", scenario, capabilities };
+        // Still broadcast, for the case where a controller somehow already
+        // attached. onAuthenticated is what actually delivers it.
+        server.broadcast(readyRef.current);
       } catch (e) {
         // A canvas must still exit 0, so a startup failure travels in the
         // registry record and the log file rather than throwing out of this
@@ -144,7 +170,11 @@ export function useCanvasServer(o: UseCanvasServerOptions): CanvasServerHandle {
       live = false;
       serverRef.current?.stop();
       serverRef.current = null;
-      void deleteRecord(id);
+      // A record carrying an unread outcome must survive this unmount --
+      // deleting it here is exactly how a user's choice used to become
+      // unrecoverable. Whoever reads the outcome deletes it; listRecords
+      // prunes one that is never read.
+      if (!outcomeRef.current) void deleteRecord(id);
     };
   }, [enabled, id, kind, scenario, exit]);
 
@@ -152,10 +182,51 @@ export function useCanvasServer(o: UseCanvasServerOptions): CanvasServerHandle {
     serverRef.current?.broadcast(msg);
   }, []);
 
+  // Records the outcome, persists it, and only then broadcasts it.
+  //
+  // The order matters and the synchronous write matters. Every caller of
+  // this exits the app immediately afterwards, and process.exit does not
+  // wait for a pending async write -- so an awaited write would lose the
+  // race it exists to win. Persisting BEFORE the broadcast also means a
+  // controller that reads the record instead of the socket can never see a
+  // stale one.
+  const emitOutcome = useCallback(
+    (msg: OutcomeMessage) => {
+      if (outcomeRef.current) return;
+      outcomeRef.current = msg;
+      try {
+        const base = recordRef.current;
+        writeRecordSync(
+          base
+            ? { ...base, outcome: msg }
+            : {
+                // No record yet means the server never finished starting.
+                // The outcome is still worth persisting -- a config error
+                // reported before startup completed is precisely the case
+                // a controller could not otherwise observe at all.
+                id,
+                kind,
+                scenario,
+                port: 0,
+                token: "",
+                pid: process.pid,
+                startedAt: new Date().toISOString(),
+                host: "none",
+                outcome: msg,
+              }
+        );
+      } catch (e) {
+        void logToFile(id, `failed to persist outcome: ${(e as Error).message}`);
+      }
+      send(msg);
+    },
+    [id, kind, scenario, send]
+  );
+
   return {
     isConnected,
-    sendSelected: useCallback((data: unknown) => send({ type: "selected", data }), [send]),
-    sendCancelled: useCallback((reason?: string) => send({ type: "cancelled", reason }), [send]),
-    sendError: useCallback((message: string) => send({ type: "error", message }), [send]),
+    sendSelected: useCallback((data: unknown) => emitOutcome({ type: "selected", data }), [emitOutcome]),
+    sendCancelled: useCallback((reason?: string) => emitOutcome({ type: "cancelled", reason }), [emitOutcome]),
+    sendError: useCallback((message: string) => emitOutcome({ type: "error", message }), [emitOutcome]),
   };
 }

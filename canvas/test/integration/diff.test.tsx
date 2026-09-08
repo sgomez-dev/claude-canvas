@@ -4,6 +4,7 @@ import { Diff } from "../../src/canvases/diff";
 import { renderCanvas } from "../harness/render";
 import { deleteRecord } from "../../src/runtime/registry";
 import { openConnection } from "../../src/runtime/client";
+import { nextOutcome } from "../harness/ipc";
 
 const ids: string[] = [];
 afterEach(async () => {
@@ -46,7 +47,7 @@ test("approving the only hunk and submitting sends the right result over a real 
   r.stdin.write("\r");
   await r.settle();
 
-  const msg = await conn.next(2000);
+  const msg = await nextOutcome(conn, 2000);
   expect(msg).toEqual({
     type: "selected",
     data: { decisions: [{ hunkId: "a.txt#0", decision: "approved" }] },
@@ -71,7 +72,7 @@ test("submitting without deciding a hunk reports it as rejected", async () => {
   r.stdin.write("\r"); // submit immediately, no decision made
   await r.settle();
 
-  const msg = await conn.next(2000);
+  const msg = await nextOutcome(conn, 2000);
   expect(msg).toEqual({
     type: "selected",
     data: { decisions: [{ hunkId: "a.txt#0", decision: "rejected" }] },
@@ -109,7 +110,7 @@ test("approving and submitting with only a single settle() tick still reports ap
   r.stdin.write("\r");
   await r.settle();
 
-  const msg = await conn.next(2000);
+  const msg = await nextOutcome(conn, 2000);
   expect(msg).toEqual({
     type: "selected",
     data: { decisions: [{ hunkId: "a.txt#0", decision: "approved" }] },
@@ -163,7 +164,7 @@ test("moving the cursor then approving with only a single settle() tick approves
   r.stdin.write("\r");
   await r.settle();
 
-  const msg = await conn.next(2000);
+  const msg = await nextOutcome(conn, 2000);
   expect(msg).toEqual({
     type: "selected",
     data: {
@@ -232,7 +233,7 @@ test("navigating across a file boundary and mixing approve/reject/undecided subm
   r.stdin.write("\r");
   await r.settle();
 
-  const msg = await conn.next(2000);
+  const msg = await nextOutcome(conn, 2000);
   expect(msg).toEqual({
     type: "selected",
     data: {
@@ -263,7 +264,7 @@ test("escape cancels without sending a result", async () => {
   r.stdin.write("\x1b"); // Esc
   await r.settle();
 
-  const msg = await conn.next(2000);
+  const msg = await nextOutcome(conn, 2000);
   expect(msg).toEqual({ type: "cancelled", reason: "escape" });
 
   conn.close();
@@ -273,13 +274,22 @@ test("escape cancels without sending a result", async () => {
 // Regression: Escape previously did nothing in the parse-error state — the
 // useInput handler's very first line was `if (files.length === 0) return;`,
 // so key.escape was never reached once parsing failed, making the pane
-// un-exitable by keyboard. (The sendError-on-parse-failure half of this fix
-// is not separately asserted over the socket here: like the `ready`
-// broadcast documented in use-canvas-server.test.tsx, it fires as soon as
-// the IPC server comes up, which in this in-process test harness reliably
-// wins the race against the test's own openConnection() call connecting
-// afterward — asserting delivery would pin a race, not a behavior.)
-test("Escape still cancels from the parse-error state", async () => {
+// un-exitable by keyboard.
+//
+// This test previously asserted that Escape produced `cancelled`, and
+// carried a note explaining that the sendError-on-parse-failure half of the
+// fix could not be asserted over the socket at all: it fired as soon as the
+// IPC server came up, which always beat the test's own openConnection().
+// Retained outcomes changed that. The parse error is now replayed to a
+// controller as it authenticates, so the assertion the note said was
+// impossible is the one this test makes.
+//
+// It also pins the resulting semantics, which are deliberate: the parse
+// error is the FIRST outcome, and first outcome wins, so the later Escape
+// does not overwrite it with `cancelled`. That is the more useful of the
+// two -- Claude learns the diff was unparseable instead of learning only
+// that the pane closed.
+test("a parse failure is reported to the controller, and Escape still exits", async () => {
   const id = "diff-it-6";
   ids.push(id);
   const r = renderCanvas(
@@ -289,13 +299,26 @@ test("Escape still cancels from the parse-error state", async () => {
   await r.settle();
   await new Promise((res) => setTimeout(res, 50));
 
+  // Connecting AFTER the error was produced is the whole point.
   const conn = await openConnection(id);
+  const outcome = await nextOutcome(conn, 2000);
+  expect((outcome as { type: string }).type).toBe("error");
+  expect((outcome as { message: string }).message).toContain("Could not determine file path");
 
   r.stdin.write("\x1b"); // Esc must still work in the error state
   await r.settle();
 
-  const cancelMsg = await conn.next(2000);
-  expect(cancelMsg).toEqual({ type: "cancelled", reason: "escape" });
+  // No second, contradicting outcome.
+  expect(await nextOutcome(conn, 300)).toBeNull();
+
+  // And Escape really did exit: exit() unmounts Ink, which runs the hook's
+  // cleanup, which stops the server -- so the connection dies. That is the
+  // observable proof that the pane is not un-exitable, which is the
+  // regression this test was written for.
+  for (let i = 0; i < 20 && (await conn.next(100)) !== null; i++) {
+    /* drain until the peer goes away */
+  }
+  expect(await conn.next(100)).toBeNull();
 
   conn.close();
   r.dispose();
@@ -319,7 +342,7 @@ test("Escape cancels from the empty-diff state", async () => {
   r.stdin.write("\x1b");
   await r.settle();
 
-  const msg = await conn.next(2000);
+  const msg = await nextOutcome(conn, 2000);
   expect(msg).toEqual({ type: "cancelled", reason: "escape" });
 
   conn.close();
@@ -345,13 +368,13 @@ test("Enter twice in quick succession only sends one outcome message", async () 
   r.stdin.write("\r");
   await r.settle();
 
-  const msg = await conn.next(2000);
+  const msg = await nextOutcome(conn, 2000);
   expect(msg).toEqual({
     type: "selected",
     data: { decisions: [{ hunkId: "a.txt#0", decision: "rejected" }] },
   });
   // No second message should follow.
-  const second = await conn.next(300);
+  const second = await nextOutcome(conn, 300);
   expect(second).toBeNull();
 
   conn.close();
@@ -379,7 +402,7 @@ Binary files a/logo.png and b/logo.png differ
   r.stdin.write("\r");
   await r.settle();
 
-  expect(await conn.next(2000)).toEqual({ type: "selected", data: { decisions: [] } });
+  expect(await nextOutcome(conn, 2000)).toEqual({ type: "selected", data: { decisions: [] } });
   conn.close();
   r.dispose();
 });

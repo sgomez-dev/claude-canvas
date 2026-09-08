@@ -74,6 +74,6 @@ unusable list: `options` not an array, empty, an option missing `id` or
 `label`, duplicate ids, every option disabled, or a missing/unrecognized
 `mode`.
 
-**Caveat:** the error is displayed in the pane, but a `wait` that connects
-afterwards will not see it — see `canvas` skill, "Known gap: outcomes are
-not buffered". Validate configs before spawning.
+A config error reaches you as
+`{"status":"error","message":"..."}` from `wait`, even though it is reported
+before you connect — see `canvas` skill, "Outcomes cannot be missed".

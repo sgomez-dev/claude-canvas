@@ -1,5 +1,6 @@
 import { encodeFrame, FrameDecoder, type CanvasMessage, type ControllerMessage } from "./protocol";
 import { readRecord } from "./registry";
+import { createQueuedWriter, type QueuedWriter } from "./socket-writer";
 
 export const DEFAULT_WAIT_MS = 55_000;
 
@@ -38,6 +39,11 @@ export async function openConnection(id: string): Promise<Connection> {
     while (waiters.length) waiters.shift()?.(null);
   };
 
+  // Assigned immediately after Bun.connect resolves, which is before any
+  // caller can invoke send() and therefore before `drain` can ever fire --
+  // the null guards below are for type-safety, not a real ordering window.
+  let writer: QueuedWriter | null = null;
+
   const socket = await Bun.connect({
     hostname: "127.0.0.1",
     port: record.port,
@@ -54,14 +60,31 @@ export async function openConnection(id: string): Promise<Connection> {
           die();
         }
       },
-      close: die,
-      error: die,
+      // Resumes a write the socket previously refused under backpressure.
+      // The controller is the side that sends `update`, which Phase 3 will
+      // use for multi-megabyte screenshots, so this is the handler that
+      // makes a large outbound config possible at all.
+      drain() {
+        writer?.drain();
+      },
+      close() {
+        writer?.destroy();
+        die();
+      },
+      error() {
+        writer?.destroy();
+        die();
+      },
     },
   });
+  writer = createQueuedWriter(socket, die);
 
   const conn: Connection = {
     send(msg) {
-      if (!dead) socket.write(encodeFrame(msg));
+      // encodeFrame's FrameTooLargeError still propagates to the caller, as
+      // it did when this wrote to the socket directly. What changed is that
+      // the bytes now survive backpressure instead of being truncated.
+      if (!dead) writer?.write(encodeFrame(msg));
     },
     next(timeoutMs) {
       const buffered = inbox.shift();
@@ -81,6 +104,12 @@ export async function openConnection(id: string): Promise<Connection> {
       });
     },
     close() {
+      // Releases anyone awaiting flushed() and drops any queued tail: this
+      // is a teardown path, and after end() the socket will never accept
+      // those bytes anyway. Callers that need a frame delivered before
+      // closing (requestClose) send small frames, which the writer's fast
+      // path hands to the socket synchronously with nothing left queued.
+      writer?.destroy();
       // The socket may already be gone (peer closed first, or a previous
       // close() call already tore it down) — end() on a dead socket throws,
       // and an uncaught throw here would escape whatever caller invoked

@@ -1,5 +1,6 @@
 import { encodeFrame, FrameDecoder, type CanvasMessage, type ControllerMessage } from "./protocol";
 import { newToken } from "./token";
+import { createQueuedWriter, type QueuedWriter } from "./socket-writer";
 import type { Socket } from "bun";
 
 export interface CanvasServer {
@@ -19,6 +20,10 @@ interface ConnState {
   authed: boolean;
   rejected: boolean;
   decoder: FrameDecoder;
+  // Every outbound byte goes through this rather than socket.write, because
+  // socket.write is documented to accept less than it was given under
+  // backpressure. See socket-writer.ts for the measurement.
+  writer: QueuedWriter;
 }
 
 export async function startCanvasServer(o: CanvasServerOptions): Promise<CanvasServer> {
@@ -26,8 +31,12 @@ export async function startCanvasServer(o: CanvasServerOptions): Promise<CanvasS
   const conns = new Map<Socket<undefined>, ConnState>();
 
   const send = (socket: Socket<undefined>, msg: CanvasMessage) => {
+    const state = conns.get(socket);
+    if (!state) return;
     try {
-      socket.write(encodeFrame(msg));
+      // encodeFrame can throw FrameTooLargeError; the writer handles the
+      // socket-level failures, so both stay inside this one try.
+      state.writer.write(encodeFrame(msg));
     } catch (e) {
       o.onError?.(e as Error);
     }
@@ -43,18 +52,29 @@ export async function startCanvasServer(o: CanvasServerOptions): Promise<CanvasS
   // (see the `rejected` guard below), so the close no longer races it.
   const sendAndClose = (socket: Socket<undefined>, msg: CanvasMessage) => {
     send(socket, msg);
+    const state = conns.get(socket);
     // Not wrapping this would let an uncaught throw here (e.g. the socket
     // was independently destroyed between scheduling and firing) escape a
     // bare timer callback, which crashes the process with a non-zero exit
     // code. A canvas process must always exit 0 — a non-zero exit on
     // Windows leaves a terminal pane nothing can close.
-    setTimeout(() => {
-      try {
-        socket.end();
-      } catch (e) {
-        o.onError?.(e as Error);
-      }
-    }, 0);
+    const endLater = () =>
+      setTimeout(() => {
+        try {
+          socket.end();
+        } catch (e) {
+          o.onError?.(e as Error);
+        }
+      }, 0);
+    // Wait for the queue to empty before scheduling the close, or a frame
+    // still sitting in the writer would be discarded by end(). When nothing
+    // is pending -- the case for every frame this path sends, all of which
+    // are tiny -- flushed() is already resolved, so this adds one microtask
+    // ahead of the setTimeout and preserves the macrotask deferral the
+    // comment above depends on (a microtask alone would NOT: microtasks
+    // drain before the event loop polls for I/O).
+    if (state) void state.writer.flushed().then(endLater, endLater);
+    else endLater();
   };
 
   const server = Bun.listen<undefined>({
@@ -62,7 +82,18 @@ export async function startCanvasServer(o: CanvasServerOptions): Promise<CanvasS
     port: 0,
     socket: {
       open(socket) {
-        conns.set(socket, { authed: false, rejected: false, decoder: new FrameDecoder() });
+        conns.set(socket, {
+          authed: false,
+          rejected: false,
+          decoder: new FrameDecoder(),
+          writer: createQueuedWriter(socket, (e) => o.onError?.(e)),
+        });
+      },
+      // Resumes any write that the socket previously refused. Without this
+      // handler a frame larger than the send buffer stalls permanently:
+      // the writer holds the tail and nothing ever asks it to continue.
+      drain(socket) {
+        conns.get(socket)?.writer.drain();
       },
       data(socket, data) {
         const state = conns.get(socket);
@@ -102,10 +133,12 @@ export async function startCanvasServer(o: CanvasServerOptions): Promise<CanvasS
         }
       },
       close(socket) {
+        conns.get(socket)?.writer.destroy();
         conns.delete(socket);
       },
       error(socket, error) {
         o.onError?.(error);
+        conns.get(socket)?.writer.destroy();
         conns.delete(socket);
       },
     },
@@ -118,7 +151,8 @@ export async function startCanvasServer(o: CanvasServerOptions): Promise<CanvasS
       for (const [socket, state] of conns) if (state.authed) send(socket, msg);
     },
     stop() {
-      for (const socket of conns.keys()) {
+      for (const [socket, state] of conns) {
+        state.writer.destroy();
         try {
           socket.end();
         } catch (e) {

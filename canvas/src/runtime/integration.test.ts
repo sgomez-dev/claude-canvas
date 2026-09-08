@@ -75,3 +75,38 @@ test("a payload larger than the old newline protocol could carry survives", asyn
     server.stop();
   }
 });
+
+// The mirror of the test above, for the other direction. The 4 MB `update`
+// exercises client.ts's writer (controller -> canvas); this exercises
+// server.ts's (canvas -> controller). Both sides called socket.write and
+// discarded its return value, so both truncated large frames -- but only the
+// controller-side path had a test, and it passed on Windows (whose loopback
+// send buffers absorbed 4 MB in one call) while failing on macOS and Linux.
+test("a large frame survives the canvas -> controller direction too", async () => {
+  const big = "QUJD\n".repeat(800_000);
+  const server = await startCanvasServer({ onMessage() {} });
+  const id = "it-big-out";
+  ids.push(id);
+  let conn: Awaited<ReturnType<typeof openConnection>> | undefined;
+  try {
+    await writeRecord({ id, kind: "document", scenario: "display", port: server.port,
+      token: server.token, pid: process.pid, startedAt: new Date().toISOString(), host: "test" });
+
+    conn = await openConnection(id);
+    server.broadcast({ type: "selected", data: { blob: big } });
+
+    // Poll rather than sleeping a fixed interval: a 4 MB frame needs many
+    // drain cycles, and the point of the test is that it completes at all,
+    // not that it completes within some arbitrary wall-clock budget.
+    const deadline = Date.now() + 10_000;
+    let msg = await conn.next(Math.max(0, deadline - Date.now()));
+    while (msg && msg.type !== "selected" && Date.now() < deadline) {
+      msg = await conn.next(Math.max(0, deadline - Date.now()));
+    }
+    expect(msg?.type).toBe("selected");
+    expect((msg as { data: { blob: string } }).data.blob.length).toBe(big.length);
+  } finally {
+    conn?.close();
+    server.stop();
+  }
+});

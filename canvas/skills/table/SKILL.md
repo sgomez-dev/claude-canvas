@@ -26,7 +26,7 @@ columns aligned.
 ### `display` (the only scenario)
 
 ```bash
-bun run ${CLAUDE_PLUGIN_ROOT}/src/cli.ts spawn table --scenario display --id tbl-1 --config '{
+bun run ${CLAUDE_PLUGIN_ROOT}/dist/cli.js spawn table --scenario display --id tbl-1 --config '{
   "title": "Outdated dependencies",
   "columns": [
     {"key": "name",    "label": "Package", "width": 24},
@@ -39,7 +39,7 @@ bun run ${CLAUDE_PLUGIN_ROOT}/src/cli.ts spawn table --scenario display --id tbl
     {"name": "commander", "current": "14.0.2", "latest": "14.0.3", "note": "patch"}
   ]
 }'
-bun run ${CLAUDE_PLUGIN_ROOT}/src/cli.ts wait tbl-1
+bun run ${CLAUDE_PLUGIN_ROOT}/dist/cli.js wait tbl-1
 ```
 
 ## Config

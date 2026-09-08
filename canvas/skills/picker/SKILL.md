@@ -29,7 +29,7 @@ because it returns an exact id rather than free text you have to interpret.
 Single- or multi-select from one implementation, chosen by `mode`.
 
 ```bash
-bun run ${CLAUDE_PLUGIN_ROOT}/src/cli.ts spawn picker --scenario select --id pick-1 --config '{
+bun run ${CLAUDE_PLUGIN_ROOT}/dist/cli.js spawn picker --scenario select --id pick-1 --config '{
   "title": "Which files should I refactor?",
   "prompt": "Space toggles, Enter submits",
   "mode": "multi",
@@ -39,7 +39,7 @@ bun run ${CLAUDE_PLUGIN_ROOT}/src/cli.ts spawn picker --scenario select --id pic
     {"id": "src/c.ts", "label": "src/c.ts", "description": "generated", "disabled": true}
   ]
 }'
-bun run ${CLAUDE_PLUGIN_ROOT}/src/cli.ts wait pick-1
+bun run ${CLAUDE_PLUGIN_ROOT}/dist/cli.js wait pick-1
 ```
 
 ## Config

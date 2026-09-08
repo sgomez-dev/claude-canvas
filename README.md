@@ -28,7 +28,9 @@ Four generic primitives, a composed canvas, and three domain demos:
 
 ## Requirements
 
-- **[Bun](https://bun.sh)** — the runtime the canvases run on
+- **[Bun](https://bun.sh)** — the runtime the canvases run on. The plugin
+  ships a prebuilt bundle with no dependencies of its own, so there is no
+  `bun install` step after installing it
 - **[tmux](https://github.com/tmux/tmux) 3.1+ or Windows Terminal** — a canvas
   opens in a split pane, so one of these has to be hosting your shell.
   `spawn` refuses with a clear message if neither is; `show` still works
@@ -103,24 +105,68 @@ bash canvas/scripts/smoke.sh
 | `scenarios [kind]` | Available scenarios and their interaction modes |
 | `env` | Detected host and terminal capabilities |
 
+## Credits
+
+The idea, and the proof of concept that showed it worked, are
+[David Siegel](https://github.com/dvdsgl)'s:
+**[dvdsgl/claude-canvas](https://github.com/dvdsgl/claude-canvas)**. Giving
+Claude Code a display of its own — a pane it opens, that a person acts in,
+whose answer comes back as a value — is the creative leap here, and it was
+his. The IPC-over-a-socket shape, the tmux split, the Ink canvases and the
+scenario idea all come from that repository, and this one still renders his
+`calendar`, `document` and `flight` canvases.
+
+He published it as an explicitly unsupported proof of concept. This fork
+takes it up from there.
+
+## What this fork adds
+
+Roughly, the original proved the idea and this took it to something that
+holds up in daily use. Concretely, and in the order it happened:
+
+**Foundations.** The original had two incompatible IPC layers, and the one
+the docs described only worked for `document` — in `calendar` and `flight` a
+user's selection reached nobody, because the canvas waited for a server the
+CLI never started. That is now one transport: length-prefixed frames over
+loopback TCP with a per-canvas token, which also made the whole thing
+testable without a terminal. Along the way: a command injection in the
+spawn path closed, Windows support (Windows Terminal as a host, no `/tmp`,
+no bash shebangs), 113 typecheck errors fixed, and a test suite and 3-OS CI
+built from nothing — there were no tests and no CI at all.
+
+**Generic primitives.** The original's three canvases were demos with
+hardcoded data. The reusable shapes underneath them are now their own
+canvases: `picker`, `form`, `table` and `diff`.
+
+**Composition.** Each primitive is a view, a canvas shell and a validator,
+so a canvas can be built out of them instead of another 600 bespoke lines.
+`dashboard` is the first: several views in one pane, with an outcome that
+says which region answered.
+
+**Reliability, mostly invisible.** Frames larger than the socket buffer were
+being silently truncated. A user's choice was lost if they made it before
+Claude asked for it. `FrameDecoder` was quadratic. Column widths counted
+UTF-16 units, so any CJK or emoji cell sheared its row. Registry writes
+were not atomic, and a read that raced one deleted it. None of that was
+visible from the outside, and all of it is fixed with a regression test
+apiece.
+
+The receipts, if you want them: **293 tests**, CI green on Linux, macOS and
+Windows, and `canvas/scripts/smoke.sh` driving all eight canvas kinds
+through a real tmux pane. Every decision, every ruling and every known gap
+is written down in [`docs/roadmap.md`](docs/roadmap.md) and the ledgers
+under [`docs/superpowers/`](docs/superpowers/) — including the things that
+are still wrong.
+
 ## Project status
 
-A fork of [dvdsgl/claude-canvas](https://github.com/dvdsgl/claude-canvas),
-which was an explicitly unsupported proof of concept.
-
-- **Phase 1 — foundations:** complete. One IPC (length-prefixed frames over
-  loopback TCP with a token), cross-platform hosts (tmux and Windows
-  Terminal), and CI on Linux, macOS and Windows.
+- **Phase 1 — foundations:** complete. One IPC, three platforms, CI.
 - **Phase 2 — generic primitives:** complete. `picker`, `form`, `table`,
   `diff`.
-- **Phase 3 — richer canvases:** in progress. `dashboard` and `tree` are
-  done; image rendering is next.
+- **Phase 3 — richer canvases:** in progress. Composition and `dashboard`
+  are done; image rendering (half-blocks, Sixel, Kitty) is next.
 - **Phase 4 — publishing:** not started.
-
-The reasoning behind every decision, and every known gap, lives in
-[`docs/roadmap.md`](docs/roadmap.md) and the ledgers under
-[`docs/superpowers/`](docs/superpowers/).
 
 ## License
 
-MIT
+MIT, and the original copyright is retained — see [LICENSE](LICENSE).

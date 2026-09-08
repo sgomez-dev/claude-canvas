@@ -156,7 +156,14 @@ export async function runSpawn(kind: string, opts: SpawnOpts, io: ActionIO = def
     const argv = [
       process.execPath,
       "run",
-      `${import.meta.dir}/cli.ts`,
+      // `import.meta.path`, not a hardcoded `cli.ts` next to it. The shipped
+      // plugin runs a bundle at dist/cli.js -- an installed plugin is a git
+      // clone with no node_modules, so nothing that imports ink at runtime
+      // can render -- and the old form built a path to a `cli.ts` that does
+      // not exist there. The pane opened and the canvas inside it died
+      // instantly. `import.meta.path` is whichever entry point is actually
+      // running, source or bundle.
+      import.meta.path,
       "show",
       kind,
       "--id",

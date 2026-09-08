@@ -25,7 +25,7 @@ Try asking Claude:
 Read-only document view with markdown rendering. User can scroll but cannot select text.
 
 ```bash
-bun run src/cli.ts show document --scenario display --config-file cfg.json
+bun run ${CLAUDE_PLUGIN_ROOT}/dist/cli.js show document --scenario display --config-file cfg.json
 # cfg.json:
 # {
 #   "content": "# Hello World\n\nThis is **markdown** content.",
@@ -42,7 +42,7 @@ Interactive document view with text selection. User can click and drag to select
 - Selection automatically sent via IPC
 
 ```bash
-bun run src/cli.ts spawn document --scenario edit --config '{
+bun run ${CLAUDE_PLUGIN_ROOT}/dist/cli.js spawn document --scenario edit --config '{
   "content": "# My Blog Post\n\nThis is the **introduction** to my post.\n\n## Section One\n\n- Point one\n- Point two",
   "title": "Blog Post Draft",
 }'
@@ -52,7 +52,7 @@ bun run src/cli.ts spawn document --scenario edit --config '{
 Specialized view for email content display.
 
 ```bash
-bun run src/cli.ts show document --scenario email-preview --config-file cfg.json
+bun run ${CLAUDE_PLUGIN_ROOT}/dist/cli.js show document --scenario email-preview --config-file cfg.json
 # cfg.json:
 # {
 #   "content": "Dear Team,\n\nPlease review the attached document.\n\nBest regards,\nAlice",
@@ -111,10 +111,10 @@ interface DocumentSelection {
 
 ```bash
 # Read-only view
-bun run ${CLAUDE_PLUGIN_ROOT}/src/cli.ts show document --scenario display --config-file cfg.json
+bun run ${CLAUDE_PLUGIN_ROOT}/dist/cli.js show document --scenario display --config-file cfg.json
 
 # Interactive editing with selection
-bun run ${CLAUDE_PLUGIN_ROOT}/src/cli.ts spawn document --scenario edit \
+bun run ${CLAUDE_PLUGIN_ROOT}/dist/cli.js spawn document --scenario edit \
   --id doc-1 --config '{
     "content": "# My Document\n\nSelect some **text** here.",
     "title": "Edit Mode",
@@ -125,7 +125,7 @@ bun run ${CLAUDE_PLUGIN_ROOT}/src/cli.ts spawn document --scenario edit \
 # report the user's selection; it only ever reports cancellation/timeout/
 # disconnection for this canvas. Call `get` whenever you need to know what
 # text (if any) is currently selected.
-bun run ${CLAUDE_PLUGIN_ROOT}/src/cli.ts get doc-1 selection
+bun run ${CLAUDE_PLUGIN_ROOT}/dist/cli.js get doc-1 selection
 ```
 
 `get <id> selection` prints `{"status":"ok","key":"selection","data":{"selectedText":...,"startOffset":...,"endOffset":...}}`

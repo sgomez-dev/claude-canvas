@@ -30,10 +30,10 @@ you are about to write), then pass its text as `diffText`.
 
 ```bash
 git diff > /tmp/change.diff
-bun run ${CLAUDE_PLUGIN_ROOT}/src/cli.ts spawn diff --scenario review --id rev-1 --config "$(
+bun run ${CLAUDE_PLUGIN_ROOT}/dist/cli.js spawn diff --scenario review --id rev-1 --config "$(
   python3 -c 'import json,sys; print(json.dumps({"title":"Proposed refactor","diffText":open("/tmp/change.diff").read()}))'
 )"
-bun run ${CLAUDE_PLUGIN_ROOT}/src/cli.ts wait rev-1
+bun run ${CLAUDE_PLUGIN_ROOT}/dist/cli.js wait rev-1
 ```
 
 For anything but a tiny diff, prefer `--config-file`: config travels by file

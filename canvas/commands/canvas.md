@@ -31,7 +31,7 @@ If you are unsure which scenario a kind supports, ask the CLI rather than
 guessing -- an unknown `--scenario` is rejected:
 
 ```bash
-bun run ${CLAUDE_PLUGIN_ROOT}/src/cli.ts scenarios <kind>
+bun run ${CLAUDE_PLUGIN_ROOT}/dist/cli.js scenarios <kind>
 ```
 
 A scenario reported as `"interactionMode": "view-only"` has no `selected`
@@ -89,35 +89,35 @@ Use the CLI to spawn the canvas:
 
 ```bash
 cd ${CLAUDE_PLUGIN_ROOT}
-bun run src/cli.ts spawn [type] --scenario [scenario] --config '[json]'
+bun run ${CLAUDE_PLUGIN_ROOT}/dist/cli.js spawn [type] --scenario [scenario] --config '[json]'
 ```
 
 **Examples:**
 
 ```bash
 # Calendar display
-bun run src/cli.ts spawn calendar --config '{"events": [...]}'
+bun run ${CLAUDE_PLUGIN_ROOT}/dist/cli.js spawn calendar --config '{"events": [...]}'
 
 # Meeting picker
-bun run src/cli.ts spawn calendar --scenario meeting-picker --config '{"calendars": [...]}'
+bun run ${CLAUDE_PLUGIN_ROOT}/dist/cli.js spawn calendar --scenario meeting-picker --config '{"calendars": [...]}'
 
 # Document editor
-bun run src/cli.ts spawn document --scenario edit --config '{"content": "# Title", "title": "Doc"}'
+bun run ${CLAUDE_PLUGIN_ROOT}/dist/cli.js spawn document --scenario edit --config '{"content": "# Title", "title": "Doc"}'
 
 # Flight booking
-bun run src/cli.ts spawn flight --config '{"flights": [...]}'
+bun run ${CLAUDE_PLUGIN_ROOT}/dist/cli.js spawn flight --config '{"flights": [...]}'
 
 # Diff review
-bun run src/cli.ts spawn diff --config '{"diffText": "diff --git a/... "}'
+bun run ${CLAUDE_PLUGIN_ROOT}/dist/cli.js spawn diff --config '{"diffText": "diff --git a/... "}'
 
 # Option picker
-bun run src/cli.ts spawn picker --config '{"mode": "single", "options": [...]}'
+bun run ${CLAUDE_PLUGIN_ROOT}/dist/cli.js spawn picker --config '{"mode": "single", "options": [...]}'
 
 # Structured form
-bun run src/cli.ts spawn form --config '{"fields": [...]}'
+bun run ${CLAUDE_PLUGIN_ROOT}/dist/cli.js spawn form --config '{"fields": [...]}'
 
 # Tabular display (view-only: closes with cancelled, never selected)
-bun run src/cli.ts spawn table --config '{"columns": [...], "rows": [...]}'
+bun run ${CLAUDE_PLUGIN_ROOT}/dist/cli.js spawn table --config '{"columns": [...], "rows": [...]}'
 ```
 
 ### Step 3b: Update a canvas in place (optional)
@@ -125,7 +125,7 @@ bun run src/cli.ts spawn table --config '{"columns": [...], "rows": [...]}'
 To change what an open canvas shows without closing it:
 
 ```bash
-bun run ${CLAUDE_PLUGIN_ROOT}/src/cli.ts update cal-1 --config '{...}'
+bun run ${CLAUDE_PLUGIN_ROOT}/dist/cli.js update cal-1 --config '{...}'
 ```
 
 The canvas resets its interaction state on an update -- a pushed config is a
@@ -138,7 +138,7 @@ Use `wait <id>` to block for the user's interaction (returns within ~55s no
 matter what — call it again if it comes back `pending`):
 
 ```bash
-bun run src/cli.ts wait cal-1
+bun run ${CLAUDE_PLUGIN_ROOT}/dist/cli.js wait cal-1
 ```
 
 `wait` prints one of:

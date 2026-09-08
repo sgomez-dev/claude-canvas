@@ -1,6 +1,11 @@
 MIT License
 
 Copyright (c) 2026 David Siegel
+Copyright (c) 2026 Santiago Gómez de la Torre Romero
+
+This project is a fork of https://github.com/dvdsgl/claude-canvas by David
+Siegel, whose copyright over the original work is retained above alongside
+that of the fork's contributors.
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal

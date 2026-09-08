@@ -30,7 +30,7 @@ Interactive flight comparison and seat selection.
 - Returns selected flight and seat via IPC
 
 ```bash
-bun run src/cli.ts spawn flight --scenario booking --config '{
+bun run ${CLAUDE_PLUGIN_ROOT}/dist/cli.js spawn flight --scenario booking --config '{
   "title": "// FLIGHT_BOOKING_TERMINAL //",
   "flights": [
     {
@@ -144,7 +144,7 @@ interface FlightResult {
 ## CLI Usage
 
 ```bash
-bun run ${CLAUDE_PLUGIN_ROOT}/src/cli.ts spawn flight --scenario booking \
+bun run ${CLAUDE_PLUGIN_ROOT}/dist/cli.js spawn flight --scenario booking \
   --id flight-1 --config '{
     "flights": [
       {
@@ -165,7 +165,7 @@ bun run ${CLAUDE_PLUGIN_ROOT}/src/cli.ts spawn flight --scenario booking \
     ]
   }'
 
-bun run ${CLAUDE_PLUGIN_ROOT}/src/cli.ts wait flight-1
+bun run ${CLAUDE_PLUGIN_ROOT}/dist/cli.js wait flight-1
 ```
 
 `wait` prints `{"status":"selected","data":{"selectedFlight":...,"selectedSeat":"12A"}}`

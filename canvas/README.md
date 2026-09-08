@@ -32,6 +32,19 @@ claude --plugin-dir /path/to/claude-canvas/canvas
 /plugin install canvas@claude-canvas
 ```
 
+## Two entry points
+
+- **`dist/cli.js`** — the shipped bundle, and what the skills tell Claude to
+  run. Built by `bun run build` from the repository root, committed, and
+  checked by CI. It has no runtime dependencies at all, which is what lets an
+  installed plugin work with no `bun install` step: a plugin arrives as a git
+  clone with no `node_modules`, so anything importing `ink` at runtime could
+  not render.
+- **`src/cli.ts`** — the source, and what to run while developing. Needs
+  `bun install` at the repository root.
+
+Rebuild after changing anything under `src/`, or CI fails on a stale bundle.
+
 ## Usage
 
 ```bash

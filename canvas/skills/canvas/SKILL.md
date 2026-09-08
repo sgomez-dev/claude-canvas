@@ -53,10 +53,10 @@ Canvas provides interactive terminal displays (TUIs) that Claude can spawn and c
 cd ${CLAUDE_PLUGIN_ROOT}
 
 # Run canvas in current terminal
-bun run src/cli.ts show calendar
+bun run ${CLAUDE_PLUGIN_ROOT}/dist/cli.js show calendar
 
 # Spawn canvas in a new pane
-bun run src/cli.ts spawn calendar --scenario meeting-picker --config '{...}'
+bun run ${CLAUDE_PLUGIN_ROOT}/dist/cli.js spawn calendar --scenario meeting-picker --config '{...}'
 ```
 
 ## Spawning Canvases
@@ -64,7 +64,7 @@ bun run src/cli.ts spawn calendar --scenario meeting-picker --config '{...}'
 **Always use `spawn` for interactive scenarios** - this opens the canvas in a split pane (tmux or Windows Terminal) while keeping the conversation terminal available.
 
 ```bash
-bun run src/cli.ts spawn [kind] --scenario [name] --config '[json]'
+bun run ${CLAUDE_PLUGIN_ROOT}/dist/cli.js spawn [kind] --scenario [name] --config '[json]'
 ```
 
 **Parameters:**
@@ -77,11 +77,11 @@ bun run src/cli.ts spawn [kind] --scenario [name] --config '[json]'
 
 ```bash
 # Open a canvas beside the conversation
-bun run ${CLAUDE_PLUGIN_ROOT}/src/cli.ts spawn calendar \
+bun run ${CLAUDE_PLUGIN_ROOT}/dist/cli.js spawn calendar \
   --scenario meeting-picker --id cal-1 --config '{...}'
 
 # Block for the user's choice. Returns within ~55s no matter what.
-bun run ${CLAUDE_PLUGIN_ROOT}/src/cli.ts wait cal-1
+bun run ${CLAUDE_PLUGIN_ROOT}/dist/cli.js wait cal-1
 ```
 
 Every command prints one JSON object. `wait` returns one of

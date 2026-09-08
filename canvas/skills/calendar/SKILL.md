@@ -25,7 +25,7 @@ Try asking Claude:
 View-only calendar display. User can navigate weeks but cannot select times.
 
 ```bash
-bun run src/cli.ts show calendar --scenario display --config-file cfg.json
+bun run ${CLAUDE_PLUGIN_ROOT}/dist/cli.js show calendar --scenario display --config-file cfg.json
 # cfg.json:
 # {
 #   "title": "My Week",
@@ -44,7 +44,7 @@ Interactive scenario for selecting a free time slot when viewing multiple people
 - Supports configurable time slot granularity (15/30/60 min)
 
 ```bash
-bun run src/cli.ts spawn calendar --scenario meeting-picker --config '{
+bun run ${CLAUDE_PLUGIN_ROOT}/dist/cli.js spawn calendar --scenario meeting-picker --config '{
   "calendars": [
     {
       "name": "Alice",
@@ -129,7 +129,7 @@ interface MeetingSelection {
 ## CLI Usage
 
 ```bash
-bun run ${CLAUDE_PLUGIN_ROOT}/src/cli.ts spawn calendar --scenario meeting-picker \
+bun run ${CLAUDE_PLUGIN_ROOT}/dist/cli.js spawn calendar --scenario meeting-picker \
   --id cal-1 --config '{
     "calendars": [
       { "name": "Alice", "color": "blue", "events": [...] },
@@ -138,7 +138,7 @@ bun run ${CLAUDE_PLUGIN_ROOT}/src/cli.ts spawn calendar --scenario meeting-picke
     "slotGranularity": 30
   }'
 
-bun run ${CLAUDE_PLUGIN_ROOT}/src/cli.ts wait cal-1
+bun run ${CLAUDE_PLUGIN_ROOT}/dist/cli.js wait cal-1
 ```
 
 `wait` prints `{"status":"selected","data":{"startTime":...,"endTime":...,"duration":...}}`

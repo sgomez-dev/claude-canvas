@@ -30,5 +30,12 @@ jobs:
       - name: Typecheck
         run: bun x tsc --noEmit
 
+      # canvas/dist/cli.js is a build artifact in version control, because a
+      # plugin install is a git clone with no node_modules and the skills have
+      # to run something that needs none. The cost is that it can go stale
+      # silently; this is what stops that.
+      - name: Bundle is current
+        run: bun run build:check
+
       - name: Test
         run: bun test

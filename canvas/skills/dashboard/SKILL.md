@@ -38,9 +38,9 @@ thing here that executes arbitrary commands.
 ### `display` (the only scenario)
 
 ```bash
-bun run ${CLAUDE_PLUGIN_ROOT}/src/cli.ts spawn dashboard --scenario display --id dash-1 \
+bun run ${CLAUDE_PLUGIN_ROOT}/dist/cli.js spawn dashboard --scenario display --id dash-1 \
   --config-file /tmp/dash.json
-bun run ${CLAUDE_PLUGIN_ROOT}/src/cli.ts wait dash-1
+bun run ${CLAUDE_PLUGIN_ROOT}/dist/cli.js wait dash-1
 ```
 
 Use `--config-file` rather than `--config`: a dashboard config is the
@@ -113,7 +113,7 @@ The focused region gets every other key, so `↑`/`↓`, `Enter`, `Space` and
 ## Refresh
 
 ```bash
-bun run ${CLAUDE_PLUGIN_ROOT}/src/cli.ts update dash-1 --config-file /tmp/dash2.json
+bun run ${CLAUDE_PLUGIN_ROOT}/dist/cli.js update dash-1 --config-file /tmp/dash2.json
 ```
 
 Re-gather, re-push. Note that a pushed config **resets the interaction

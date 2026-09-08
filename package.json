@@ -3,11 +3,15 @@
   "version": "0.1.0",
   "type": "module",
   "private": true,
-  "workspaces": ["canvas"],
+  "workspaces": [
+    "canvas"
+  ],
   "scripts": {
     "start": "bun run canvas/src/cli.ts",
     "show": "bun run canvas/src/cli.ts show",
-    "spawn": "bun run canvas/src/cli.ts spawn"
+    "spawn": "bun run canvas/src/cli.ts spawn",
+    "build": "bun build canvas/src/cli.ts --target=bun --external react-devtools-core --outfile canvas/dist/cli.js",
+    "build:check": "bun run scripts/check-bundle.ts"
   },
   "devDependencies": {
     "@types/bun": "latest",

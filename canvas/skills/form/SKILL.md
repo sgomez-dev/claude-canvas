@@ -25,7 +25,7 @@ Tab through and submit once.
 ### `fill` (the only scenario)
 
 ```bash
-bun run ${CLAUDE_PLUGIN_ROOT}/src/cli.ts spawn form --scenario fill --id form-1 --config '{
+bun run ${CLAUDE_PLUGIN_ROOT}/dist/cli.js spawn form --scenario fill --id form-1 --config '{
   "title": "Report a bug",
   "fields": [
     {"id": "summary",    "type": "text",     "label": "Summary", "required": true},
@@ -36,7 +36,7 @@ bun run ${CLAUDE_PLUGIN_ROOT}/src/cli.ts spawn form --scenario fill --id form-1 
     {"id": "count",      "type": "number",   "label": "Occurrences", "min": 1, "max": 10}
   ]
 }'
-bun run ${CLAUDE_PLUGIN_ROOT}/src/cli.ts wait form-1
+bun run ${CLAUDE_PLUGIN_ROOT}/dist/cli.js wait form-1
 ```
 
 ## Field types

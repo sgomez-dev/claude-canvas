@@ -107,26 +107,23 @@ interface DocumentSelection {
 - `↑/↓` or scroll: Navigate document
 - `q` or `Esc`: Close/cancel
 
-## API Usage
+## CLI Usage
 
-```typescript
-import { editDocument, displayDocument } from "${CLAUDE_PLUGIN_ROOT}/src/api";
+```bash
+# Read-only view
+bun run ${CLAUDE_PLUGIN_ROOT}/src/cli.ts show document --scenario display --config-file cfg.json
 
-// Display read-only document
-await displayDocument({
-  content: "# My Document\n\nContent here.",
-  title: "View Mode",
-});
+# Interactive editing with selection
+bun run ${CLAUDE_PLUGIN_ROOT}/src/cli.ts spawn document --scenario edit \
+  --id doc-1 --config '{
+    "content": "# My Document\n\nSelect some **text** here.",
+    "title": "Edit Mode",
+    "diffs": [{ "startOffset": 20, "endOffset": 30, "type": "add" }]
+  }'
 
-// Interactive editing with selection
-const result = await editDocument({
-  content: "# My Document\n\nSelect some **text** here.",
-  title: "Edit Mode",
-  diffs: [{ startOffset: 20, endOffset: 30, type: "add" }],
-});
-
-if (result.success && result.data) {
-  console.log(`Selected: "${result.data.selectedText}"`);
-  console.log(`Position: ${result.data.startOffset}-${result.data.endOffset}`);
-}
+bun run ${CLAUDE_PLUGIN_ROOT}/src/cli.ts wait doc-1
 ```
+
+`wait` prints `{"status":"selected","data":{"selectedText":...,"startOffset":...,"endOffset":...}}`
+once the user finishes a selection, `{"status":"cancelled"}` if they quit, or
+`{"status":"pending"}` if it timed out (still alive — call `wait` again).

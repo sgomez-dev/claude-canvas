@@ -141,33 +141,33 @@ interface FlightResult {
 - `[+]` - Premium seat (extra legroom)
 - `[*]` - Currently selected
 
-## API Usage
+## CLI Usage
 
-```typescript
-import { bookFlight } from "${CLAUDE_PLUGIN_ROOT}/src/api";
+```bash
+bun run ${CLAUDE_PLUGIN_ROOT}/src/cli.ts spawn flight --scenario booking \
+  --id flight-1 --config '{
+    "flights": [
+      {
+        "id": "ua123",
+        "airline": "United Airlines",
+        "flightNumber": "UA 123",
+        "origin": { "code": "SFO", "name": "San Francisco", "city": "SF", "timezone": "PST" },
+        "destination": { "code": "DEN", "name": "Denver", "city": "Denver", "timezone": "MST" },
+        "departureTime": "2026-01-08T12:55:00-08:00",
+        "arrivalTime": "2026-01-08T16:37:00-07:00",
+        "duration": 162,
+        "price": 34500,
+        "currency": "USD",
+        "cabinClass": "economy",
+        "stops": 0,
+        "seatmap": { ... }
+      }
+    ]
+  }'
 
-const result = await bookFlight({
-  flights: [
-    {
-      id: "ua123",
-      airline: "United Airlines",
-      flightNumber: "UA 123",
-      origin: { code: "SFO", name: "San Francisco", city: "SF", timezone: "PST" },
-      destination: { code: "DEN", name: "Denver", city: "Denver", timezone: "MST" },
-      departureTime: "2026-01-08T12:55:00-08:00",
-      arrivalTime: "2026-01-08T16:37:00-07:00",
-      duration: 162,
-      price: 34500,
-      currency: "USD",
-      cabinClass: "economy",
-      stops: 0,
-      seatmap: { ... }
-    }
-  ]
-});
-
-if (result.success && result.data) {
-  console.log(`Booked: ${result.data.selectedFlight.flightNumber}`);
-  console.log(`Seat: ${result.data.selectedSeat}`);
-}
+bun run ${CLAUDE_PLUGIN_ROOT}/src/cli.ts wait flight-1
 ```
+
+`wait` prints `{"status":"selected","data":{"selectedFlight":...,"selectedSeat":"12A"}}`
+once the user confirms, `{"status":"cancelled"}` if they quit, or
+`{"status":"pending"}` if it timed out (still alive — call `wait` again).

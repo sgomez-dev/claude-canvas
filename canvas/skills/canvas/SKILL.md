@@ -63,46 +63,28 @@ bun run src/cli.ts spawn [kind] --scenario [name] --config '[json]'
 - `--config`: JSON configuration for the canvas
 - `--id`: Optional canvas instance ID for IPC
 
-## IPC Communication
+## Interacting with a canvas
 
-Interactive canvases communicate via Unix domain sockets.
+```bash
+# Open a canvas beside the conversation
+bun run ${CLAUDE_PLUGIN_ROOT}/src/cli.ts spawn calendar \
+  --scenario meeting-picker --id cal-1 --config '{...}'
 
-**Canvas → Controller:**
-```typescript
-{ type: "ready", scenario }        // Canvas is ready
-{ type: "selected", data }         // User made a selection
-{ type: "cancelled", reason? }     // User cancelled
-{ type: "error", message }         // Error occurred
+# Block for the user's choice. Returns within ~55s no matter what.
+bun run ${CLAUDE_PLUGIN_ROOT}/src/cli.ts wait cal-1
 ```
 
-**Controller → Canvas:**
-```typescript
-{ type: "update", config }  // Update canvas configuration
-{ type: "close" }           // Request canvas to close
-{ type: "ping" }            // Health check
-```
+Every command prints one JSON object. `wait` returns one of
+`{"status":"selected","data":...}`, `{"status":"cancelled"}`,
+`{"status":"pending"}` (timed out, canvas still alive — call `wait` again),
+`{"status":"disconnected"}`, or `{"status":"error","message":...}`.
 
-## High-Level API
-
-For programmatic use, import the API module:
-
-```typescript
-import { pickMeetingTime, editDocument, bookFlight } from "${CLAUDE_PLUGIN_ROOT}/src/api";
-
-// Spawn meeting picker and wait for selection
-const result = await pickMeetingTime({
-  calendars: [...],
-  slotGranularity: 30,
-});
-
-if (result.success && result.data) {
-  console.log(`Selected: ${result.data.startTime}`);
-}
-```
+`get <id> <key>` reads state (`selection`, `content`, `config`);
+`close <id>` asks the canvas to exit; `list` shows live canvases.
 
 ## Requirements
 
-- **tmux**: Canvas spawning requires a tmux session
+- **tmux or Windows Terminal**: Canvas spawning requires one of these two host backends
 - **Terminal with mouse support**: For click-based interactions
 - **Bun**: Runtime for executing canvas commands
 

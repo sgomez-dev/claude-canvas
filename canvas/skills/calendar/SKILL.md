@@ -124,20 +124,21 @@ interface MeetingSelection {
 }
 ```
 
-## API Usage
+## CLI Usage
 
-```typescript
-import { pickMeetingTime } from "${CLAUDE_PLUGIN_ROOT}/src/api";
+```bash
+bun run ${CLAUDE_PLUGIN_ROOT}/src/cli.ts spawn calendar --scenario meeting-picker \
+  --id cal-1 --config '{
+    "calendars": [
+      { "name": "Alice", "color": "blue", "events": [...] },
+      { "name": "Bob", "color": "green", "events": [...] }
+    ],
+    "slotGranularity": 30
+  }'
 
-const result = await pickMeetingTime({
-  calendars: [
-    { name: "Alice", color: "blue", events: [...] },
-    { name: "Bob", color: "green", events: [...] },
-  ],
-  slotGranularity: 30,
-});
-
-if (result.success && result.data) {
-  console.log(`Selected: ${result.data.startTime} - ${result.data.endTime}`);
-}
+bun run ${CLAUDE_PLUGIN_ROOT}/src/cli.ts wait cal-1
 ```
+
+`wait` prints `{"status":"selected","data":{"startTime":...,"endTime":...,"duration":...}}`
+once the user picks a slot, `{"status":"cancelled"}` if they quit, or
+`{"status":"pending"}` if it timed out (still alive — call `wait` again).

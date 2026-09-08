@@ -23,6 +23,8 @@ Ask what kind of canvas the user needs:
 - **Flight** - Compare flights and select seats
 - **Diff** - Review a unified diff hunk-by-hunk
 - **Picker** - Choose one or more options from a list
+- **Form** - Fill in structured fields and submit them as one result
+- **Table** - Display tabular data, view-only
 
 ### Step 2: Gather Configuration
 
@@ -50,8 +52,18 @@ Based on the canvas type, collect the necessary configuration:
 
 **Picker:**
 - Options to choose from (id + label, optional description/disabled)
-- Single- or multi-select mode
+- Single- or multi-select mode (`mode` is required)
 - Optional title/prompt
+
+**Form:**
+- Fields: `text`, `textarea`, `select`, `checkbox`, `number`
+- Which fields are `required` (checkbox never is)
+- `min`/`max` for number fields
+
+**Table:**
+- Columns (key + label, optional width)
+- Rows as objects of string values
+- Optional title
 
 ### Step 3: Spawn Canvas
 
@@ -82,6 +94,12 @@ bun run src/cli.ts spawn diff --config '{"diffText": "diff --git a/... "}'
 
 # Option picker
 bun run src/cli.ts spawn picker --config '{"mode": "single", "options": [...]}'
+
+# Structured form
+bun run src/cli.ts spawn form --config '{"fields": [...]}'
+
+# Tabular display (view-only: closes with cancelled, never selected)
+bun run src/cli.ts spawn table --config '{"columns": [...], "rows": [...]}'
 ```
 
 ### Step 4: Handle Results
@@ -120,5 +138,7 @@ Read these skills for detailed configuration options:
 - `calendar` - Calendar events and meeting picker
 - `document` - Markdown rendering and text selection
 - `flight` - Flight comparison and seatmaps
-- `diff` - Diff review (coming soon)
-- `picker` - Option picker (coming soon)
+- `diff` - Diff review, per-hunk approve/reject
+- `picker` - Option picker
+- `form` - Structured fields with validation
+- `table` - Tabular display, view-only

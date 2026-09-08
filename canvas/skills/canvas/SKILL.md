@@ -38,6 +38,8 @@ Canvas provides interactive terminal displays (TUIs) that Claude can spawn and c
 | `flight` | Flight comparison and seat selection | `booking` |
 | `diff` | Review a unified diff hunk-by-hunk | `review` |
 | `picker` | Choose one or more options from a list | `select` |
+| `form` | Fill in structured fields and submit them as one result | `fill` |
+| `table` | Display tabular data, view-only | `display` |
 
 ## Quick Start
 
@@ -60,7 +62,7 @@ bun run src/cli.ts spawn [kind] --scenario [name] --config '[json]'
 ```
 
 **Parameters:**
-- `kind`: Canvas type (calendar, document, flight, diff, picker)
+- `kind`: Canvas type (calendar, document, flight, diff, picker, form, table)
 - `--scenario`: Interaction mode (e.g., display, meeting-picker, edit)
 - `--config`: JSON configuration for the canvas
 - `--id`: Optional canvas instance ID for IPC
@@ -86,6 +88,49 @@ and answers `selection`, `content`, and `config`; `flight` and `calendar`
 return `{"status":"ok","data":null}` for any key today.
 `close <id>` asks the canvas to exit; `list` shows live canvases.
 
+## Which canvas to reach for
+
+The four generic primitives cover most real interactions; the three
+domain canvases are demos of the same machinery.
+
+| You need the user to... | Use |
+|---|---|
+| choose between things you can enumerate | `picker` |
+| accept or refuse parts of a code change | `diff` |
+| give several related answers at once | `form` |
+| read a set of rows | `table` |
+
+Prefer a primitive over asking in prose whenever the choice is already
+enumerable: the result comes back as an exact id or a typed value rather
+than free text you have to interpret.
+
+## Known gap: outcomes are not buffered
+
+A canvas sends its outcome (`selected`, `cancelled`, `error`) by
+broadcasting to **whoever is connected at that instant**. Nothing is
+retained, so:
+
+- If the user acts before your `wait` connects, the outcome is broadcast to
+  zero connections and lost. The canvas then exits and its registry record
+  is removed, so the follow-up `wait` answers
+  `{"status":"error","message":"no canvas <id>"}` and there is no way to
+  recover what the user chose.
+- A **config error** is effectively never observable. The primitives send it
+  as soon as their own server is up, which is before any controller can have
+  read the port from the registry record. The message is rendered in the
+  pane, so a human sees it; you do not.
+- `spawn` returns as soon as the pane is opened, which can be before the
+  canvas has written its registry record — so a `wait` issued immediately
+  after `spawn` can also answer `no canvas <id>`.
+
+Until this is fixed, in practice:
+
+1. **Validate configs before spawning.** A malformed config costs a 55 s
+   `wait` that answers `pending` and tells you nothing.
+2. **Call `wait` promptly** after `spawn`, and if it answers
+   `{"status":"error","message":"no canvas <id>"}` immediately, retry once
+   before concluding the canvas is gone.
+
 ## Requirements
 
 - **tmux 3.1+ or Windows Terminal**: Canvas spawning requires one of these two host backends
@@ -99,5 +144,7 @@ return `{"status":"ok","data":null}` for any key today.
 | `calendar` | Calendar display and meeting picker details |
 | `document` | Document rendering and text selection |
 | `flight` | Flight comparison and seat map details |
-| `diff` | Diff review details (coming soon) |
-| `picker` | Option picker details (coming soon) |
+| `diff` | Diff review, per-hunk approve/reject |
+| `picker` | Single/multi-select option picker |
+| `form` | Structured fields with validation |
+| `table` | Tabular display, view-only |

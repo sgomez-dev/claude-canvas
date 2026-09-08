@@ -23,10 +23,24 @@ canvas/
 
 ## Adding a New Canvas Type
 
-1. Create component in `src/canvases/`
-2. Register scenarios in `src/scenarios/`
-3. Add skill in `skills/[name]/SKILL.md`
-4. Update main canvas skill
+A new kind must be registered in **three** places, not one. Miss the first
+and `spawn` rejects a correctly-spelled kind at the validation gate built to
+catch typos.
+
+1. Add the kind to `KNOWN_KINDS` in `src/cli.ts`
+2. Create the component in `src/canvases/` and add a `case` to
+   `renderCanvas`'s switch in `src/canvases/index.tsx`
+3. Register its scenarios in `src/scenarios/registry.ts` (and re-export from
+   `src/scenarios/index.ts`)
+4. Add a skill in `skills/[name]/SKILL.md`
+5. Update the main canvas skill, `README.md` and `commands/canvas.md`
+6. Add a render snapshot and a real-socket IPC test
+
+Note that the scenario registry currently has **no runtime consumer**:
+`getScenario` is called only from its own test, and `interactionMode` /
+`closeOn` / `autoCloseDelay` are read by nothing. Registering a scenario is
+bookkeeping today, not behaviour -- `--scenario` is validated for
+identifier shape only, never against the registry. See the Phase 2 ledger.
 
 ## IPC Protocol
 

@@ -1,7 +1,7 @@
-import React, { useRef, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { Box, Text, useInput, useApp } from "ink";
 import { useCanvasServer } from "../runtime/use-canvas-server";
-import type { PickerConfig, PickerResult } from "./picker/types";
+import type { PickerConfig, PickerOption, PickerResult } from "./picker/types";
 
 export interface PickerProps {
   id: string;
@@ -10,16 +10,86 @@ export interface PickerProps {
   enabled: boolean;
 }
 
-function firstEnabledIndex(options: PickerConfig["options"]): number {
+interface ValidatedPicker {
+  options: PickerOption[];
+  mode: "single" | "multi";
+  error: string | null;
+}
+
+function firstEnabledIndex(options: PickerOption[]): number {
   const idx = options.findIndex((o) => !o.disabled);
   return idx === -1 ? 0 : idx;
 }
 
 export function Picker({ id, config, scenario = "select", enabled }: PickerProps): React.JSX.Element {
   const { exit } = useApp();
-  const options = config?.options ?? [];
-  const mode = config?.mode ?? "single";
 
+  // Options, mode, and any config error are derived from ONE memo so there
+  // is a single source of truth for "is this config usable at all" — see
+  // diff.tsx's combined `{files, error}` memo for the reference pattern.
+  // Previously `options`/`mode` were derived inline
+  // (`config?.options ?? []`, `config?.mode ?? "single"`) with no
+  // validation at all, and fed straight into the cursor's useState
+  // initializer and the render body: malformed `options` (not an array,
+  // elements missing id/label, duplicate ids), an empty `options` array,
+  // an unrecognized `mode` string, or every option disabled would each
+  // either throw inside Ink with no error surfaced to the controller, or
+  // render a canvas that could never be submitted (sometimes with Escape
+  // unreachable too). Validating the *raw* config here, before any
+  // indexing or useState initializer touches it, closes all of those gaps
+  // at once.
+  const { options, mode, error } = useMemo<ValidatedPicker>(() => {
+    const rawOptions: unknown = config?.options;
+    if (!Array.isArray(rawOptions)) {
+      return { options: [], mode: "single", error: "picker config: 'options' must be an array" };
+    }
+    for (let i = 0; i < rawOptions.length; i++) {
+      const o: unknown = rawOptions[i];
+      const id = o !== null && typeof o === "object" ? (o as { id?: unknown }).id : undefined;
+      const label = o !== null && typeof o === "object" ? (o as { label?: unknown }).label : undefined;
+      if (typeof id !== "string" || id.length === 0 || typeof label !== "string" || label.length === 0) {
+        return {
+          options: [],
+          mode: "single",
+          error: `picker config: options[${i}] is missing 'id' or 'label'`,
+        };
+      }
+    }
+    const candidateOptions = rawOptions as PickerOption[];
+    const seenIds = new Set<string>();
+    for (const opt of candidateOptions) {
+      if (seenIds.has(opt.id)) {
+        return {
+          options: [],
+          mode: "single",
+          error: `picker config: duplicate option id ${JSON.stringify(opt.id)}`,
+        };
+      }
+      seenIds.add(opt.id);
+    }
+    if (candidateOptions.length === 0) {
+      return { options: [], mode: "single", error: "picker config: 'options' must not be empty" };
+    }
+    const rawMode: unknown = config?.mode;
+    if (rawMode !== undefined && rawMode !== "single" && rawMode !== "multi") {
+      return {
+        options: [],
+        mode: "single",
+        error: `picker config: 'mode' must be "single" or "multi", got ${JSON.stringify(rawMode)}`,
+      };
+    }
+    const validMode: "single" | "multi" = rawMode === "multi" ? "multi" : "single";
+    if (!candidateOptions.some((o) => !o.disabled)) {
+      return { options: [], mode: validMode, error: "picker config: all options are disabled" };
+    }
+    return { options: candidateOptions, mode: validMode, error: null };
+  }, [config?.options, config?.mode]);
+
+  // Cursor state and its ref always exist (hooks are unconditional every
+  // render — see diff.tsx's identical structure). When `error` is set,
+  // `options` is the empty-array fallback from the memo above, so
+  // `firstEnabledIndex` safely returns 0 rather than indexing into
+  // unvalidated data.
   const [cursor, setCursor] = useState(() => firstEnabledIndex(options));
   // Mirrors `cursor` synchronously into a ref on every render (NOT inside a
   // useEffect, which would reintroduce the same one-render lag this is
@@ -40,6 +110,11 @@ export function Picker({ id, config, scenario = "select", enabled }: PickerProps
   const checkedRef = useRef(checked);
   checkedRef.current = checked;
 
+  // Guards against a second outcome message (Enter-then-Enter,
+  // Enter-then-Escape, etc.) firing before the component has actually
+  // unmounted. See diff.tsx's `submittedRef` for the reference pattern.
+  const submittedRef = useRef(false);
+
   const ipc = useCanvasServer({
     id,
     kind: "picker",
@@ -47,6 +122,23 @@ export function Picker({ id, config, scenario = "select", enabled }: PickerProps
     enabled,
     onClose: () => {},
   });
+
+  // Reports a config validation failure to the controller exactly once,
+  // when `error` transitions from null to non-null. Gated on
+  // `ipc.isConnected` for the same reason as diff.tsx's own sendError
+  // effect: the IPC server starts asynchronously (real filesystem I/O for
+  // the registry record), so an unconditional send on mount would race the
+  // server's startup and broadcast to zero connections, silently dropping
+  // the message forever. This effect re-runs when `isConnected` flips to
+  // true and sends then; `sentRef` keeps that to a single send even if
+  // this effect re-runs again afterward.
+  const sentRef = useRef(false);
+  useEffect(() => {
+    if (error && ipc.isConnected && !sentRef.current) {
+      sentRef.current = true;
+      ipc.sendError(error);
+    }
+  }, [error, ipc.isConnected, ipc.sendError]);
 
   function moveCursor(delta: number) {
     if (options.length === 0) return;
@@ -59,20 +151,29 @@ export function Picker({ id, config, scenario = "select", enabled }: PickerProps
   }
 
   function submit(ids: string[]) {
+    if (submittedRef.current) return;
+    submittedRef.current = true;
     const result: PickerResult = { selectedIds: ids };
     ipc.sendSelected(result);
     exit();
   }
 
   useInput((input, key) => {
+    // Escape must always work, in every state (config error, normal
+    // selection) — checked first and unconditionally so the pane is never
+    // un-exitable by keyboard. Copies diff.tsx's exact ordering.
+    if (key.escape) {
+      if (submittedRef.current) return;
+      submittedRef.current = true;
+      ipc.sendCancelled("escape");
+      exit();
+      return;
+    }
     if (options.length === 0) return;
     if (key.upArrow || input === "k") {
       moveCursor(-1);
     } else if (key.downArrow || input === "j") {
       moveCursor(1);
-    } else if (key.escape) {
-      ipc.sendCancelled("escape");
-      exit();
     } else if (mode === "single" && key.return) {
       const opt = options[cursorRef.current];
       if (opt && !opt.disabled) submit([opt.id]);
@@ -91,10 +192,10 @@ export function Picker({ id, config, scenario = "select", enabled }: PickerProps
     }
   });
 
-  if (options.length === 0) {
+  if (error) {
     return (
-      <Box borderStyle="round" borderColor="red" padding={1}>
-        <Text color="red">No options to choose from.</Text>
+      <Box flexDirection="column" borderStyle="round" borderColor="red" padding={1}>
+        <Text color="red">{error}</Text>
       </Box>
     );
   }
@@ -106,7 +207,17 @@ export function Picker({ id, config, scenario = "select", enabled }: PickerProps
       {options.map((opt, i) => {
         const isCursor = i === cursor;
         const isChecked = mode === "multi" && checked.has(opt.id);
-        const prefix = mode === "multi" ? (isChecked ? "[x] " : "[ ] ") : isCursor ? "> " : "  ";
+        // Multi-mode gives the cursor its own gutter (`> `/`  `) ahead of
+        // the checkbox so cursor position is visible even with color
+        // stripped — previously the cursor was expressed solely via
+        // `color="cyan"` on the row, invisible in a no-color terminal.
+        // Single mode keeps its existing `> `/`  ` prefix unchanged.
+        const prefix =
+          mode === "multi"
+            ? `${isCursor ? "> " : "  "}${isChecked ? "[x] " : "[ ] "}`
+            : isCursor
+              ? "> "
+              : "  ";
         return (
           <Text
             key={opt.id}

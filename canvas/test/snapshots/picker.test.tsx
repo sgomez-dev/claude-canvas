@@ -19,6 +19,7 @@ const MULTI_CONFIG = {
   options: [
     { id: "x", label: "X" },
     { id: "y", label: "Y" },
+    { id: "z", label: "Z (unavailable)", disabled: true },
   ],
 };
 

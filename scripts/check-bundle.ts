@@ -11,9 +11,13 @@
  * rather than shipping a plugin that renders the previous version.
  */
 import { $ } from "bun";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
 const BUNDLE = "canvas/dist/cli.js";
-const TMP = "/tmp/claude-canvas-bundle-check.js";
+// os.tmpdir(), not a hardcoded "/tmp": this runs on the Windows CI leg too,
+// where "/tmp" is not a path and `bun build --outfile` fails outright.
+const TMP = join(tmpdir(), "claude-canvas-bundle-check.js");
 
 const committed = Bun.file(BUNDLE);
 if (!(await committed.exists())) {

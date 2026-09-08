@@ -1,0 +1,9 @@
+# The shipped bundle is compared byte for byte against a fresh build by
+# `bun run build:check`, which CI runs. Any line-ending translation on
+# checkout makes the committed copy differ from a freshly built one and the
+# check fails on that platform alone -- a false alarm that says "stale
+# bundle" when nothing is stale. Marked so git never rewrites it.
+canvas/dist/cli.js -text
+
+# Snapshots are byte-compared too, by the render tests.
+canvas/test/snapshots/__snapshots__/*.snap -text

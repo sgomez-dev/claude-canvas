@@ -48,9 +48,10 @@ test("a pushed config replaces a picker's options and resets the cursor", async 
     mode: "single",
     options: [{ id: "x", label: "Gamma" }, { id: "y", label: "Delta" }],
   });
-  // Polls rather than asserting after one macrotask: pushUpdate resolves
-  // when the bytes reach the socket, not when the canvas has re-rendered.
-  const frame = await settleUntil(r, (f) => f.includes("Gamma"));
+  // The predicate IS the assertion, deliberately. Waiting for "Gamma" alone
+  // would only prove the config arrived; the cursor reset happens in an
+  // effect keyed on the validated options, which lands a render later.
+  const frame = await settleUntil(r, (f) => f.includes("> Gamma"));
   expect(frame).toContain("Gamma");
   expect(frame).not.toContain("Alpha");
   // Cursor is back on the first option of the new list, not still on index 1.
@@ -87,7 +88,9 @@ test("a pushed config refreshes a table's rows and resets the scroll", async () 
     columns: [{ key: "n", label: "N", width: 6 }],
     rows: [{ n: "only" }],
   });
-  const frame = await settleUntil(r, (f) => f.includes("only"));
+  // Both post-conditions, not just the new content: the scroll reset is an
+  // effect and lands a render after the config does.
+  const frame = await settleUntil(r, (f) => f.includes("only") && !f.includes("of 30"));
   expect(frame).toContain("only");
   // One row now, so no range counter, and the body is back at the top.
   expect(frame).not.toContain("of 30");
@@ -121,7 +124,14 @@ test("a pushed diff drops decisions made against the previous one", async () => 
 
   // Same path, same hunk index, so the same hunk id -- the collision case.
   await pushUpdate(id, { diffText: second });
-  const frame = await settleUntil(r, (f) => f.includes("TWO"));
+  // Waiting for "TWO" alone is what turned windows-latest red on a
+  // docs-only commit: the new diff renders as soon as the config arrives,
+  // but clearing the decisions is an effect keyed on the parsed files, one
+  // render behind. The predicate has to name the state being asserted.
+  const frame = await settleUntil(
+    r,
+    (f) => f.includes("TWO") && f.includes("[undecided]")
+  );
   expect(frame).toContain("TWO");
   expect(frame).toContain("[undecided]");
   expect(frame).not.toContain("[approved]");

@@ -407,14 +407,31 @@ The same shape as the timer-based races removed from the Phase 1 tests in
 dc70a08, and the same mistake: asserting on a deadline instead of on a
 condition.
 
-**Ruling 17: assert on a condition, never on a fixed number of turns.**
-A `settleUntil(r, predicate, timeoutMs)` helper re-renders until the frame
-satisfies the predicate. All four `update` tests use it, not only the one
-that failed -- the three small configs were equally racy in principle and
-merely small enough to usually win. Verified 20 consecutive runs of that
-file and 10 of the full suite, all clean. Cost if wrong: a genuinely broken
-update now fails by timeout rather than immediately, which is slower to
-diagnose but never wrong.
+**Ruling 17: assert on a condition, never on a fixed number of turns -- and
+make the predicate BE the assertion.** A
+`settleUntil(r, predicate, timeoutMs)` helper re-renders until the frame
+satisfies the predicate, and all four `update` tests use it.
+
+The second half of that ruling was learned the hard way: the first attempt
+polled for the new content and then asserted on state a later effect
+produces, which merely moved the race. `a pushed diff drops decisions
+against the previous one` then failed on **windows-latest, again on a
+docs-only commit** -- the new diff rendered as soon as the config arrived,
+while clearing the decisions happens in an effect keyed on the parsed files,
+one render behind. Waiting for `TWO` proved the config had landed and said
+nothing about the decisions. The predicates now name exactly the state each
+test asserts.
+
+Verified 30 consecutive runs of that file idle, plus 15 with the machine
+deliberately loaded past its core count -- the condition that distinguishes
+a CI runner from an idle laptop, and the reason 30+ clean local runs proved
+nothing the first time. Cost if wrong: a genuinely broken update fails by
+timeout rather than immediately, slower to diagnose but never wrong.
+
+Both of these were my own tests, introduced with the `update` verb, and both
+turned CI red on commits that changed only documentation. That is the
+cheapest possible signal that a test rather than the code is at fault, and
+worth remembering as such.
 
 ### Unresolved: one earlier unreproduced failure
 

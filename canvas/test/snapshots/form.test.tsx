@@ -189,8 +189,22 @@ test("a textarea with enough newlines to exceed its row allocation does not over
     rows,
   });
   await r.settle();
-  r.stdin.write("\t"); // focus the textarea
-  await r.settle();
+  // The textarea is the form's only field, so it already has focus (focus
+  // starts at index 0) -- no Tab needed. A leading Tab here used to be the
+  // actual bug behind this test's CI failure: it moved focus off the field
+  // and onto Submit (Tab wraps forward past the form's only field straight
+  // to the Submit position), so the first "\r" below hit the
+  // onSubmitButton branch instead of inserting a newline and, since nothing
+  // here is required, immediately submitted and called exit() -- the
+  // remaining 29 "\r" landed on an already-unmounted tree and did nothing.
+  // Harmless locally, but in CI (`process.env.CI` set -- confirmed by
+  // reproducing with `CI=true bun test`) Ink's unmount path writes
+  // `this.lastOutput + "\n"` to stdout, and `this.lastOutput` is never
+  // populated by the harness's `debug: true` render mode, so the captured
+  // "last frame" became bare "\n" -- exactly this test's CI failure. Not a
+  // windowing bug and not a settle()/timing race: the field never actually
+  // received the 30 newlines this test claims to type into it.
+  //
   // 30 Enters -- 30 newlines, far more than any reasonable per-field
   // allocation -- typed as fast as the harness can deliver them.
   for (let i = 0; i < 30; i++) {

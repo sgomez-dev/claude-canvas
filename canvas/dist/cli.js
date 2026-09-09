@@ -23439,6 +23439,192 @@ var init_format = __esm(() => {
   };
 });
 
+// canvas/src/canvases/width.ts
+function inRanges(cp, ranges) {
+  for (const [lo, hi] of ranges) {
+    if (cp < lo)
+      return false;
+    if (cp <= hi)
+      return true;
+  }
+  return false;
+}
+function codePointWidth(cp) {
+  if (cp === 0)
+    return 0;
+  if (cp < 32 || cp >= 127 && cp < 160)
+    return 0;
+  if (inRanges(cp, ZERO_WIDTH))
+    return 0;
+  if (inRanges(cp, WIDE))
+    return 2;
+  return 1;
+}
+function clusterWidth(cluster) {
+  const first = cluster.codePointAt(0);
+  if (first === undefined)
+    return 0;
+  if (cluster.includes("\uFE0F"))
+    return 2;
+  return codePointWidth(first);
+}
+function displayWidth(text) {
+  let total = 0;
+  for (const { segment } of segmenter4.segment(text))
+    total += clusterWidth(segment);
+  return total;
+}
+function truncateToWidth(text, columns) {
+  if (columns <= 0)
+    return "";
+  let out = "";
+  let used = 0;
+  for (const { segment } of segmenter4.segment(text)) {
+    const w = clusterWidth(segment);
+    if (used + w > columns)
+      break;
+    out += segment;
+    used += w;
+  }
+  return out;
+}
+function padToWidth(text, columns) {
+  const w = displayWidth(text);
+  return w >= columns ? text : text + " ".repeat(columns - w);
+}
+function truncateToWidthFromEnd(text, columns) {
+  if (columns <= 0)
+    return "";
+  const clusters = Array.from(segmenter4.segment(text), ({ segment }) => segment);
+  let out = "";
+  let used = 0;
+  for (let i = clusters.length - 1;i >= 0; i--) {
+    const cluster = clusters[i];
+    const w = clusterWidth(cluster);
+    if (used + w > columns)
+      break;
+    out = cluster + out;
+    used += w;
+  }
+  return out;
+}
+function wrappedLineCount(text, innerWidth) {
+  if (innerWidth <= 0)
+    return 1;
+  const tokens = text.match(/\S+|\s+/g) ?? [];
+  if (tokens.length === 0)
+    return 1;
+  let lines = 1;
+  let col = 0;
+  let pendingGap = 0;
+  for (const token of tokens) {
+    if (/^\s+$/.test(token)) {
+      pendingGap += displayWidth(token);
+      continue;
+    }
+    const wordWidth = displayWidth(token);
+    const needed = col + pendingGap + wordWidth;
+    if (needed <= innerWidth) {
+      col = needed;
+    } else if (wordWidth <= innerWidth) {
+      if (col > 0)
+        lines += 1;
+      col = wordWidth;
+    } else {
+      if (col > 0)
+        lines += 1;
+      const extraLines = Math.ceil(wordWidth / innerWidth);
+      lines += extraLines - 1;
+      const remainder = wordWidth % innerWidth;
+      col = remainder === 0 ? innerWidth : remainder;
+    }
+    pendingGap = 0;
+  }
+  return lines;
+}
+var segmenter4, ZERO_WIDTH, WIDE;
+var init_width = __esm(() => {
+  segmenter4 = new Intl.Segmenter(undefined, { granularity: "grapheme" });
+  ZERO_WIDTH = [
+    [768, 879],
+    [1155, 1161],
+    [1425, 1469],
+    [1552, 1562],
+    [1611, 1631],
+    [3633, 3633],
+    [3636, 3642],
+    [3655, 3662],
+    [6832, 6911],
+    [7616, 7679],
+    [8203, 8207],
+    [8400, 8432],
+    [65024, 65039],
+    [65056, 65071],
+    [917760, 917999]
+  ];
+  WIDE = [
+    [4352, 4447],
+    [8986, 8987],
+    [9193, 9196],
+    [9200, 9200],
+    [9203, 9203],
+    [9725, 9726],
+    [9745, 9745],
+    [9748, 9749],
+    [9800, 9811],
+    [9855, 9855],
+    [9875, 9875],
+    [9889, 9889],
+    [9898, 9899],
+    [9917, 9918],
+    [9924, 9925],
+    [9934, 9934],
+    [9940, 9940],
+    [9962, 9962],
+    [9970, 9971],
+    [9973, 9973],
+    [9978, 9978],
+    [9981, 9981],
+    [9989, 9989],
+    [9994, 9995],
+    [10024, 10024],
+    [10060, 10060],
+    [10062, 10062],
+    [10067, 10069],
+    [10071, 10071],
+    [10133, 10135],
+    [10160, 10160],
+    [10175, 10175],
+    [11035, 11036],
+    [11088, 11088],
+    [11093, 11093],
+    [11904, 12350],
+    [12353, 13311],
+    [13312, 19903],
+    [19968, 40959],
+    [40960, 42191],
+    [43360, 43391],
+    [44032, 55203],
+    [63744, 64255],
+    [65040, 65049],
+    [65072, 65135],
+    [65280, 65376],
+    [65504, 65510],
+    [126980, 126980],
+    [127183, 127183],
+    [127374, 127374],
+    [127377, 127386],
+    [127462, 127487],
+    [127744, 128511],
+    [128512, 128591],
+    [128640, 128767],
+    [129280, 129535],
+    [129648, 129791],
+    [131072, 196605],
+    [196608, 262141]
+  ];
+});
+
 // canvas/src/canvases/calendar/types.ts
 function getWeekDays(baseDate) {
   const days = [];
@@ -23723,6 +23909,28 @@ var require_jsx_dev_runtime = __commonJS(function(exports, module) {
 });
 
 // canvas/src/canvases/calendar/scenarios/meeting-picker-view.tsx
+function LegendRow({ calendars }) {
+  return /* @__PURE__ */ jsx_dev_runtime.jsxDEV(Text, {
+    children: calendars.map((calendar, i) => /* @__PURE__ */ jsx_dev_runtime.jsxDEV(import_react31.Fragment, {
+      children: [
+        /* @__PURE__ */ jsx_dev_runtime.jsxDEV(Text, {
+          backgroundColor: calendar.color,
+          color: TEXT_COLORS[calendar.color] || "white",
+          children: ` ${calendar.name} `
+        }, undefined, false, undefined, this),
+        i < calendars.length - 1 ? "  " : ""
+      ]
+    }, i, true, undefined, this))
+  }, undefined, false, undefined, this);
+}
+function legendText(calendars) {
+  return calendars.map((c) => ` ${c.name} `).join("  ");
+}
+function legendLineCount(calendars, legendWidth) {
+  if (calendars.length === 0)
+    return 1;
+  return wrappedLineCount(legendText(calendars), legendWidth);
+}
 function nextWindowStart(cursorSlot, currentStart, totalSlots, visibleSlotCount) {
   if (totalSlots <= visibleSlotCount)
     return 0;
@@ -23813,7 +24021,9 @@ function MeetingPickerView({ id, config, enabled = false }) {
   const columnWidth = Math.max(12, Math.floor(availableWidth / 7));
   const slotsPerHour = 60 / slotGranularity;
   const totalSlots = (endHour - startHour) * slotsPerHour;
-  const headerHeight = 5;
+  const legendWidth = Math.max(1, termWidth - 2);
+  const legendRows = import_react31.useMemo(() => legendLineCount(calendars, legendWidth), [calendars, legendWidth]);
+  const headerHeight = 4 + legendRows;
   const footerHeight = 2;
   const availableHeight = Math.max(1, termHeight - headerHeight - footerHeight);
   const visibleSlotCount = Math.max(1, Math.min(totalSlots, availableHeight));
@@ -23868,7 +24078,7 @@ function MeetingPickerView({ id, config, enabled = false }) {
     const dayIndex = Math.floor(relX / columnWidth);
     if (dayIndex >= 7)
       return null;
-    let visibleIndex = 0;
+    let visibleIndex = -1;
     let cumHeight = 0;
     for (let i = 0;i < visibleSlotCount; i++) {
       cumHeight += slotHeights[i];
@@ -23876,10 +24086,9 @@ function MeetingPickerView({ id, config, enabled = false }) {
         visibleIndex = i;
         break;
       }
-      if (i === visibleSlotCount - 1) {
-        visibleIndex = i;
-      }
     }
+    if (visibleIndex === -1)
+      return null;
     const slotIndex = windowStartRef.current + visibleIndex;
     if (slotIndex >= totalSlots)
       return null;
@@ -24152,18 +24361,9 @@ function MeetingPickerView({ id, config, enabled = false }) {
       children: slots
     }, dayIndex, false, undefined, this);
   };
-  const renderLegend = () => {
-    return /* @__PURE__ */ jsx_dev_runtime.jsxDEV(Box_default, {
-      children: calendars.map((calendar, i) => /* @__PURE__ */ jsx_dev_runtime.jsxDEV(Box_default, {
-        marginRight: 2,
-        children: /* @__PURE__ */ jsx_dev_runtime.jsxDEV(Text, {
-          backgroundColor: calendar.color,
-          color: TEXT_COLORS[calendar.color] || "white",
-          children: ` ${calendar.name} `
-        }, undefined, false, undefined, this)
-      }, i, false, undefined, this))
-    }, undefined, false, undefined, this);
-  };
+  const renderLegend = () => /* @__PURE__ */ jsx_dev_runtime.jsxDEV(LegendRow, {
+    calendars
+  }, undefined, false, undefined, this);
   return /* @__PURE__ */ jsx_dev_runtime.jsxDEV(Box_default, {
     flexDirection: "column",
     width: termWidth,
@@ -24274,6 +24474,7 @@ function MeetingPickerView({ id, config, enabled = false }) {
 var import_react31, jsx_dev_runtime;
 var init_meeting_picker_view = __esm(async () => {
   init_format();
+  init_width();
   init_types();
   await __promiseAll([
     init_build2(),
@@ -24285,19 +24486,32 @@ var init_meeting_picker_view = __esm(async () => {
 });
 
 // canvas/src/scenarios/types.ts
-function isMeetingPickerConfig(config) {
-  if (!("calendars" in config) || !Array.isArray(config.calendars))
-    return false;
-  if (config.calendars.length === 0)
-    return false;
+function meetingPickerConfigError(config) {
+  if (!("calendars" in config) || !Array.isArray(config.calendars) || config.calendars.length === 0) {
+    return "calendar config: scenario 'meeting-picker' needs a non-empty 'calendars' array";
+  }
   if ("slotGranularity" in config && config.slotGranularity !== undefined) {
     if (!VALID_SLOT_GRANULARITIES.includes(config.slotGranularity)) {
-      return false;
+      return "calendar config: scenario 'meeting-picker' needs 'slotGranularity' to be 15, 30, or 60";
     }
   }
-  return true;
+  const startHour = "startHour" in config && config.startHour !== undefined ? config.startHour : DEFAULT_START_HOUR;
+  const endHour = "endHour" in config && config.endHour !== undefined ? config.endHour : DEFAULT_END_HOUR;
+  if (!Number.isInteger(startHour) || startHour < 0 || startHour > 23) {
+    return "calendar config: scenario 'meeting-picker' needs 'startHour' to be an integer from 0 to 23";
+  }
+  if (!Number.isInteger(endHour) || endHour < 1 || endHour > 24) {
+    return "calendar config: scenario 'meeting-picker' needs 'endHour' to be an integer from 1 to 24";
+  }
+  if (startHour >= endHour) {
+    return "calendar config: scenario 'meeting-picker' needs 'startHour' to be strictly less than 'endHour'";
+  }
+  return null;
 }
-var VALID_SLOT_GRANULARITIES;
+function isMeetingPickerConfig(config) {
+  return meetingPickerConfigError(config) === null;
+}
+var VALID_SLOT_GRANULARITIES, DEFAULT_START_HOUR = 6, DEFAULT_END_HOUR = 22;
 var init_types2 = __esm(() => {
   VALID_SLOT_GRANULARITIES = [15, 30, 60];
 });
@@ -24309,6 +24523,18 @@ function isAllDayEvent(event) {
   const start = event.startTime;
   const end = event.endTime;
   return start.getHours() === 0 && start.getMinutes() === 0 && end.getHours() === 0 && end.getMinutes() === 0 && end.getTime() - start.getTime() >= 24 * 60 * 60 * 1000;
+}
+function allDayRowCount(events, weekDays) {
+  const allDayEvents = events.filter(isAllDayEvent);
+  if (allDayEvents.length === 0)
+    return 0;
+  let max = 1;
+  for (const day of weekDays) {
+    const count = allDayEvents.filter((e) => isSameDay2(e.startTime, day)).length;
+    if (count > max)
+      max = count;
+  }
+  return max;
 }
 function getWeekDays2(baseDate) {
   const days = [];
@@ -24570,8 +24796,7 @@ function AllDayEventsRow({ weekDays, events, columnWidth, timeColumnWidth }) {
 function Calendar({ id, config, enabled = false, scenario = "display" }) {
   if (scenario === "meeting-picker") {
     if (!config || !isMeetingPickerConfig(config)) {
-      const hasCalendars = !!config && "calendars" in config && Array.isArray(config.calendars);
-      const message = !hasCalendars || config.calendars?.length === 0 ? "calendar config: scenario 'meeting-picker' needs a non-empty 'calendars' array" : "calendar config: scenario 'meeting-picker' needs 'slotGranularity' to be 15, 30, or 60";
+      const message = !config ? "calendar config: scenario 'meeting-picker' needs a non-empty 'calendars' array" : meetingPickerConfigError(config) ?? "calendar config: invalid 'meeting-picker' config";
       return /* @__PURE__ */ jsx_dev_runtime2.jsxDEV(CalendarConfigError, {
         id,
         scenario,
@@ -24583,8 +24808,8 @@ function Calendar({ id, config, enabled = false, scenario = "display" }) {
       calendars: config.calendars,
       slotGranularity: config.slotGranularity || 30,
       title: config.title,
-      startHour: config.startHour ?? START_HOUR,
-      endHour: config.endHour ?? END_HOUR
+      startHour: config.startHour ?? DEFAULT_START_HOUR,
+      endHour: config.endHour ?? DEFAULT_END_HOUR
     };
     return /* @__PURE__ */ jsx_dev_runtime2.jsxDEV(MeetingPickerView, {
       id,
@@ -24663,7 +24888,15 @@ function CalendarDisplay({ id, config, enabled, scenario }) {
   const columnWidth = Math.max(12, Math.floor(availableWidth / 7));
   const startHour = config?.startHour ?? START_HOUR;
   const endHour = config?.endHour ?? END_HOUR;
-  const headerHeight = 5;
+  const events = config?.events ? config.events.map((e) => ({
+    ...e,
+    startTime: new Date(e.startTime),
+    endTime: new Date(e.endTime)
+  })) : getDemoEvents();
+  const weekDays = getWeekDays2(currentDate);
+  const today = new Date;
+  const allDayRows = allDayRowCount(events, weekDays);
+  const headerHeight = 5 + allDayRows;
   const footerHeight = 1;
   const availableHeight = Math.max(1, termHeight - headerHeight - footerHeight);
   const totalSlots = (endHour - startHour) * 2;
@@ -24673,13 +24906,6 @@ function CalendarDisplay({ id, config, enabled, scenario }) {
   const baseSlotHeight = Math.max(1, Math.floor(availableHeight / visibleSlotCount));
   const extraRows = availableHeight - baseSlotHeight * visibleSlotCount;
   const slotHeights = Array.from({ length: visibleSlotCount }, (_, i) => baseSlotHeight + (i < extraRows ? 1 : 0));
-  const events = config?.events ? config.events.map((e) => ({
-    ...e,
-    startTime: new Date(e.startTime),
-    endTime: new Date(e.endTime)
-  })) : getDemoEvents();
-  const weekDays = getWeekDays2(currentDate);
-  const today = new Date;
   use_input_default((input, key) => {
     if (input === "q" || key.escape) {
       ipc.sendCancelled("User quit");
@@ -25664,13 +25890,23 @@ function formatDuration(minutes) {
     return `${hours}h`;
   return `${hours}h ${mins}m`;
 }
+function isValidTimeZone(timezone) {
+  try {
+    new Intl.DateTimeFormat("en-US", { timeZone: timezone });
+    return true;
+  } catch {
+    return false;
+  }
+}
 function formatTime2(isoString, timezone) {
   const date = new Date(isoString);
-  if (!timezone)
+  if (!timezone || !isValidTimeZone(timezone))
     return formatTime(date);
   return date.toLocaleTimeString(displayLocale(), { ...FLIGHT_TIME_OPTIONS, timeZone: timezone });
 }
 function formatTimezoneAbbreviation(timezone, isoString) {
+  if (!isValidTimeZone(timezone))
+    return timezone;
   const date = new Date(isoString);
   const parts = new Intl.DateTimeFormat(displayLocale(), {
     timeZone: timezone,
@@ -26619,192 +26855,6 @@ var init_flight = __esm(async () => {
   ]);
   import_react34 = __toESM(require_react(), 1);
   jsx_dev_runtime13 = __toESM(require_jsx_dev_runtime(), 1);
-});
-
-// canvas/src/canvases/width.ts
-function inRanges(cp, ranges) {
-  for (const [lo, hi] of ranges) {
-    if (cp < lo)
-      return false;
-    if (cp <= hi)
-      return true;
-  }
-  return false;
-}
-function codePointWidth(cp) {
-  if (cp === 0)
-    return 0;
-  if (cp < 32 || cp >= 127 && cp < 160)
-    return 0;
-  if (inRanges(cp, ZERO_WIDTH))
-    return 0;
-  if (inRanges(cp, WIDE))
-    return 2;
-  return 1;
-}
-function clusterWidth(cluster) {
-  const first = cluster.codePointAt(0);
-  if (first === undefined)
-    return 0;
-  if (cluster.includes("\uFE0F"))
-    return 2;
-  return codePointWidth(first);
-}
-function displayWidth(text) {
-  let total = 0;
-  for (const { segment } of segmenter4.segment(text))
-    total += clusterWidth(segment);
-  return total;
-}
-function truncateToWidth(text, columns) {
-  if (columns <= 0)
-    return "";
-  let out = "";
-  let used = 0;
-  for (const { segment } of segmenter4.segment(text)) {
-    const w = clusterWidth(segment);
-    if (used + w > columns)
-      break;
-    out += segment;
-    used += w;
-  }
-  return out;
-}
-function padToWidth(text, columns) {
-  const w = displayWidth(text);
-  return w >= columns ? text : text + " ".repeat(columns - w);
-}
-function truncateToWidthFromEnd(text, columns) {
-  if (columns <= 0)
-    return "";
-  const clusters = Array.from(segmenter4.segment(text), ({ segment }) => segment);
-  let out = "";
-  let used = 0;
-  for (let i = clusters.length - 1;i >= 0; i--) {
-    const cluster = clusters[i];
-    const w = clusterWidth(cluster);
-    if (used + w > columns)
-      break;
-    out = cluster + out;
-    used += w;
-  }
-  return out;
-}
-function wrappedLineCount(text, innerWidth) {
-  if (innerWidth <= 0)
-    return 1;
-  const tokens = text.match(/\S+|\s+/g) ?? [];
-  if (tokens.length === 0)
-    return 1;
-  let lines = 1;
-  let col = 0;
-  let pendingGap = 0;
-  for (const token of tokens) {
-    if (/^\s+$/.test(token)) {
-      pendingGap += displayWidth(token);
-      continue;
-    }
-    const wordWidth = displayWidth(token);
-    const needed = col + pendingGap + wordWidth;
-    if (needed <= innerWidth) {
-      col = needed;
-    } else if (wordWidth <= innerWidth) {
-      if (col > 0)
-        lines += 1;
-      col = wordWidth;
-    } else {
-      if (col > 0)
-        lines += 1;
-      const extraLines = Math.ceil(wordWidth / innerWidth);
-      lines += extraLines - 1;
-      const remainder = wordWidth % innerWidth;
-      col = remainder === 0 ? innerWidth : remainder;
-    }
-    pendingGap = 0;
-  }
-  return lines;
-}
-var segmenter4, ZERO_WIDTH, WIDE;
-var init_width = __esm(() => {
-  segmenter4 = new Intl.Segmenter(undefined, { granularity: "grapheme" });
-  ZERO_WIDTH = [
-    [768, 879],
-    [1155, 1161],
-    [1425, 1469],
-    [1552, 1562],
-    [1611, 1631],
-    [3633, 3633],
-    [3636, 3642],
-    [3655, 3662],
-    [6832, 6911],
-    [7616, 7679],
-    [8203, 8207],
-    [8400, 8432],
-    [65024, 65039],
-    [65056, 65071],
-    [917760, 917999]
-  ];
-  WIDE = [
-    [4352, 4447],
-    [8986, 8987],
-    [9193, 9196],
-    [9200, 9200],
-    [9203, 9203],
-    [9725, 9726],
-    [9745, 9745],
-    [9748, 9749],
-    [9800, 9811],
-    [9855, 9855],
-    [9875, 9875],
-    [9889, 9889],
-    [9898, 9899],
-    [9917, 9918],
-    [9924, 9925],
-    [9934, 9934],
-    [9940, 9940],
-    [9962, 9962],
-    [9970, 9971],
-    [9973, 9973],
-    [9978, 9978],
-    [9981, 9981],
-    [9989, 9989],
-    [9994, 9995],
-    [10024, 10024],
-    [10060, 10060],
-    [10062, 10062],
-    [10067, 10069],
-    [10071, 10071],
-    [10133, 10135],
-    [10160, 10160],
-    [10175, 10175],
-    [11035, 11036],
-    [11088, 11088],
-    [11093, 11093],
-    [11904, 12350],
-    [12353, 13311],
-    [13312, 19903],
-    [19968, 40959],
-    [40960, 42191],
-    [43360, 43391],
-    [44032, 55203],
-    [63744, 64255],
-    [65040, 65049],
-    [65072, 65135],
-    [65280, 65376],
-    [65504, 65510],
-    [126980, 126980],
-    [127183, 127183],
-    [127374, 127374],
-    [127377, 127386],
-    [127462, 127487],
-    [127744, 128511],
-    [128512, 128591],
-    [128640, 128767],
-    [129280, 129535],
-    [129648, 129791],
-    [131072, 196605],
-    [196608, 262141]
-  ];
 });
 
 // canvas/src/canvases/diff/view.tsx

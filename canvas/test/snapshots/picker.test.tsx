@@ -85,6 +85,22 @@ test("picker renders a config error when mode is missing", async () => {
   r.dispose();
 });
 
+// Regression test for Fix 3's footer-wrap half: at a narrow terminal width
+// the multi-select footer hint (56 columns) wraps onto a second line inside
+// a narrower box, which the row-budget math's flat "one line of hint text"
+// assumption didn't account for. Verified at the exact dimensions the
+// independent review reproduced this at.
+test("at a narrow terminal width, the frame never exceeds the terminal's row count", async () => {
+  const rows = 12;
+  const r = renderCanvas(<Picker id="picker-8" config={MULTI_CONFIG} enabled={false} />, {
+    columns: 40,
+    rows,
+  });
+  const frame = await r.settle();
+  expect(frame.split("\n").length).toBeLessThanOrEqual(rows);
+  r.dispose();
+});
+
 test("picker windows a list longer than the pane", async () => {
   const r = renderCanvas(
     <Picker

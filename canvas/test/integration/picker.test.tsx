@@ -119,6 +119,64 @@ test("multi mode: toggling both options and submitting returns both ids", async 
   r.dispose();
 });
 
+// CRITICAL regression test for the deeper stale-ref bug: the ref-mirror
+// pattern (`cursorRef.current = cursor` written in the render body) is only
+// updated when a render actually commits. Two keystrokes with TRULY ZERO
+// delay between them -- back-to-back synchronous write() calls, no
+// settle(), no await, not even a microtask -- can both reach useInput's
+// handler before React has committed the render the mirror depends on, so
+// the ref stays stale for the SECOND keystroke too. The single-settle()-tick
+// test above (and every pre-existing test in this file) uses a
+// `setTimeout(0)` between keystrokes, which is NOT a tight enough proof:
+// that macrotask is exactly what the ref-mirror-in-render-body pattern
+// already survives. This only proves the direct-write-in-the-handler fix.
+test("single mode: moving down then selecting with truly zero delay between keystrokes picks the second option", async () => {
+  const id = "picker-it-zero-delay-1";
+  ids.push(id);
+  const r = renderCanvas(<Picker id={id} config={SINGLE_CONFIG} enabled={true} />, {
+    columns: 60,
+    rows: 15,
+  });
+  await r.settle();
+  await new Promise((res) => setTimeout(res, 50));
+
+  const conn = await openConnection(id);
+  // No settle(), no await, nothing at all between these two writes.
+  r.stdin.write("j");
+  r.stdin.write("\r");
+  await r.settle();
+
+  const msg = await nextOutcome(conn, 2000);
+  expect(msg).toEqual({ type: "selected", data: { selectedIds: ["b"] } });
+  conn.close();
+  r.dispose();
+});
+
+// Same zero-delay proof, for checkedRef: toggling an option and then
+// immediately submitting used to lose the toggle entirely (submitting an
+// empty selection) when the ref stayed stale for the second keystroke.
+test("multi mode: toggling then submitting with truly zero delay between keystrokes does not lose the toggle", async () => {
+  const id = "picker-it-zero-delay-2";
+  ids.push(id);
+  const r = renderCanvas(<Picker id={id} config={MULTI_CONFIG} enabled={true} />, {
+    columns: 60,
+    rows: 15,
+  });
+  await r.settle();
+  await new Promise((res) => setTimeout(res, 50));
+
+  const conn = await openConnection(id);
+  // No settle(), no await, nothing at all between these two writes.
+  r.stdin.write(" "); // toggle x
+  r.stdin.write("\r"); // submit
+  await r.settle();
+
+  const msg = await nextOutcome(conn, 2000);
+  expect(msg).toEqual({ type: "selected", data: { selectedIds: ["x"] } });
+  conn.close();
+  r.dispose();
+});
+
 test("escape cancels without sending a result", async () => {
   const id = "picker-it-4";
   ids.push(id);
@@ -195,7 +253,11 @@ test("navigating with a disabled option in the middle skips over it", async () =
 });
 
 // A list longer than the pane used to render every option, overflowing the
-// terminal. 25 options in a 12-row terminal leaves room for 7 at a time.
+// terminal. 25 options in a 12-row, 40-column terminal leaves room for 6 at
+// a time: the single-select footer hint (41 columns) doesn't fit the box's
+// 36-column inner width at this narrow a terminal, so Fix 3 reserves the
+// extra wrapped row that costs -- 12 - 5 (CHROME_ROWS) - 1 (wrapped footer)
+// = 6, not the 7 a flat one-line-footer assumption would allow.
 const LONG_CONFIG = {
   mode: "single" as const,
   options: Array.from({ length: 25 }, (_, i) => ({
@@ -212,15 +274,15 @@ test("a list longer than the pane shows one window at a time", async () => {
     rows: 12,
   });
   let frame = await r.settle();
-  expect(frame).toContain("1-7 of 25");
+  expect(frame).toContain("1-6 of 25");
 
-  // Seven moves puts the cursor on index 7, the first option of the next
+  // Six moves puts the cursor on index 6, the first option of the next
   // window, so the window advances.
-  for (let i = 0; i < 7; i++) {
+  for (let i = 0; i < 6; i++) {
     r.stdin.write("j");
     frame = await r.settle();
   }
-  expect(frame).toContain("8-14 of 25");
+  expect(frame).toContain("7-12 of 25");
   r.dispose();
 });
 

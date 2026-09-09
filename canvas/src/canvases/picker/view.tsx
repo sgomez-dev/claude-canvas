@@ -1,5 +1,6 @@
 import React, { useRef, useState } from "react";
 import { Box, Text, useInput } from "ink";
+import { wrappedLineCount } from "../width";
 import type { PickerOption, PickerResult } from "./types";
 
 export interface PickerViewProps {
@@ -14,6 +15,13 @@ export interface PickerViewProps {
    */
   rows: number;
   /**
+   * Terminal width, for estimating whether the footer hint wraps at a
+   * narrow width. Optional and defaults to 80 (Ink's own stdout default) so
+   * a composing canvas without a meaningful per-region width doesn't have
+   * to pass one.
+   */
+  columns?: number;
+  /**
    * Only the focused view receives keys. Ink's `useInput` takes `isActive`
    * for exactly this case -- its own docs call it "useful when there are
    * multiple useInput hooks used at once to avoid handling the same input
@@ -27,6 +35,11 @@ export interface PickerViewProps {
 // title, a blank line and the footer hint. The prompt adds one more when
 // present.
 const CHROME_ROWS = 5;
+// Horizontal chrome the outer box spends: one column of border on each side
+// plus one column of paddingX on each side.
+const HORIZONTAL_CHROME = 4;
+const SINGLE_FOOTER_HINT = "↑/↓: navigate  Enter: select  Esc: cancel";
+const MULTI_FOOTER_HINT = "↑/↓: navigate  Space: toggle  Enter: submit  Esc: cancel";
 
 function firstEnabledIndex(options: PickerOption[]): number {
   const idx = options.findIndex((o) => !o.disabled);
@@ -53,6 +66,7 @@ export function PickerView({
   title,
   prompt,
   rows,
+  columns = 80,
   focused,
   onSubmit,
 }: PickerViewProps): React.JSX.Element {
@@ -88,6 +102,14 @@ export function PickerView({
       next = (next + delta + options.length) % options.length;
       if (!options[next]?.disabled) break;
     }
+    // Written directly into the ref here, not left to the render-body
+    // mirror alone: two keystrokes with truly zero delay between them (real
+    // burst input, not just a fast setTimeout) can both reach this handler
+    // before React has committed the render that would otherwise update
+    // cursorRef.current. Without this direct write, a second keystroke in
+    // the same burst (e.g. Enter right after this "j") would read the ref's
+    // stale pre-move value. See the class comment on cursorRef above.
+    cursorRef.current = next;
     setCursor(next);
   }
 
@@ -103,12 +125,16 @@ export function PickerView({
     } else if (mode === "multi" && input === " ") {
       const opt = options[cursorRef.current];
       if (opt && !opt.disabled) {
-        setChecked((prev) => {
-          const next = new Set(prev);
-          if (next.has(opt.id)) next.delete(opt.id);
-          else next.add(opt.id);
-          return next;
-        });
+        // Same direct-write treatment as cursorRef above: a zero-delay
+        // Space immediately followed by Enter must have Enter's read of
+        // checkedRef.current see THIS toggle, not a stale pre-toggle set
+        // from a render that hasn't committed yet -- otherwise the toggle
+        // is lost entirely and Enter submits an empty selection.
+        const next = new Set(checkedRef.current);
+        if (next.has(opt.id)) next.delete(opt.id);
+        else next.add(opt.id);
+        checkedRef.current = next;
+        setChecked(next);
       }
     } else if (mode === "multi" && key.return) {
       onSubmit({ selectedIds: Array.from(checkedRef.current) });
@@ -126,7 +152,14 @@ export function PickerView({
   // the cursorRef the input handler reads. Paging (rather than centring the
   // cursor) means the list only moves when the cursor crosses a boundary,
   // instead of shifting under the user on every keypress.
-  const visibleCount = Math.max(1, rows - CHROME_ROWS - (prompt ? 1 : 0));
+  // At a narrow terminal width the footer hint itself wraps onto a second
+  // line, which CHROME_ROWS's flat "one line of hint text" assumption
+  // doesn't account for -- so reserve however many extra rows the footer's
+  // actual wrapped height needs, on top of the fixed chrome.
+  const footerHint = mode === "multi" ? MULTI_FOOTER_HINT : SINGLE_FOOTER_HINT;
+  const footerRows = wrappedLineCount(footerHint, Math.max(1, columns - HORIZONTAL_CHROME));
+  const footerOverflow = Math.max(0, footerRows - 1);
+  const visibleCount = Math.max(1, rows - CHROME_ROWS - footerOverflow - (prompt ? 1 : 0));
   const windowStart =
     options.length <= visibleCount ? 0 : Math.floor(cursor / visibleCount) * visibleCount;
   const visibleOptions = options.slice(windowStart, windowStart + visibleCount);

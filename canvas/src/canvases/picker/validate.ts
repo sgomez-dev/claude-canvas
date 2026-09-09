@@ -21,6 +21,18 @@ export interface ValidatedPicker {
  * or render a canvas that could never be submitted.
  */
 export function validatePicker(config: PickerConfig | undefined): ValidatedPicker {
+    // A non-string `title`/`prompt` used to either render garbage (a number
+    // or array coerced into the text by React) or crash (an object reaching
+    // <Text> as a child) instead of being caught here like every other
+    // shape mismatch in this file.
+    const rawTitle: unknown = config?.title;
+    if (rawTitle !== undefined && typeof rawTitle !== "string") {
+      return { options: [], mode: "single", error: "picker config: 'title' must be a string" };
+    }
+    const rawPrompt: unknown = config?.prompt;
+    if (rawPrompt !== undefined && typeof rawPrompt !== "string") {
+      return { options: [], mode: "single", error: "picker config: 'prompt' must be a string" };
+    }
     const rawOptions: unknown = config?.options;
     if (!Array.isArray(rawOptions)) {
       return { options: [], mode: "single", error: "picker config: 'options' must be an array" };

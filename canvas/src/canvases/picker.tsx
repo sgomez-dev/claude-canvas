@@ -110,6 +110,7 @@ export function Picker({
       title={config?.title}
       prompt={config?.prompt}
       rows={stdout?.rows ?? 24}
+      columns={stdout?.columns ?? 80}
       focused
       onSubmit={handleSubmit}
     />

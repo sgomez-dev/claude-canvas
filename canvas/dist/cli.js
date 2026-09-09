@@ -26547,11 +26547,148 @@ var init_flight = __esm(async () => {
   jsx_dev_runtime13 = __toESM(require_jsx_dev_runtime(), 1);
 });
 
+// canvas/src/canvases/width.ts
+function inRanges(cp, ranges) {
+  for (const [lo, hi] of ranges) {
+    if (cp < lo)
+      return false;
+    if (cp <= hi)
+      return true;
+  }
+  return false;
+}
+function codePointWidth(cp) {
+  if (cp === 0)
+    return 0;
+  if (cp < 32 || cp >= 127 && cp < 160)
+    return 0;
+  if (inRanges(cp, ZERO_WIDTH))
+    return 0;
+  if (inRanges(cp, WIDE))
+    return 2;
+  return 1;
+}
+function clusterWidth(cluster) {
+  const first = cluster.codePointAt(0);
+  if (first === undefined)
+    return 0;
+  if (cluster.includes("\uFE0F"))
+    return 2;
+  return codePointWidth(first);
+}
+function displayWidth(text) {
+  let total = 0;
+  for (const { segment } of segmenter4.segment(text))
+    total += clusterWidth(segment);
+  return total;
+}
+function truncateToWidth(text, columns) {
+  if (columns <= 0)
+    return "";
+  let out = "";
+  let used = 0;
+  for (const { segment } of segmenter4.segment(text)) {
+    const w = clusterWidth(segment);
+    if (used + w > columns)
+      break;
+    out += segment;
+    used += w;
+  }
+  return out;
+}
+function padToWidth(text, columns) {
+  const w = displayWidth(text);
+  return w >= columns ? text : text + " ".repeat(columns - w);
+}
+function wrappedLineCount(text, innerWidth) {
+  if (innerWidth <= 0)
+    return 1;
+  return Math.max(1, Math.ceil(displayWidth(text) / innerWidth));
+}
+var segmenter4, ZERO_WIDTH, WIDE;
+var init_width = __esm(() => {
+  segmenter4 = new Intl.Segmenter(undefined, { granularity: "grapheme" });
+  ZERO_WIDTH = [
+    [768, 879],
+    [1155, 1161],
+    [1425, 1469],
+    [1552, 1562],
+    [1611, 1631],
+    [3633, 3633],
+    [3636, 3642],
+    [3655, 3662],
+    [6832, 6911],
+    [7616, 7679],
+    [8203, 8207],
+    [8400, 8432],
+    [65024, 65039],
+    [65056, 65071],
+    [917760, 917999]
+  ];
+  WIDE = [
+    [4352, 4447],
+    [8986, 8987],
+    [9745, 9745],
+    [9748, 9749],
+    [9800, 9811],
+    [9875, 9875],
+    [9889, 9889],
+    [9898, 9899],
+    [9917, 9918],
+    [9924, 9925],
+    [9934, 9934],
+    [9940, 9940],
+    [9962, 9962],
+    [9970, 9971],
+    [9973, 9973],
+    [9978, 9978],
+    [9981, 9981],
+    [9989, 9989],
+    [9994, 9995],
+    [10024, 10024],
+    [10060, 10060],
+    [10062, 10062],
+    [10067, 10069],
+    [10071, 10071],
+    [10133, 10135],
+    [10160, 10160],
+    [10175, 10175],
+    [11035, 11036],
+    [11088, 11088],
+    [11093, 11093],
+    [11904, 12350],
+    [12353, 13311],
+    [13312, 19903],
+    [19968, 40959],
+    [40960, 42191],
+    [43360, 43391],
+    [44032, 55203],
+    [63744, 64255],
+    [65040, 65049],
+    [65072, 65135],
+    [65280, 65376],
+    [65504, 65510],
+    [126980, 126980],
+    [127183, 127183],
+    [127374, 127374],
+    [127377, 127386],
+    [127462, 127487],
+    [127744, 128511],
+    [128512, 128591],
+    [128640, 128767],
+    [129280, 129535],
+    [129648, 129791],
+    [131072, 196605],
+    [196608, 262141]
+  ];
+});
+
 // canvas/src/canvases/diff/view.tsx
 function DiffView({
   files,
   title,
   budget: totalBudget,
+  columns = 80,
   focused,
   onSubmit
 }) {
@@ -26566,6 +26703,7 @@ function DiffView({
   const cursorRef = import_react35.useRef(cursor);
   cursorRef.current = cursor;
   const [lineOffset, setLineOffset] = import_react35.useState(0);
+  const maxLineOffsetRef = import_react35.useRef(0);
   const [decisions, setDecisions] = import_react35.useState(new Map);
   const decisionsRef = import_react35.useRef(decisions);
   decisionsRef.current = decisions;
@@ -26584,7 +26722,7 @@ function DiffView({
     if (flatHunks.length === 0)
       return;
     if (key.pageDown) {
-      setLineOffset((o) => o + 1);
+      setLineOffset((o) => Math.min(maxLineOffsetRef.current, o + 1));
       return;
     }
     if (key.pageUp) {
@@ -26592,22 +26730,30 @@ function DiffView({
       return;
     }
     if (key.upArrow || input === "k") {
-      setCursor((c) => Math.max(0, c - 1));
+      const next = Math.max(0, cursorRef.current - 1);
+      cursorRef.current = next;
+      setCursor(next);
       setLineOffset(0);
     } else if (key.downArrow || input === "j") {
-      setCursor((c) => Math.min(flatHunks.length - 1, c + 1));
+      const next = Math.min(flatHunks.length - 1, cursorRef.current + 1);
+      cursorRef.current = next;
+      setCursor(next);
       setLineOffset(0);
     } else if (input === "a") {
       const ref = flatHunks[cursorRef.current];
       if (ref) {
         const hunk = files[ref.fileIndex].hunks[ref.hunkIndex];
-        setDecisions((prev) => new Map(prev).set(hunk.id, "approved"));
+        const nextDecisions = new Map(decisionsRef.current).set(hunk.id, "approved");
+        decisionsRef.current = nextDecisions;
+        setDecisions(nextDecisions);
       }
     } else if (input === "r") {
       const ref = flatHunks[cursorRef.current];
       if (ref) {
         const hunk = files[ref.fileIndex].hunks[ref.hunkIndex];
-        setDecisions((prev) => new Map(prev).set(hunk.id, "rejected"));
+        const nextDecisions = new Map(decisionsRef.current).set(hunk.id, "rejected");
+        decisionsRef.current = nextDecisions;
+        setDecisions(nextDecisions);
       }
     }
   }, { isActive: focused });
@@ -26624,13 +26770,16 @@ function DiffView({
   const currentRef = flatHunks[cursor];
   const currentFile = currentRef ? files[currentRef.fileIndex] : undefined;
   const currentHunk = currentRef ? currentFile?.hunks[currentRef.hunkIndex] : undefined;
-  const budget = Math.max(2, totalBudget - CHROME_ROWS);
+  const footerRows = wrappedLineCount(FOOTER_HINT, Math.max(1, columns - HORIZONTAL_CHROME));
+  const footerOverflow = Math.max(0, footerRows - 1);
+  const budget = Math.max(2, totalBudget - CHROME_ROWS - footerOverflow);
   const fileRows = Math.max(1, Math.min(MAX_FILE_ROWS, files.length, budget - 1));
   const hunkRows = Math.max(1, budget - fileRows);
   const fileWindowStart = files.length <= fileRows ? 0 : Math.floor((currentRef?.fileIndex ?? 0) / fileRows) * fileRows;
   const visibleFiles = files.slice(fileWindowStart, fileWindowStart + fileRows);
   const hunkLines = currentHunk?.lines ?? [];
   const maxLineOffset = Math.max(0, hunkLines.length - hunkRows);
+  maxLineOffsetRef.current = maxLineOffset;
   const clampedLineOffset = Math.min(lineOffset, maxLineOffset);
   const visibleLines = hunkLines.slice(clampedLineOffset, clampedLineOffset + hunkRows);
   return /* @__PURE__ */ jsx_dev_runtime14.jsxDEV(Box_default, {
@@ -26718,8 +26867,9 @@ function DiffView({
     ]
   }, undefined, true, undefined, this);
 }
-var import_react35, jsx_dev_runtime14, CHROME_ROWS = 9, MAX_FILE_ROWS = 5;
+var import_react35, jsx_dev_runtime14, CHROME_ROWS = 10, MAX_FILE_ROWS = 5, HORIZONTAL_CHROME = 0, FOOTER_HINT = "a/r: approve/reject  \u2191/\u2193: hunk  PgUp/PgDn: scroll  Enter: submit  Esc: cancel";
 var init_view = __esm(async () => {
+  init_width();
   await init_build2();
   import_react35 = __toESM(require_react(), 1);
   jsx_dev_runtime14 = __toESM(require_jsx_dev_runtime(), 1);
@@ -26914,11 +27064,15 @@ var init_parser = __esm(() => {
 
 // canvas/src/canvases/diff/validate.ts
 function parseDiffConfig(config) {
-  if (!config?.diffText || config.diffText.trim().length === 0) {
+  const raw = config?.diffText;
+  if (raw !== undefined && typeof raw !== "string") {
+    return { files: [], error: "diff config: 'diffText' must be a string" };
+  }
+  if (!raw || raw.trim().length === 0) {
     return { files: [], error: null };
   }
   try {
-    return { files: parseUnifiedDiff(config.diffText), error: null };
+    return { files: parseUnifiedDiff(raw), error: null };
   } catch (e) {
     return { files: [], error: e instanceof DiffParseError ? e.message : "Failed to parse diff." };
   }
@@ -26994,6 +27148,7 @@ function Diff({
     files,
     title: config?.title,
     budget: stdout?.rows ?? 24,
+    columns: stdout?.columns ?? 80,
     focused: true,
     onSubmit: handleSubmit
   }, generation, false, undefined, this);
@@ -27021,6 +27176,7 @@ function PickerView({
   title,
   prompt,
   rows,
+  columns = 80,
   focused,
   onSubmit
 }) {
@@ -27039,6 +27195,7 @@ function PickerView({
       if (!options[next]?.disabled)
         break;
     }
+    cursorRef.current = next;
     setCursor(next);
   }
   use_input_default((input, key) => {
@@ -27055,20 +27212,22 @@ function PickerView({
     } else if (mode === "multi" && input === " ") {
       const opt = options[cursorRef.current];
       if (opt && !opt.disabled) {
-        setChecked((prev) => {
-          const next = new Set(prev);
-          if (next.has(opt.id))
-            next.delete(opt.id);
-          else
-            next.add(opt.id);
-          return next;
-        });
+        const next = new Set(checkedRef.current);
+        if (next.has(opt.id))
+          next.delete(opt.id);
+        else
+          next.add(opt.id);
+        checkedRef.current = next;
+        setChecked(next);
       }
     } else if (mode === "multi" && key.return) {
       onSubmit({ selectedIds: Array.from(checkedRef.current) });
     }
   }, { isActive: focused });
-  const visibleCount = Math.max(1, rows - CHROME_ROWS2 - (prompt ? 1 : 0));
+  const footerHint = mode === "multi" ? MULTI_FOOTER_HINT : SINGLE_FOOTER_HINT;
+  const footerRows = wrappedLineCount(footerHint, Math.max(1, columns - HORIZONTAL_CHROME2));
+  const footerOverflow = Math.max(0, footerRows - 1);
+  const visibleCount = Math.max(1, rows - CHROME_ROWS2 - footerOverflow - (prompt ? 1 : 0));
   const windowStart = options.length <= visibleCount ? 0 : Math.floor(cursor / visibleCount) * visibleCount;
   const visibleOptions = options.slice(windowStart, windowStart + visibleCount);
   return /* @__PURE__ */ jsx_dev_runtime16.jsxDEV(Box_default, {
@@ -27113,8 +27272,9 @@ function PickerView({
     ]
   }, undefined, true, undefined, this);
 }
-var import_react37, jsx_dev_runtime16, CHROME_ROWS2 = 5;
+var import_react37, jsx_dev_runtime16, CHROME_ROWS2 = 5, HORIZONTAL_CHROME2 = 4, SINGLE_FOOTER_HINT = "\u2191/\u2193: navigate  Enter: select  Esc: cancel", MULTI_FOOTER_HINT = "\u2191/\u2193: navigate  Space: toggle  Enter: submit  Esc: cancel";
 var init_view2 = __esm(async () => {
+  init_width();
   await init_build2();
   import_react37 = __toESM(require_react(), 1);
   jsx_dev_runtime16 = __toESM(require_jsx_dev_runtime(), 1);
@@ -27122,6 +27282,14 @@ var init_view2 = __esm(async () => {
 
 // canvas/src/canvases/picker/validate.ts
 function validatePicker(config) {
+  const rawTitle = config?.title;
+  if (rawTitle !== undefined && typeof rawTitle !== "string") {
+    return { options: [], mode: "single", error: "picker config: 'title' must be a string" };
+  }
+  const rawPrompt = config?.prompt;
+  if (rawPrompt !== undefined && typeof rawPrompt !== "string") {
+    return { options: [], mode: "single", error: "picker config: 'prompt' must be a string" };
+  }
   const rawOptions = config?.options;
   if (!Array.isArray(rawOptions)) {
     return { options: [], mode: "single", error: "picker config: 'options' must be an array" };
@@ -27234,6 +27402,7 @@ function Picker({
     title: config?.title,
     prompt: config?.prompt,
     rows: stdout?.rows ?? 24,
+    columns: stdout?.columns ?? 80,
     focused: true,
     onSubmit: handleSubmit
   }, generation, false, undefined, this);
@@ -27286,6 +27455,7 @@ function FormView({
   fields,
   title,
   budget,
+  columns = 80,
   focused,
   onSubmit
 }) {
@@ -27310,7 +27480,9 @@ function FormView({
       }));
     }
     const total = fields.length + 1;
-    setFocusIndex((i) => (i + delta + total) % total);
+    const next = (focusIndexRef.current + delta + total) % total;
+    focusIndexRef.current = next;
+    setFocusIndex(next);
   }
   function attemptSubmit() {
     const missing = new Set;
@@ -27321,8 +27493,10 @@ function FormView({
     if (missing.size > 0) {
       setErrors(missing);
       const firstMissingIndex = fields.findIndex((f) => missing.has(f.id));
-      if (firstMissingIndex !== -1)
+      if (firstMissingIndex !== -1) {
+        focusIndexRef.current = firstMissingIndex;
         setFocusIndex(firstMissingIndex);
+      }
       return;
     }
     const outValues = {};
@@ -27332,7 +27506,11 @@ function FormView({
         outValues[f.id] = Boolean(v);
       } else if (f.type === "number") {
         const raw = v;
-        const n = Number(clampNumber(raw, f.min, f.max));
+        const clamped = clampNumber(raw, f.min, f.max);
+        if (clamped.trim().length === 0) {
+          continue;
+        }
+        const n = Number(clamped);
         outValues[f.id] = Number.isFinite(n) ? n : 0;
       } else {
         outValues[f.id] = v;
@@ -27421,7 +27599,9 @@ function FormView({
       });
     }
   }, { isActive: focused });
-  const visibleFields = Math.max(1, Math.floor((budget - CHROME_ROWS3) / ROWS_PER_FIELD));
+  const footerRows = wrappedLineCount(FOOTER_HINT2, Math.max(1, columns - HORIZONTAL_CHROME3));
+  const footerOverflow = Math.max(0, footerRows - 1);
+  const visibleFields = Math.max(1, Math.floor((budget - CHROME_ROWS3 - footerOverflow) / ROWS_PER_FIELD));
   const windowStart = fields.length <= visibleFields ? 0 : Math.min(Math.floor(Math.min(focusIndex, fields.length - 1) / visibleFields) * visibleFields, fields.length - visibleFields);
   const windowFields = fields.slice(windowStart, windowStart + visibleFields);
   return /* @__PURE__ */ jsx_dev_runtime18.jsxDEV(Box_default, {
@@ -27437,8 +27617,8 @@ function FormView({
       windowFields.map((f, visibleIndex) => {
         const i = windowStart + visibleIndex;
         const isFocused = i === focusIndex;
-        const hasError = errors.has(f.id);
         const value = values[f.id] ?? initialValue(f);
+        const hasError = errors.has(f.id) && isMissing(f, value);
         const labelColor = hasError ? "red" : isFocused ? "cyan" : undefined;
         const requiredMark = "required" in f && f.required ? " *" : "";
         return /* @__PURE__ */ jsx_dev_runtime18.jsxDEV(Box_default, {
@@ -27468,11 +27648,16 @@ function FormView({
                 const placeholder = "placeholder" in f && f.placeholder ? f.placeholder : undefined;
                 const body = raw.length > 0 ? raw : placeholder ?? "";
                 const filler = body.length === 0 && !isFocused ? "\u2014" : "";
+                const lines = body.length > 0 ? body.split(`
+`) : [""];
+                const lastLine = lines[lines.length - 1] ?? "";
+                const truncated = lines.length > 1;
                 return /* @__PURE__ */ jsx_dev_runtime18.jsxDEV(Text, {
                   dimColor: raw.length === 0,
                   children: [
-                    body,
-                    filler,
+                    truncated ? `(${lines.length} lines, showing last) ` : "",
+                    lastLine,
+                    truncated ? "" : filler,
                     isFocused ? "\u258F" : ""
                   ]
                 }, undefined, true, undefined, this);
@@ -27505,8 +27690,9 @@ function FormView({
     ]
   }, undefined, true, undefined, this);
 }
-var import_react39, jsx_dev_runtime18, CHROME_ROWS3 = 7, ROWS_PER_FIELD = 2;
+var import_react39, jsx_dev_runtime18, CHROME_ROWS3 = 7, ROWS_PER_FIELD = 2, HORIZONTAL_CHROME3 = 4, FOOTER_HINT2 = "Tab/Shift+Tab: move  Enter: submit (on the button)  Esc: cancel";
 var init_view3 = __esm(async () => {
+  init_width();
   await init_build2();
   import_react39 = __toESM(require_react(), 1);
   jsx_dev_runtime18 = __toESM(require_jsx_dev_runtime(), 1);
@@ -27514,6 +27700,10 @@ var init_view3 = __esm(async () => {
 
 // canvas/src/canvases/form/validate.ts
 function validateForm(config) {
+  const rawTitle = config?.title;
+  if (rawTitle !== undefined && typeof rawTitle !== "string") {
+    return { fields: [], error: "form config: 'title' must be a string" };
+  }
   const raw = config?.fields;
   if (!Array.isArray(raw)) {
     return { fields: [], error: "form config: 'fields' must be an array" };
@@ -27636,6 +27826,7 @@ function Form({
     fields,
     title: config?.title,
     budget: stdout?.rows ?? 24,
+    columns: stdout?.columns ?? 80,
     focused: true,
     onSubmit: handleSubmit
   }, generation, false, undefined, this);
@@ -27650,108 +27841,6 @@ var init_form = __esm(async () => {
   ]);
   import_react40 = __toESM(require_react(), 1);
   jsx_dev_runtime19 = __toESM(require_jsx_dev_runtime(), 1);
-});
-
-// canvas/src/canvases/width.ts
-function inRanges(cp, ranges) {
-  for (const [lo, hi] of ranges) {
-    if (cp < lo)
-      return false;
-    if (cp <= hi)
-      return true;
-  }
-  return false;
-}
-function codePointWidth(cp) {
-  if (cp === 0)
-    return 0;
-  if (cp < 32 || cp >= 127 && cp < 160)
-    return 0;
-  if (inRanges(cp, ZERO_WIDTH))
-    return 0;
-  if (inRanges(cp, WIDE))
-    return 2;
-  return 1;
-}
-function clusterWidth(cluster) {
-  const first = cluster.codePointAt(0);
-  if (first === undefined)
-    return 0;
-  if (cluster.includes("\uFE0F"))
-    return 2;
-  return codePointWidth(first);
-}
-function displayWidth(text) {
-  let total = 0;
-  for (const { segment } of segmenter4.segment(text))
-    total += clusterWidth(segment);
-  return total;
-}
-function truncateToWidth(text, columns) {
-  if (columns <= 0)
-    return "";
-  let out = "";
-  let used = 0;
-  for (const { segment } of segmenter4.segment(text)) {
-    const w = clusterWidth(segment);
-    if (used + w > columns)
-      break;
-    out += segment;
-    used += w;
-  }
-  return out;
-}
-function padToWidth(text, columns) {
-  const w = displayWidth(text);
-  return w >= columns ? text : text + " ".repeat(columns - w);
-}
-var segmenter4, ZERO_WIDTH, WIDE;
-var init_width = __esm(() => {
-  segmenter4 = new Intl.Segmenter(undefined, { granularity: "grapheme" });
-  ZERO_WIDTH = [
-    [768, 879],
-    [1155, 1161],
-    [1425, 1469],
-    [1552, 1562],
-    [1611, 1631],
-    [3633, 3633],
-    [3636, 3642],
-    [3655, 3662],
-    [6832, 6911],
-    [7616, 7679],
-    [8203, 8207],
-    [8400, 8432],
-    [65024, 65039],
-    [65056, 65071],
-    [917760, 917999]
-  ];
-  WIDE = [
-    [4352, 4447],
-    [11904, 12350],
-    [12353, 13311],
-    [13312, 19903],
-    [19968, 40959],
-    [40960, 42191],
-    [43360, 43391],
-    [44032, 55203],
-    [63744, 64255],
-    [65040, 65049],
-    [65072, 65135],
-    [65280, 65376],
-    [65504, 65510],
-    [126980, 126980],
-    [127183, 127183],
-    [127374, 127374],
-    [127377, 127386],
-    [127462, 127487],
-    [127744, 128511],
-    [128512, 128591],
-    [128640, 128767],
-    [129280, 129535],
-    [129648, 129791],
-    [131072, 196605],
-    [196608, 262141]
-  ];
 });
 
 // canvas/src/canvases/table/view.tsx
@@ -27779,10 +27868,13 @@ function TableView({
   rows,
   title,
   budget,
+  terminalWidth = 80,
   focused
 }) {
   const widths = import_react41.useMemo(() => columns.map((c) => computeWidth(c, rows)), [columns, rows]);
-  const visibleCount = Math.max(1, budget - HEADER_OVERHEAD_ROWS);
+  const footerRows = wrappedLineCount(FOOTER_HINT3, Math.max(1, terminalWidth - HORIZONTAL_CHROME4));
+  const footerOverflow = Math.max(0, footerRows - 1);
+  const visibleCount = Math.max(1, budget - HEADER_OVERHEAD_ROWS - footerOverflow);
   const [scrollOffset, setScrollOffset] = import_react41.useState(0);
   const maxOffset = Math.max(0, rows.length - visibleCount);
   use_input_default((input, key) => {
@@ -27855,7 +27947,7 @@ function TableView({
     ]
   }, undefined, true, undefined, this);
 }
-var import_react41, jsx_dev_runtime20, MAX_AUTO_WIDTH = 40, HEADER_OVERHEAD_ROWS = 6;
+var import_react41, jsx_dev_runtime20, MAX_AUTO_WIDTH = 40, HEADER_OVERHEAD_ROWS = 6, HORIZONTAL_CHROME4 = 4, FOOTER_HINT3 = "\u2191/\u2193/PgUp/PgDn: scroll  Esc: close";
 var init_view4 = __esm(async () => {
   init_width();
   await init_build2();
@@ -27900,9 +27992,27 @@ function validateTable(config) {
   if (rawRows !== undefined && !Array.isArray(rawRows)) {
     return { columns: [], rows: [], error: "table config: 'rows' must be an array" };
   }
+  const rowsArray = rawRows ?? [];
+  const validColumns = rawColumns;
+  for (let i = 0;i < rowsArray.length; i++) {
+    const row = rowsArray[i];
+    if (row === null || typeof row !== "object" || Array.isArray(row)) {
+      return { columns: [], rows: [], error: `table config: rows[${i}] is not an object` };
+    }
+    for (const col of validColumns) {
+      const cell = row[col.key];
+      if (cell !== undefined && typeof cell !== "string") {
+        return {
+          columns: [],
+          rows: [],
+          error: `table config: rows[${i}][${JSON.stringify(col.key)}] must be a string`
+        };
+      }
+    }
+  }
   return {
-    columns: rawColumns,
-    rows: rawRows ?? [],
+    columns: validColumns,
+    rows: rowsArray,
     error: null
   };
 }
@@ -27965,6 +28075,7 @@ function Table({
     rows,
     title: config?.title,
     budget: stdout?.rows ?? 24,
+    terminalWidth: stdout?.columns ?? 80,
     focused: true
   }, generation, false, undefined, this);
 }

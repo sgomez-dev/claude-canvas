@@ -199,3 +199,45 @@ test("PageUp works immediately after PageDown overshoots past the end of the con
 
   r.dispose();
 });
+
+// Regression test for Fix 5: `maxLineOffsetRef` was mirrored ONLY in the
+// render body (identical in shape to cursorRef/decisionsRef, which ARE
+// written directly in the handler), but is read inside the handler's
+// PageDown branch -- so a zero-delay "j" (move to a hunk with a DIFFERENT,
+// larger max scroll) immediately followed by PageDown used to clamp against
+// the PREVIOUS hunk's stale max instead of the new hunk's, silently
+// swallowing the scroll. Two hunks with very different sizes make the two
+// maxima concretely different: hunk 0 has 2 lines (max offset 0, cannot
+// scroll at all) and hunk 1 has 40 (max offset 31 at 9 visible rows).
+const TWO_SIZED_HUNKS_DIFF = `diff --git a/a.txt b/a.txt
+--- a/a.txt
++++ b/a.txt
+@@ -1,1 +1,1 @@
+-old
++new
+@@ -10,40 +10,40 @@
+${Array.from({ length: 40 }, (_, i) => ` line ${i + 1}`).join("\n")}
+`;
+
+test("moving to a hunk with a larger max scroll then paging down with zero delay scrolls the NEW hunk, not the old one", async () => {
+  const r = renderCanvas(
+    <Diff id="diff-12" config={{ diffText: TWO_SIZED_HUNKS_DIFF }} enabled={false} />,
+    { columns: 80, rows: 20 }
+  );
+  await r.settle();
+
+  // Cursor starts on hunk 0 (the 2-line hunk, max offset 0). Move to hunk 1
+  // (the 40-line hunk, max offset 31) and page down with NO settle(), no
+  // await, nothing at all between the two writes.
+  r.stdin.write("j");
+  r.stdin.write("\x1b[6~"); // page down
+  const frame = await r.settle();
+
+  // Bug symptom (pre-fix): the ref was still 0 from hunk 0, so the clamp
+  // computed min(0, 0+1) = 0 and the scroll silently did nothing --
+  // "lines 1-9 of 40" would still show.
+  expect(frame).toContain("lines 2-10 of 40");
+  expect(frame).not.toContain("lines 1-9 of 40");
+
+  r.dispose();
+});

@@ -100,7 +100,31 @@ export function DiffView({
   // was DISPLAYED, but the internal value kept climbing, so the first
   // several PageUp presses afterward appeared to do nothing while the value
   // came back down through the overshot range.
+  //
+  // That render-body mirror alone has the exact same stale-ref bug this
+  // whole class of ref was invented to fix: it is only WRITTEN in the
+  // render body (below, alongside hunkRowsRef), but it IS read inside the
+  // useInput handler's PageDown branch. A zero-delay "j"/"k" (move to a
+  // different hunk, whose max scroll differs from the previous hunk's)
+  // immediately followed by PageDown -- no settle, no await between them --
+  // reaches the handler before the render that would refresh
+  // maxLineOffsetRef.current for the NEW hunk has committed, so PageDown
+  // clamps against the PREVIOUS hunk's maximum instead, silently swallowing
+  // or mis-clamping the scroll. Fixed the same way as cursorRef/
+  // decisionsRef/focusIndexRef/valuesRef elsewhere in this codebase: the
+  // cursor-move branches below also write maxLineOffsetRef.current directly,
+  // computed from hunkRowsRef (a plain render-body mirror is fine there --
+  // hunkRows is derived only from props/terminal size, never decided by this
+  // handler itself, so it cannot go stale within a single keystroke burst).
   const maxLineOffsetRef = useRef(0);
+  const hunkRowsRef = useRef(1);
+
+  function maxLineOffsetForHunk(flatIndex: number): number {
+    const ref = flatHunks[flatIndex];
+    const hunk = ref ? files[ref.fileIndex]?.hunks[ref.hunkIndex] : undefined;
+    const lineCount = hunk?.lines.length ?? 0;
+    return Math.max(0, lineCount - hunkRowsRef.current);
+  }
 
   const [decisions, setDecisions] = useState<Map<string, HunkDecision>>(new Map());
   // Same stale-closure hazard as cursorRef above, for the submit branch's
@@ -146,11 +170,18 @@ export function DiffView({
       cursorRef.current = next;
       setCursor(next);
       setLineOffset(0);
+      // Direct ref write, same reasoning as cursorRef above: a zero-delay
+      // "k" (switch to this hunk) immediately followed by PageDown must
+      // have PageDown's clamp read THIS hunk's max scroll, not the
+      // previous hunk's stale value. See the class comment on
+      // maxLineOffsetRef above.
+      maxLineOffsetRef.current = maxLineOffsetForHunk(next);
     } else if (key.downArrow || input === "j") {
       const next = Math.min(flatHunks.length - 1, cursorRef.current + 1);
       cursorRef.current = next;
       setCursor(next);
       setLineOffset(0);
+      maxLineOffsetRef.current = maxLineOffsetForHunk(next);
     } else if (input === "a") {
       const ref = flatHunks[cursorRef.current];
       if (ref) {
@@ -204,6 +235,11 @@ export function DiffView({
   const budget = Math.max(2, totalBudget - CHROME_ROWS - footerOverflow);
   const fileRows = Math.max(1, Math.min(MAX_FILE_ROWS, files.length, budget - 1));
   const hunkRows = Math.max(1, budget - fileRows);
+  // Render-body mirror only, and that's sufficient: unlike maxLineOffsetRef,
+  // this value is derived purely from props/terminal size, never decided by
+  // the useInput handler itself, so it cannot be stale relative to anything
+  // the handler just did within the same keystroke burst.
+  hunkRowsRef.current = hunkRows;
 
   // Both windows page rather than centre, for the same reason as picker's:
   // the view only moves when the cursor crosses a boundary instead of

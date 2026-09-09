@@ -73,7 +73,9 @@ interface CalendarConfig {
   title?: string;
   events: CalendarEvent[];
   startHour?: number;  // First hour of the day shown (default: 6)
-  endHour?: number;    // Last hour of the day shown (default: 22)
+  endHour?: number;    // Exclusive upper bound: hours shown run from startHour up to but not
+                       // including endHour (default: 22, so the last bookable slot ends at
+                       // 22:00 but no slot starts at 22:00)
 }
 
 interface CalendarEvent {
@@ -91,7 +93,9 @@ interface MeetingPickerConfig {
   calendars: Calendar[];     // Must be non-empty
   slotGranularity?: number;  // 15, 30, or 60 minutes (default: 30) -- no other value is accepted
   startHour?: number;        // First hour of the day shown (default: 6)
-  endHour?: number;          // Last hour of the day shown (default: 22)
+  endHour?: number;          // Exclusive upper bound: hours shown run from startHour up to but
+                             // not including endHour (default: 22, so the last bookable slot
+                             // ends at 22:00 but no slot starts at 22:00)
 }
 
 interface Calendar {

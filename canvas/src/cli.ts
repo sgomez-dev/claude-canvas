@@ -148,6 +148,19 @@ interface SpawnOpts {
 }
 
 export async function runSpawn(kind: string, opts: SpawnOpts, io: ActionIO = defaultIO): Promise<void> {
+  // Captured before anything else happens for this invocation. `spawn`'s
+  // default id is deterministic per kind (e.g. `${kind}-1`, reused across
+  // every invocation with no explicit --id), and the registry keeps an
+  // outcome around even after its canvas exits until something reads it.
+  // Without this cutoff, an unconsumed outcome left by a PREVIOUS
+  // invocation of the same default id is indistinguishable from this
+  // invocation's own record: awaitRecord below would find it on its very
+  // first poll -- before this invocation's canvas has even started -- and
+  // report a stale answer as if it belonged to this spawn. Reproduced
+  // directly: spawn, record an outcome, don't consume it, spawn again with
+  // the same id, and the second spawn's wait returned the first spawn's
+  // data in under 1 ms.
+  const spawnStartedAt = Date.now();
   try {
     const id = assertIdent("id", opts.id ?? `${kind}-1`);
     assertIdent("kind", kind);
@@ -198,7 +211,7 @@ export async function runSpawn(kind: string, opts: SpawnOpts, io: ActionIO = def
     // so a `wait` issued immediately after answered "no canvas <id>" for a
     // canvas that was merely still starting. Measured window on this
     // machine: 0-1 s, so 10 s is far beyond any healthy start.
-    const record = await awaitRecord(id, SPAWN_READY_MS);
+    const record = await awaitRecord(id, SPAWN_READY_MS, { after: spawnStartedAt });
     if (!record) {
       throw new Error(
         `Pane opened, but canvas ${id} did not become reachable within ` +

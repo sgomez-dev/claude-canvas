@@ -114,3 +114,113 @@ test("a declared startHour/endHour is forwarded into the meeting picker grid", a
   r.dispose();
   restore();
 });
+
+// Fix 4: startHour/endHour were wired to actually be respected (the test
+// above) but shipped with no validation at all. A negative startHour makes
+// `setHours(-5, ...)` silently roll back to the previous day; an inverted
+// or equal pair produces zero/negative total slots (nothing selectable,
+// no error); fractional values produce fractional loop bounds internally.
+// Each must now be rejected as a config error, the same way an out-of-range
+// slotGranularity already is.
+async function expectRejected(config: unknown, messageSubstring: string) {
+  const id = `mpc-hours-${Math.random().toString(36).slice(2)}`;
+  const { r, restore } = mount(id, config);
+  await r.settle();
+  await awaitRecord(id, 5000);
+  const conn = await openConnection(id);
+
+  const msg = await nextOutcome(conn, 2000);
+  expect(msg?.type).toBe("error");
+  expect((msg as { message: string }).message).toContain(messageSubstring);
+
+  conn.close();
+  r.dispose();
+  restore();
+}
+
+test("a negative startHour is rejected as a config error", async () => {
+  await expectRejected(
+    { calendars: [{ name: "Ana", color: "cyan", events: [] }], startHour: -1, endHour: 12 },
+    "startHour"
+  );
+});
+
+test("a fractional startHour is rejected as a config error", async () => {
+  await expectRejected(
+    { calendars: [{ name: "Ana", color: "cyan", events: [] }], startHour: 9.5, endHour: 12 },
+    "startHour"
+  );
+});
+
+test("a fractional endHour is rejected as a config error", async () => {
+  await expectRejected(
+    { calendars: [{ name: "Ana", color: "cyan", events: [] }], startHour: 9, endHour: 12.5 },
+    "endHour"
+  );
+});
+
+test("an endHour of 25 (out of range) is rejected as a config error", async () => {
+  await expectRejected(
+    { calendars: [{ name: "Ana", color: "cyan", events: [] }], startHour: 9, endHour: 25 },
+    "endHour"
+  );
+});
+
+test("an inverted startHour/endHour pair is rejected as a config error", async () => {
+  await expectRejected(
+    { calendars: [{ name: "Ana", color: "cyan", events: [] }], startHour: 14, endHour: 9 },
+    "startHour"
+  );
+});
+
+test("an equal startHour/endHour pair is rejected as a config error", async () => {
+  await expectRejected(
+    { calendars: [{ name: "Ana", color: "cyan", events: [] }], startHour: 9, endHour: 9 },
+    "startHour"
+  );
+});
+
+// A partial override (only startHour given) is checked against the OTHER
+// field's real EFFECTIVE value (the default endHour, 22), not skipped just
+// because endHour wasn't explicitly provided. startHour: 23 alone is
+// invalid because 23 is not strictly less than the default endHour of 22.
+test("a partial override checked against the other field's default is still rejected when inverted", async () => {
+  await expectRejected(
+    { calendars: [{ name: "Ana", color: "cyan", events: [] }], startHour: 23 },
+    "startHour"
+  );
+});
+
+// A normal valid range still works correctly -- this fix must not reject
+// anything that was previously fine.
+test("a normal valid startHour/endHour range like {9, 17} still works", async () => {
+  const id = "mpc-hours-valid";
+  const { r, restore } = mount(id, {
+    calendars: [{ name: "Ana", color: "cyan", events: [] }],
+    startHour: 9,
+    endHour: 17,
+  });
+  const frame = await r.settle();
+  expect(frame).toContain("Select a meeting time");
+  expect(frame).toContain("9am");
+
+  r.dispose();
+  restore();
+});
+
+// endHour: 24 (midnight, end of day) is a legitimate value -- exclusive
+// upper bound, so 24 is never itself a bookable slot -- and must be
+// accepted, not rejected as "out of range".
+test("endHour: 24 (midnight, end of day) is accepted", async () => {
+  const id = "mpc-hours-midnight";
+  const { r, restore } = mount(id, {
+    calendars: [{ name: "Ana", color: "cyan", events: [] }],
+    startHour: 20,
+    endHour: 24,
+  });
+  const frame = await r.settle();
+  expect(frame).toContain("Select a meeting time");
+
+  r.dispose();
+  restore();
+});

@@ -1,7 +1,13 @@
 import React, { useState, useEffect, useRef } from "react";
 import { Box, Text, useInput, useApp, useStdout } from "ink";
 import { MeetingPickerView } from "./calendar/scenarios/meeting-picker-view";
-import { isMeetingPickerConfig, type MeetingPickerConfig } from "../scenarios/types";
+import {
+  isMeetingPickerConfig,
+  meetingPickerConfigError,
+  DEFAULT_START_HOUR,
+  DEFAULT_END_HOUR,
+  type MeetingPickerConfig,
+} from "../scenarios/types";
 import { useCanvasServer } from "../runtime/use-canvas-server";
 import { formatTime } from "./format";
 // Re-exported because this module's public surface has always included it;
@@ -35,6 +41,43 @@ function isAllDayEvent(event: CalendarEvent): boolean {
   return start.getHours() === 0 && start.getMinutes() === 0 &&
          end.getHours() === 0 && end.getMinutes() === 0 &&
          end.getTime() - start.getTime() >= 24 * 60 * 60 * 1000;
+}
+
+// The number of rows AllDayEventsRow will actually render for the currently
+// visible week. AllDayEventsRow renders one Box per event (not one shared
+// row for all of them), so a day with 3 all-day events makes the whole row
+// 3 rows tall, and every other day's column pads out to match (a row-flex
+// container's height is its tallest child).
+//
+// This is 0 only when there is no all-day event ANYWHERE in `events` --
+// mirroring AllDayEventsRow's own `if (allDayEvents.length === 0) return
+// null` check, which is a GLOBAL test, not scoped to the visible week.
+// Once that's true, the row always renders (every visible day gets at
+// least a 1-row-tall cell, blank ones included via its own `: <Box
+// height={1}>` fallback branch) -- so the minimum height is 1 even in the
+// edge case where an all-day event exists in the config but happens to
+// fall outside the currently visible week. Getting this wrong looks
+// identical to the bug this fixes: rendering 3 all-day events landing
+// outside the visible week still reproduced a 1-row under-count and the
+// same footer overlap, caught empirically while verifying this fix.
+//
+// This used to be assumed to always be 0 by a hardcoded `headerHeight`
+// constant that had no all-day-events term at all. A single all-day event
+// already grew the real row by 1 beyond what the constant assumed for the
+// no-events case, and three or more meant the JS-computed `availableHeight`
+// (and therefore `visibleSlotCount`/`slotHeights`) was sized for a grid
+// taller than the space Yoga actually gives the flexGrow grid box once the
+// real all-day row eats into it -- grid content spilled onto the footer row,
+// and with enough events an hour-boundary line got overdrawn entirely.
+function allDayRowCount(events: CalendarEvent[], weekDays: Date[]): number {
+  const allDayEvents = events.filter(isAllDayEvent);
+  if (allDayEvents.length === 0) return 0;
+  let max = 1;
+  for (const day of weekDays) {
+    const count = allDayEvents.filter((e) => isSameDay(e.startTime, day)).length;
+    if (count > max) max = count;
+  }
+  return max;
 }
 
 interface Props {
@@ -373,15 +416,16 @@ export function Calendar({ id, config, enabled = false, scenario = "display" }: 
     // 55 s later. This is the type guard that check should always have
     // been, and a bad config is now reported like every other primitive's.
     if (!config || !isMeetingPickerConfig(config)) {
-      // Report the SPECIFIC thing that's wrong -- isMeetingPickerConfig only
-      // returns a boolean, and a bad slotGranularity produces a very
-      // different actionable message than a missing/empty calendars array.
-      const hasCalendars =
-        !!config && "calendars" in config && Array.isArray(config.calendars);
-      const message =
-        !hasCalendars || (config as { calendars?: unknown[] }).calendars?.length === 0
-          ? "calendar config: scenario 'meeting-picker' needs a non-empty 'calendars' array"
-          : "calendar config: scenario 'meeting-picker' needs 'slotGranularity' to be 15, 30, or 60";
+      // Report the SPECIFIC thing that's wrong -- calendars, slotGranularity,
+      // or (once wired to actually be respected) startHour/endHour each get
+      // their own distinct, actionable message.
+      const message = !config
+        ? "calendar config: scenario 'meeting-picker' needs a non-empty 'calendars' array"
+        : meetingPickerConfigError(config) ??
+          // isMeetingPickerConfig and meetingPickerConfigError agree by
+          // construction (the former IS the latter's null-check), so this
+          // is unreachable -- kept only so `message` always has a string.
+          "calendar config: invalid 'meeting-picker' config";
       return (
         <CalendarConfigError
           id={id}
@@ -395,8 +439,8 @@ export function Calendar({ id, config, enabled = false, scenario = "display" }: 
       calendars: config.calendars,
       slotGranularity: config.slotGranularity || 30,
       title: config.title,
-      startHour: config.startHour ?? START_HOUR,
-      endHour: config.endHour ?? END_HOUR,
+      startHour: config.startHour ?? DEFAULT_START_HOUR,
+      endHour: config.endHour ?? DEFAULT_END_HOUR,
     };
     return <MeetingPickerView id={id} config={pickerConfig} enabled={enabled} />;
   }
@@ -504,6 +548,17 @@ function CalendarDisplay({ id, config, enabled, scenario }: CalendarDisplayProps
   const startHour = config?.startHour ?? START_HOUR;
   const endHour = config?.endHour ?? END_HOUR;
 
+  const events: CalendarEvent[] = config?.events
+    ? config.events.map((e) => ({
+        ...e,
+        startTime: new Date(e.startTime),
+        endTime: new Date(e.endTime),
+      }))
+    : getDemoEvents();
+
+  const weekDays = getWeekDays(currentDate);
+  const today = new Date();
+
   // Vertical budget, and the window of slots that actually fits in it.
   //
   // This used to render EVERY slot unconditionally at a height of
@@ -517,7 +572,20 @@ function CalendarDisplay({ id, config, enabled, scenario }: CalendarDisplayProps
   // Now the grid shows as many slots as fit and pages (via the up/down
   // arrow keys -- keyboard-only, this scenario has no mouse) when
   // navigation crosses a boundary, exactly as the meeting picker does.
-  const headerHeight = 5; // Title (1) + marginBottom (1) + day name (1) + day number (1) + marginBottom (1)
+  //
+  // headerHeight = the original hardcoded "5" (title + its marginBottom +
+  // the 2-row day-headers row -- empirically confirmed to still be the
+  // exact right budget for the zero-all-day-events case: at 70x18 that
+  // reproduces the historical "08:00-14:00, 12 visible slots" baseline
+  // byte-for-byte) + the all-day-events row's ACTUAL rendered height
+  // (allDayRowCount above -- 0 when nothing is all-day, otherwise at least
+  // 1, or the busiest visible day's event count if higher). This used to
+  // hardcode the all-day term at 0 unconditionally: a single all-day event
+  // already grew the real row by 1 beyond what the constant assumed, and
+  // three or more meant the grid was sized for more rows than the space
+  // actually available once the real all-day row ate into it.
+  const allDayRows = allDayRowCount(events, weekDays);
+  const headerHeight = 5 + allDayRows;
   const footerHeight = 1; // Help bar
   const availableHeight = Math.max(1, termHeight - headerHeight - footerHeight);
   const totalSlots = (endHour - startHour) * 2; // 2 slots per hour
@@ -531,17 +599,6 @@ function CalendarDisplay({ id, config, enabled, scenario }: CalendarDisplayProps
   const slotHeights = Array.from({ length: visibleSlotCount }, (_, i) =>
     baseSlotHeight + (i < extraRows ? 1 : 0)
   );
-
-  const events: CalendarEvent[] = config?.events
-    ? config.events.map((e) => ({
-        ...e,
-        startTime: new Date(e.startTime),
-        endTime: new Date(e.endTime),
-      }))
-    : getDemoEvents();
-
-  const weekDays = getWeekDays(currentDate);
-  const today = new Date();
 
   useInput((input, key) => {
     if (input === "q" || key.escape) {

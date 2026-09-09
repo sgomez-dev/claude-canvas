@@ -69,6 +69,12 @@ export interface MeetingPickerConfig extends BaseCalendarConfig {
 // meeting picker assumes.
 const VALID_SLOT_GRANULARITIES = [15, 30, 60] as const;
 
+// Historical defaults for startHour/endHour, shared with calendar.tsx so
+// this module's validation checks the same effective values calendar.tsx
+// will actually use once a caller omits one or both.
+export const DEFAULT_START_HOUR = 6;
+export const DEFAULT_END_HOUR = 22;
+
 // Meeting picker result
 export interface MeetingPickerResult {
   startTime: string; // ISO datetime
@@ -79,23 +85,60 @@ export interface MeetingPickerResult {
 // Union type for all calendar configs
 export type CalendarScenarioConfig = BaseCalendarConfig | MeetingPickerConfig;
 
-// Type guard for meeting picker config.
+// Validates a meeting-picker config and returns the SPECIFIC reason it's
+// invalid (a ready-to-report message), or `null` when it's fine.
+// isMeetingPickerConfig (below) is a thin boolean wrapper around this; both
+// exist so calendar.tsx can report calendars/slotGranularity/startHour/
+// endHour problems with a distinct, actionable message each, rather than a
+// generic "invalid config".
 //
-// Requires a NON-EMPTY calendars array (an empty one is a config error --
-// the message calendar.tsx reports for a bad config, and this project's own
-// calendar skill doc, both already promised this) and, when present, a
-// slotGranularity that's actually one of the values the grid supports --
-// nothing previously enforced that at runtime, so a bad value like `7`
-// reached the grid's slot-count math and produced fractional loop bounds.
+// Checks:
+// - a NON-EMPTY `calendars` array (an empty one is a config error -- the
+//   message calendar.tsx reports for a bad config, and this project's own
+//   calendar skill doc, both already promised this)
+// - when present, a `slotGranularity` that's actually one of the values the
+//   grid supports -- nothing previously enforced that at runtime, so a bad
+//   value like `7` reached the grid's slot-count math and produced
+//   fractional loop bounds
+// - `startHour`/`endHour` (evaluated against their historical defaults when
+//   omitted, so a partial override like `{startHour: 23}` is checked
+//   against the OTHER field's real effective value, not just its own raw
+//   presence). These were wired to actually be respected in an earlier fix
+//   but left completely unvalidated: negative hours make `setHours(-5,
+//   ...)` silently roll back to the previous day (a booking made from a
+//   picker showing a "6am" label under an otherwise-correct day header
+//   actually books the PREVIOUS day); an inverted or equal pair produces
+//   zero or negative total slots, rendering nothing selectable with no
+//   error at all; fractional values produce fractional loop bounds
+//   internally. `endHour: 24` (midnight, end of day) is allowed on purpose
+//   -- exclusive upper bound, so 24 never itself becomes a bookable slot.
+export function meetingPickerConfigError(config: CalendarScenarioConfig): string | null {
+  if (!("calendars" in config) || !Array.isArray(config.calendars) || config.calendars.length === 0) {
+    return "calendar config: scenario 'meeting-picker' needs a non-empty 'calendars' array";
+  }
+  if ("slotGranularity" in config && config.slotGranularity !== undefined) {
+    if (!(VALID_SLOT_GRANULARITIES as readonly number[]).includes(config.slotGranularity)) {
+      return "calendar config: scenario 'meeting-picker' needs 'slotGranularity' to be 15, 30, or 60";
+    }
+  }
+  const startHour = "startHour" in config && config.startHour !== undefined ? config.startHour : DEFAULT_START_HOUR;
+  const endHour = "endHour" in config && config.endHour !== undefined ? config.endHour : DEFAULT_END_HOUR;
+  if (!Number.isInteger(startHour) || startHour < 0 || startHour > 23) {
+    return "calendar config: scenario 'meeting-picker' needs 'startHour' to be an integer from 0 to 23";
+  }
+  if (!Number.isInteger(endHour) || endHour < 1 || endHour > 24) {
+    return "calendar config: scenario 'meeting-picker' needs 'endHour' to be an integer from 1 to 24";
+  }
+  if (startHour >= endHour) {
+    return "calendar config: scenario 'meeting-picker' needs 'startHour' to be strictly less than 'endHour'";
+  }
+  return null;
+}
+
+// Type guard for meeting picker config. See meetingPickerConfigError above
+// for what specifically is checked.
 export function isMeetingPickerConfig(
   config: CalendarScenarioConfig
 ): config is MeetingPickerConfig {
-  if (!("calendars" in config) || !Array.isArray(config.calendars)) return false;
-  if (config.calendars.length === 0) return false;
-  if ("slotGranularity" in config && config.slotGranularity !== undefined) {
-    if (!(VALID_SLOT_GRANULARITIES as readonly number[]).includes(config.slotGranularity)) {
-      return false;
-    }
-  }
-  return true;
+  return meetingPickerConfigError(config) === null;
 }

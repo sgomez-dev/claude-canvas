@@ -498,7 +498,13 @@ export function FormView({
           {fields.length > visibleFields
             ? `${windowStart + 1}-${windowStart + windowFields.length} of ${fields.length}  `
             : ""}
-          Tab/Shift+Tab: move  Enter: submit (on the button)  Esc: cancel
+          {/* Rendered from the same constant the footer budget measures.
+              These used to be two separate literals -- the budget measured
+              one, the render printed the other -- so editing the visible
+              hint silently mismeasured how many rows it would occupy, and
+              the wrap reservation would be for a string no longer on
+              screen. One source of truth makes that drift impossible. */}
+          {FOOTER_HINT}
         </Text>
       </Box>
     </Box>

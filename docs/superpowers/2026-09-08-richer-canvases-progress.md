@@ -139,15 +139,17 @@ rather than a condition and was caught only by CI. Worth reading as a
 pattern: the harness makes it very easy to write, and only a loaded runner
 tells you.
 
-### Found during the extraction, not fixed
+### Found during the extraction, deferred to sub-project 2 — since FIXED
 
-**`form` has no viewport.** It is the one primitive that never got one: a
-form with more fields than the pane has rows overflows, exactly as `picker`,
-`diff` and `table` did before Phase 2 gave them windows. Left alone here
-deliberately -- adding one changes a render, and this sub-project's entire
-guard was that no render changed. Recorded as the first item for whoever
-picks up sub-project 2, since a form region inside a dashboard makes it
-worse.
+**`form` had no viewport.** It was the one primitive that never got one: a
+form with more fields than the pane has rows overflowed, exactly as
+`picker`, `diff` and `table` did before Phase 2 gave them windows. Left
+alone during the extraction deliberately -- adding one changes a render, and
+that sub-project's entire guard was that no render changed.
+
+**Fixed in sub-project 2**, where it turned out to be the worst of the four
+overflows: the others hid content, while form's pushed the Submit button off
+screen, leaving a form that could be filled in and not submitted.
 
 ### Sub-project 2: dashboard — COMPLETE
 
@@ -202,14 +204,21 @@ and asserts the outcome carries `regionId`.
 
 ### Found in sub-project 2, not fixed
 
-**Each region repeats its own footer hint, and one of them is wrong.** A
-picker region's footer says "Esc: cancel" while Escape actually closes the
-whole dashboard. Three regions means three hint lines competing with the
-dashboard's own. The fix is an optional `hint` prop on each view, defaulting
-to true so standalone renders are untouched, with the dashboard suppressing
-them and naming the focused region's keys in its own footer. Left for
-whoever picks this up: it is wrong information rather than wrong behaviour,
-and the dashboard is legible without it.
+**STILL OPEN: each region repeats its own footer hint, and one of them is
+wrong.** A picker region's footer says "Esc: cancel" while Escape actually
+closes the whole dashboard. Three regions means three hint lines competing
+with the dashboard's own. The fix is an optional `hint` prop on each view,
+defaulting to true so standalone renders are untouched, with the dashboard
+suppressing them and naming the focused region's keys in its own footer;
+each view's chrome then shrinks by the footer's two rows (its blank line
+and its text).
+
+Attempted and abandoned 2026-09-09, deliberately: it needs a coordinated
+edit across five views plus the dashboard, for text that is wrong rather
+than behaviour that is wrong, and the session's actual instruction was to
+advance the image pipeline. **It is a smaller job now than it was**: every
+view renders its hint from a single constant, so suppressing it is one
+conditional per view rather than an edit to a duplicated literal.
 
 **A region's chrome overhead is not obvious from the config.** A `table`
 region given `rows: 7` shows one data row, because the view spends six on
@@ -332,6 +341,31 @@ blocks would tell them nothing. `env` surfaces the message in a
 available, since they describe the terminal rather than the pane host, and
 `env` is exactly the command someone runs to ask why their images look like
 blocks.
+
+### Detour, taken while checking what was still pending: footer hints
+
+Two things, both found by reading rather than by a failure.
+
+**The measured footer string and the rendered footer string were separate
+literals, in all five views.** The wrap budget the merge review added
+measures `FOOTER_HINT` to reserve rows for a hint that wraps at a narrow
+width -- but every view then printed its own duplicate copy of that text in
+the render. Editing the visible hint would have silently mismeasured its
+height, reserving rows for a string no longer on screen. Exactly the drift
+shape `CLAUDE.md`'s "Verifying a fix" section catalogues.
+
+Latent, not active: unifying them moved **no snapshot at all**, which is the
+evidence that the two copies still agreed. Now structurally impossible --
+each view renders the constant it measures. `diff` gained a second constant
+for its no-hunks footer, which it rendered while measuring the long one and
+so over-reserved a row.
+
+**`tree` never received the footer-wrap budget the other four have**, having
+been written after that wave. At a narrow width its own hint wraps onto a
+line `CHROME_ROWS` does not reserve, pushing a row of content out of the
+pane. Fixed, with a test that compares the window size at 80 and 34 columns
+and asserts the render never exceeds its budget -- confirmed to fail with
+the budget removed.
 
 ### Next: step 2, the PNG decoder
 

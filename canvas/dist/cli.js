@@ -27007,7 +27007,8 @@ function DiffView({
   const currentRef = flatHunks[cursor];
   const currentFile = currentRef ? files[currentRef.fileIndex] : undefined;
   const currentHunk = currentRef ? currentFile?.hunks[currentRef.hunkIndex] : undefined;
-  const footerRows = wrappedLineCount(FOOTER_HINT, Math.max(1, columns - HORIZONTAL_CHROME));
+  const footerHint = flatHunks.length === 0 ? NO_HUNKS_FOOTER_HINT : FOOTER_HINT;
+  const footerRows = wrappedLineCount(footerHint, Math.max(1, columns - HORIZONTAL_CHROME));
   const footerOverflow = Math.max(0, footerRows - 1);
   const budget = Math.max(2, totalBudget - CHROME_ROWS - footerOverflow);
   const fileRows = Math.max(1, Math.min(MAX_FILE_ROWS, files.length, budget - 1));
@@ -27099,13 +27100,13 @@ function DiffView({
         marginTop: 1,
         children: /* @__PURE__ */ jsx_dev_runtime14.jsxDEV(Text, {
           dimColor: true,
-          children: flatHunks.length === 0 ? "Enter: submit  Esc: cancel" : "a/r: approve/reject  \u2191/\u2193: hunk  PgUp/PgDn: scroll  Enter: submit  Esc: cancel"
+          children: flatHunks.length === 0 ? NO_HUNKS_FOOTER_HINT : FOOTER_HINT
         }, undefined, false, undefined, this)
       }, undefined, false, undefined, this)
     ]
   }, undefined, true, undefined, this);
 }
-var import_react35, jsx_dev_runtime14, CHROME_ROWS = 10, MAX_FILE_ROWS = 5, HORIZONTAL_CHROME = 0, FOOTER_HINT = "a/r: approve/reject  \u2191/\u2193: hunk  PgUp/PgDn: scroll  Enter: submit  Esc: cancel";
+var import_react35, jsx_dev_runtime14, CHROME_ROWS = 10, MAX_FILE_ROWS = 5, HORIZONTAL_CHROME = 0, FOOTER_HINT = "a/r: approve/reject  \u2191/\u2193: hunk  PgUp/PgDn: scroll  Enter: submit  Esc: cancel", NO_HUNKS_FOOTER_HINT = "Enter: submit  Esc: cancel";
 var init_view = __esm(async () => {
   init_width();
   await init_build2();
@@ -27515,7 +27516,7 @@ function PickerView({
           dimColor: true,
           children: [
             options.length > visibleCount ? `${windowStart + 1}-${windowStart + visibleOptions.length} of ${options.length}  ` : "",
-            mode === "single" ? "\u2191/\u2193: navigate  Enter: select  Esc: cancel" : "\u2191/\u2193: navigate  Space: toggle  Enter: submit  Esc: cancel"
+            footerHint
           ]
         }, undefined, true, undefined, this)
       }, undefined, false, undefined, this)
@@ -27945,7 +27946,7 @@ function FormView({
           dimColor: true,
           children: [
             fields.length > visibleFields ? `${windowStart + 1}-${windowStart + windowFields.length} of ${fields.length}  ` : "",
-            "Tab/Shift+Tab: move  Enter: submit (on the button)  Esc: cancel"
+            FOOTER_HINT2
           ]
         }, undefined, true, undefined, this)
       }, undefined, false, undefined, this)
@@ -28216,7 +28217,7 @@ function TableView({
           dimColor: true,
           children: [
             rows.length > visibleCount ? `rows ${scrollOffset + 1}-${scrollOffset + visibleRows.length} of ${rows.length}  ` : "",
-            "\u2191/\u2193/PgUp/PgDn: scroll  Esc: close"
+            FOOTER_HINT3
           ]
         }, undefined, true, undefined, this)
       }, undefined, false, undefined, this)
@@ -28400,6 +28401,7 @@ function TreeView({
   title,
   prompt,
   budget,
+  columns = 80,
   focused,
   onSubmit
 }) {
@@ -28463,7 +28465,8 @@ function TreeView({
         onSubmit({ selectedId: row.node.id, path: row.path });
     }
   }, { isActive: focused });
-  const visibleCount = Math.max(1, budget - CHROME_ROWS4 - (prompt ? 1 : 0));
+  const footerOverflow = Math.max(0, wrappedLineCount(FOOTER_HINT4, Math.max(1, columns - HORIZONTAL_CHROME5)) - 1);
+  const visibleCount = Math.max(1, budget - CHROME_ROWS4 - footerOverflow - (prompt ? 1 : 0));
   const windowStart = rows.length <= visibleCount ? 0 : Math.floor(clamped / visibleCount) * visibleCount;
   const windowRows = rows.slice(windowStart, windowStart + visibleCount);
   return /* @__PURE__ */ jsx_dev_runtime22.jsxDEV(Box_default, {
@@ -28501,15 +28504,16 @@ function TreeView({
           dimColor: true,
           children: [
             rows.length > visibleCount ? `${windowStart + 1}-${windowStart + windowRows.length} of ${rows.length}  ` : "",
-            "\u2191/\u2193: move  \u2190/\u2192: fold  Enter: pick  Esc: cancel"
+            FOOTER_HINT4
           ]
         }, undefined, true, undefined, this)
       }, undefined, false, undefined, this)
     ]
   }, undefined, true, undefined, this);
 }
-var import_react43, jsx_dev_runtime22, CHROME_ROWS4 = 5;
+var import_react43, jsx_dev_runtime22, CHROME_ROWS4 = 5, HORIZONTAL_CHROME5 = 4, FOOTER_HINT4 = "\u2191/\u2193: move  \u2190/\u2192: fold  Enter: pick  Esc: cancel";
 var init_view5 = __esm(async () => {
+  init_width();
   await init_build2();
   import_react43 = __toESM(require_react(), 1);
   jsx_dev_runtime22 = __toESM(require_jsx_dev_runtime(), 1);

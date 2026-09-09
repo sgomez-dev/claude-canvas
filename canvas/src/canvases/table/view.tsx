@@ -208,7 +208,13 @@ export function TableView({
           {rows.length > visibleCount
             ? `rows ${scrollOffset + 1}-${scrollOffset + visibleRows.length} of ${rows.length}  `
             : ""}
-          ↑/↓/PgUp/PgDn: scroll  Esc: close
+          {/* Rendered from the same constant the footer budget measures.
+              These used to be two separate literals -- the budget measured
+              one, the render printed the other -- so editing the visible
+              hint silently mismeasured how many rows it would occupy, and
+              the wrap reservation would be for a string no longer on
+              screen. One source of truth makes that drift impossible. */}
+          {FOOTER_HINT}
         </Text>
       </Box>
     </Box>

@@ -1,9 +1,12 @@
 import React, { useMemo, useRef, useState } from "react";
 import { Box, Text, useInput } from "ink";
+import { wrappedLineCount } from "../width";
 import type { TreeNode, TreeResult } from "./types";
 
 export interface TreeViewProps {
   nodes: TreeNode[];
+  /** Terminal width, for measuring whether the footer hint wraps. */
+  columns?: number;
   title?: string;
   prompt?: string;
   /** Total rows this view may paint into; it subtracts its own chrome. */
@@ -15,6 +18,12 @@ export interface TreeViewProps {
 // Two border rows, the title, a blank line and the footer hint. The prompt
 // adds one more when present.
 const CHROME_ROWS = 5;
+// Two border columns plus one column of padding on each side.
+const HORIZONTAL_CHROME = 4;
+// Rendered from this constant, and measured from it: they used to be
+// separate literals in the other four views, so editing the visible hint
+// silently mismeasured its own wrapped height.
+const FOOTER_HINT = "↑/↓: move  ←/→: fold  Enter: pick  Esc: cancel";
 
 interface Row {
   node: TreeNode;
@@ -73,6 +82,7 @@ export function TreeView({
   title,
   prompt,
   budget,
+  columns = 80,
   focused,
   onSubmit,
 }: TreeViewProps): React.JSX.Element {
@@ -150,7 +160,18 @@ export function TreeView({
     { isActive: focused }
   );
 
-  const visibleCount = Math.max(1, budget - CHROME_ROWS - (prompt ? 1 : 0));
+  // At a narrow width the footer hint wraps onto a second line, which
+  // CHROME_ROWS's flat "one line of hint" assumption does not account for --
+  // the same overflow the other four views were given a budget for, which
+  // this one never received because it was written after that wave.
+  const footerOverflow = Math.max(
+    0,
+    wrappedLineCount(FOOTER_HINT, Math.max(1, columns - HORIZONTAL_CHROME)) - 1
+  );
+  const visibleCount = Math.max(
+    1,
+    budget - CHROME_ROWS - footerOverflow - (prompt ? 1 : 0)
+  );
   const windowStart =
     rows.length <= visibleCount ? 0 : Math.floor(clamped / visibleCount) * visibleCount;
   const windowRows = rows.slice(windowStart, windowStart + visibleCount);
@@ -185,7 +206,7 @@ export function TreeView({
           {rows.length > visibleCount
             ? `${windowStart + 1}-${windowStart + windowRows.length} of ${rows.length}  `
             : ""}
-          ↑/↓: move  ←/→: fold  Enter: pick  Esc: cancel
+          {FOOTER_HINT}
         </Text>
       </Box>
     </Box>

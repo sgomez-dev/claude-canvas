@@ -45,8 +45,14 @@ const MAX_FILE_ROWS = 5;
 // nested inside it -- so the footer's available width is the full terminal
 // width, not `columns` minus a border-and-padding allowance.
 const HORIZONTAL_CHROME = 0;
+// Kept under 80 columns on purpose: at 80 the longer wording wrapped onto a
+// second line, costing a row of the hunk body the viewport exists to protect.
 const FOOTER_HINT =
   "a/r: approve/reject  ↑/↓: hunk  PgUp/PgDn: scroll  Enter: submit  Esc: cancel";
+// What renders when there is nothing to decide -- a binary-only diff. The
+// budget below measures whichever of the two will actually appear: measuring
+// the long one while rendering the short one over-reserved a row.
+const NO_HUNKS_FOOTER_HINT = "Enter: submit  Esc: cancel";
 
 /**
  * The diff review's rendering and per-hunk decisions, knowing nothing about
@@ -230,7 +236,8 @@ export function DiffView({
   // (or third) line, which CHROME_ROWS's flat "one line of hint text"
   // assumption doesn't account for -- so on top of the fixed chrome, reserve
   // however many extra rows the footer's actual wrapped height needs.
-  const footerRows = wrappedLineCount(FOOTER_HINT, Math.max(1, columns - HORIZONTAL_CHROME));
+  const footerHint = flatHunks.length === 0 ? NO_HUNKS_FOOTER_HINT : FOOTER_HINT;
+  const footerRows = wrappedLineCount(footerHint, Math.max(1, columns - HORIZONTAL_CHROME));
   const footerOverflow = Math.max(0, footerRows - 1);
   const budget = Math.max(2, totalBudget - CHROME_ROWS - footerOverflow);
   const fileRows = Math.max(1, Math.min(MAX_FILE_ROWS, files.length, budget - 1));
@@ -317,11 +324,8 @@ export function DiffView({
       <Box marginTop={1}>
         <Text dimColor>
           {flatHunks.length === 0
-            ? "Enter: submit  Esc: cancel"
-            : // Kept under 80 columns on purpose: at 80 the longer wording
-              // wrapped onto a second line, costing a row of the hunk body
-              // this viewport work exists to protect.
-              "a/r: approve/reject  ↑/↓: hunk  PgUp/PgDn: scroll  Enter: submit  Esc: cancel"}
+            ? NO_HUNKS_FOOTER_HINT
+            : FOOTER_HINT}
         </Text>
       </Box>
     </Box>

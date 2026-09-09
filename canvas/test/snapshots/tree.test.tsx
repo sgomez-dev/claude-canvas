@@ -128,3 +128,43 @@ test("tree is deterministic across renders", async () => {
   b.dispose();
   expect(second).toBe(first);
 });
+
+// tree was written after the wave that gave the other four views a
+// footer-wrap budget, so it never received one: at a narrow width its own
+// footer hint wraps onto a second line that CHROME_ROWS's flat "one line of
+// hint" assumption does not reserve, and the extra line pushes a row of
+// content out of the pane.
+test("tree reserves a row when its footer hint wraps at a narrow width", async () => {
+  const many: TreeNode[] = Array.from({ length: 30 }, (_, i) => ({
+    id: `n${i}`,
+    label: `node-${i}`,
+  }));
+
+  // Wide enough for the hint to fit on one line.
+  const wide = renderCanvas(
+    <TreeView nodes={many} title="T" budget={12} columns={80} focused onSubmit={() => {}} />,
+    { columns: 80, rows: 30 }
+  );
+  const wideFrame = await wide.settle();
+  wide.dispose();
+
+  // Narrow enough that the hint wraps. One fewer row is available for
+  // nodes, so the window must be one shorter -- and crucially the rendered
+  // height must not exceed the budget.
+  const narrow = renderCanvas(
+    <TreeView nodes={many} title="T" budget={12} columns={34} focused onSubmit={() => {}} />,
+    { columns: 34, rows: 30 }
+  );
+  const narrowFrame = await narrow.settle();
+  narrow.dispose();
+
+  const wideCount = Number(/1-(\d+) of 30/.exec(wideFrame)?.[1]);
+  const narrowCount = Number(/1-(\d+) of 30/.exec(narrowFrame)?.[1]);
+  expect(wideCount).toBeGreaterThan(0);
+  expect(narrowCount).toBeGreaterThan(0);
+  expect(narrowCount).toBeLessThan(wideCount);
+
+  // The whole point: the pane must not overflow its budget.
+  const lines = narrowFrame.split("\n").filter((l) => l.trim().length > 0).length;
+  expect(lines).toBeLessThanOrEqual(12);
+});

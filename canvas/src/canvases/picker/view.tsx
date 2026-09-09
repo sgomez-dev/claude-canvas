@@ -245,9 +245,13 @@ export function PickerView({
           {options.length > visibleCount
             ? `${windowStart + 1}-${windowStart + visibleOptions.length} of ${options.length}  `
             : ""}
-          {mode === "single"
-            ? "↑/↓: navigate  Enter: select  Esc: cancel"
-            : "↑/↓: navigate  Space: toggle  Enter: submit  Esc: cancel"}
+          {/* Rendered from the same constant the footer budget measures.
+              These used to be two separate literals -- the budget measured
+              one, the render printed the other -- so editing the visible
+              hint silently mismeasured how many rows it would occupy, and
+              the wrap reservation would be for a string no longer on
+              screen. One source of truth makes that drift impossible. */}
+          {footerHint}
         </Text>
       </Box>
     </Box>

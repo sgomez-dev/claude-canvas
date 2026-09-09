@@ -20,7 +20,7 @@ Four generic primitives, a composed canvas, and three domain demos:
 | `picker` | Choose one or more options from a list |
 | `form` | Fill in structured fields and submit them together |
 | `table` | Read tabular data, with a fixed header and scrolling body |
-| `image` | Look at a PNG in the pane, scaled to fit and rendered with half-block cells |
+| `image` | Look at a PNG in the pane: full resolution on kitty, iTerm2 and Sixel terminals, half-block cells everywhere else |
 | `diff` | Review a unified diff hunk by hunk, approving or rejecting each |
 | `dashboard` | Several of the above in one pane, at a glance |
 | `calendar` | Display events, or pick a meeting time from several calendars |

@@ -1,4 +1,9 @@
 import type { DecodedImage } from "./png";
+import { span, averageBox, DEFAULT_BACKGROUND, type RGB } from "./graphics/resample";
+
+// Re-exported because this module was where they lived first, and both the
+// image canvas and its validator import them from here.
+export { DEFAULT_BACKGROUND, type RGB };
 
 /**
  * One horizontal run of cells sharing a colour pair, so a row of 80
@@ -15,15 +20,6 @@ export interface HalfBlockRun {
   /** How many adjacent cells share this pair. */
   count: number;
 }
-
-export interface RGB {
-  r: number;
-  g: number;
-  b: number;
-}
-
-/** The colour transparent pixels are composited over. */
-export const DEFAULT_BACKGROUND: RGB = { r: 0, g: 0, b: 0 };
 
 function hex({ r, g, b }: RGB): string {
   return `#${((1 << 24) | (r << 16) | (g << 8) | b).toString(16).slice(1)}`;
@@ -58,48 +54,6 @@ export function fitToCells(
     rows: maxRows,
     columns: Math.max(1, Math.round((maxRows * 2 * imageWidth) / imageHeight)),
   };
-}
-
-/**
- * Averages the source pixels covering one cell of the target grid.
- *
- * Box-averaged rather than sampled: a nearest-neighbour downscale of a
- * screenshot drops entire rows of text, which is exactly the content this
- * tier exists to make legible. Alpha is composited over `background`,
- * because a terminal cannot tell us its own colour and a transparent pixel
- * has to resolve to something.
- */
-function averageBox(
-  img: DecodedImage,
-  x0: number,
-  x1: number,
-  y0: number,
-  y1: number,
-  background: RGB
-): RGB {
-  let r = 0;
-  let g = 0;
-  let b = 0;
-  let n = 0;
-  for (let y = y0; y < y1; y++) {
-    for (let x = x0; x < x1; x++) {
-      const o = (y * img.width + x) * 4;
-      const a = img.pixels[o + 3]! / 255;
-      r += img.pixels[o]! * a + background.r * (1 - a);
-      g += img.pixels[o + 1]! * a + background.g * (1 - a);
-      b += img.pixels[o + 2]! * a + background.b * (1 - a);
-      n++;
-    }
-  }
-  if (n === 0) return background;
-  return { r: Math.round(r / n), g: Math.round(g / n), b: Math.round(b / n) };
-}
-
-/** Maps a target index onto its source span, never empty. */
-function span(index: number, targetExtent: number, sourceExtent: number): [number, number] {
-  const start = Math.floor((index * sourceExtent) / targetExtent);
-  const end = Math.floor(((index + 1) * sourceExtent) / targetExtent);
-  return [start, Math.max(end, start + 1)];
 }
 
 /**

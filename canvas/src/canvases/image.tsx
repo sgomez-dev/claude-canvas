@@ -2,8 +2,12 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 import { Box, Text, useInput, useApp, useStdout } from "ink";
 import { useCanvasServer } from "../runtime/use-canvas-server";
 import { ImageView } from "./image/view";
+import { GraphicsImageView } from "./image/graphics-view";
 import { validateImage, type ImageSource } from "./image/validate";
 import { decodePng, type DecodedImage } from "./png";
+import { resolveGraphics } from "../host/graphics";
+import { resolveCellPixels } from "./graphics/sixel";
+import { usesProtocol } from "./graphics/paint";
 import type { ImageConfig } from "./image/types";
 
 export interface ImageProps {
@@ -35,12 +39,11 @@ export interface ImageProps {
  * file that turned out not to be a readable PNG -- and reports whichever it
  * has through the same single channel.
  *
- * Renders through the half-block tier for every terminal. Kitty, iTerm2 and
- * Sixel are not implemented yet; when they are, the choice belongs here,
- * because the shell is what already knows the environment. The resolved
- * tier is in `CANVAS_GRAPHICS`, put there by the CLI before rendering --
- * the canvas cannot detect it itself, since inside a tmux pane the outer
- * terminal's identity is erased.
+ * Picks the tier and therefore the view. `halfblocks` renders through Ink
+ * as styled text; kitty, iTerm2 and Sixel reserve rows and paint with a
+ * terminal protocol. The resolved tier comes from `CANVAS_GRAPHICS`, put
+ * there by the CLI before rendering -- the canvas cannot detect it itself,
+ * since inside a tmux pane the outer terminal's identity is erased.
  */
 export function Image({
   id,
@@ -58,10 +61,32 @@ export function Image({
     [config]
   );
 
-  // The decoded image, or the reason it could not be decoded. Both null
-  // while the read is in flight, which is the state the "Loading" frame
-  // below renders -- a canvas that painted an empty frame during the read
-  // would look like a canvas that had failed.
+  // The tier and the cell assumption, both of which can be rejected: a
+  // misspelled CANVAS_GRAPHICS or CANVAS_CELL_PIXELS throws rather than
+  // being ignored, because someone who set it meant something by it. Caught
+  // here so it reaches the same single error channel as a bad config
+  // instead of taking the canvas down mid-render with no message.
+  const environment = useMemo(() => {
+    try {
+      return {
+        tier: resolveGraphics(process.env),
+        cell: resolveCellPixels(process.env),
+        error: null as string | null,
+      };
+    } catch (e) {
+      return {
+        tier: "halfblocks" as const,
+        cell: { width: 8, height: 16 },
+        error: e instanceof Error ? e.message : String(e),
+      };
+    }
+  }, []);
+
+  // The decoded image AND the bytes it came from. kitty and iTerm2 send the
+  // PNG itself and let the terminal decode it, which for this repository's
+  // own screenshot is 2 MB rather than the 39 MB its RGBA would base64 to --
+  // so the original bytes are worth keeping, not just the pixels.
+  const [png, setPng] = useState<Uint8Array | null>(null);
   const [image, setImage] = useState<DecodedImage | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
 
@@ -82,6 +107,7 @@ export function Image({
     // remove this guard on the strength of no test covering it.
     let cancelled = false;
     setImage(null);
+    setPng(null);
     setLoadError(null);
     void (async () => {
       try {
@@ -90,7 +116,10 @@ export function Image({
             ? source.bytes
             : await Bun.file(source.path).bytes();
         const decoded = decodePng(bytes);
-        if (!cancelled) setImage(decoded);
+        if (!cancelled) {
+          setPng(bytes);
+          setImage(decoded);
+        }
       } catch (e) {
         // The message names the source, because "unsupported colour type 3
         // (palette)" is only actionable if you know which file it was.
@@ -104,7 +133,7 @@ export function Image({
     };
   }, [source]);
 
-  const problem = error ?? loadError;
+  const problem = error ?? environment.error ?? loadError;
 
   const submittedRef = useRef(false);
   const sentRef = useRef(false);
@@ -156,11 +185,26 @@ export function Image({
     );
   }
 
-  if (image === null) {
+  if (image === null || png === null) {
     return (
       <Box flexDirection="column" borderStyle="round" borderColor="cyan" paddingX={1}>
         <Text dimColor>{loadingLabel(source)}</Text>
       </Box>
+    );
+  }
+
+  if (usesProtocol(environment.tier)) {
+    return (
+      <GraphicsImageView
+        image={image}
+        png={png}
+        tier={environment.tier}
+        title={title}
+        background={background}
+        budget={stdout?.rows ?? 24}
+        terminalWidth={stdout?.columns ?? 80}
+        cell={environment.cell}
+      />
     );
   }
 

@@ -40,6 +40,10 @@ bun run ${CLAUDE_PLUGIN_ROOT}/dist/cli.js wait img-1
 | `title` | no | Heading. Costs one row, taken from the image rather than the pane. |
 | `background` | no | `#rrggbb` that transparent pixels resolve to. Defaults to black. |
 
+The footer names the source dimensions and, on a protocol tier, which
+protocol painted it -- when an image renders wrong, that is the first thing
+worth knowing.
+
 Give **exactly one** of `path` and `data`. Both set is rejected rather than
 one silently winning, because then the other's typo would be invisible.
 
@@ -51,19 +55,45 @@ format named, so you know what to convert. There is no JPEG, GIF or WebP
 support. Images above 16 megapixels are refused before anything is
 allocated.
 
-Rendered with **half-block cells**: `▀` painted with a foreground and a
-background colour puts two vertically stacked pixels in one character cell,
-so the image is box-averaged down to the pane and appears at roughly
-`columns × 2·rows` pixels. It is a real image, not ASCII art, and it works
-in every terminal that can do 24-bit colour -- including the default macOS
-Terminal.
+## Resolution depends on the terminal, and you do not have to care
 
-It is genuinely low resolution. Fine text in a screenshot will not be
-readable; a chart, a diagram, a UI layout or a visual diff will be.
+The tier is detected for you and the config is identical either way.
 
-Kitty, iTerm2 and Sixel protocols are **not implemented yet**. When they
-are, the same config will render at full resolution on terminals that
-support them, with no change to how you call this.
+| Tier | Terminals | What you get |
+|---|---|---|
+| `kitty` | kitty, Ghostty | Full resolution. The terminal decodes the PNG. |
+| `iterm2` | iTerm2 | Full resolution, via inline images. |
+| `sixel` | WezTerm, foot, Windows Terminal, xterm | Full resolution, 256 colours. |
+| `halfblocks` | everything else, including the default macOS Terminal | Roughly `columns × 2·rows` pixels. |
+
+`halfblocks` is the **baseline, not a failure**: `▀` painted with a
+foreground and a background colour puts two vertically stacked pixels in one
+character cell, so the image is box-averaged down to the pane. It is a real
+image and it works anywhere 24-bit colour does -- but it is genuinely low
+resolution. Fine text in a screenshot will not be readable there; a chart, a
+diagram, a UI layout or a visual diff will be.
+
+Inside tmux the escapes are wrapped in a DCS passthrough, which needs
+`allow-passthrough` on (tmux 3.3+):
+
+```bash
+tmux set -g allow-passthrough on
+```
+
+Without it a protocol tier shows nothing at all. `halfblocks` is unaffected,
+because it is ordinary text.
+
+Two overrides, for when detection is wrong:
+
+- `CANVAS_GRAPHICS=kitty|iterm2|sixel|halfblocks|none` forces the tier. Set
+  it to `halfblocks` if a protocol tier shows garbage.
+- `CANVAS_CELL_PIXELS=WxH` tells the Sixel encoder how many pixels a cell
+  is. It cannot be detected without interrogating the terminal, so it is
+  assumed to be 8x16 -- deliberately small, so an image under-fills its rows
+  rather than overflowing them and pushing the footer off screen. Set it if
+  your Sixel images look smaller than the space reserved for them.
+
+A misspelled value for either is reported as an error rather than ignored.
 
 ## Result
 

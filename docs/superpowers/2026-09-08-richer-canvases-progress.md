@@ -605,20 +605,119 @@ case, but a file near it would stall a canvas for a noticeable moment and
 make it briefly unable to answer a `ping` or a `close`. Not fixed, and it is
 what defeated the race test above.
 
-### Next: Kitty, then tmux passthrough, then Sixel last
+### Kitty, iTerm2, tmux passthrough and Sixel — ALL DONE
 
-The pipeline is now reachable end to end on the tier that works everywhere,
-which was the point of doing it before any protocol. Each remaining tier is
-a swap behind a working canvas rather than a leap of faith.
+Four encoders plus a paint layer, in `canvases/graphics/`: `kitty.ts`,
+`iterm2.ts`, `sixel.ts`, `passthrough.ts`, `paint.ts`, and `resample.ts`
+shared with the half-block renderer. 530 tests.
 
-Kitty next: a base64 payload, and Ghostty reports as kitty so one
-implementation covers both. Then tmux passthrough, which every protocol tier
-needs and half-blocks does not. **Sixel last**, unchanged reasoning: it is
-the only part that cannot be verified from here without `brew install
-libsixel` for `sixel2png` as an independent oracle.
+**Ruling 30: kitty and iTerm2 send PNG bytes, not pixels.** Both decode PNG
+themselves. The difference is not marginal: this repository's screenshot is
+a 2 MB file but 29 MB of RGBA, which base64 expands to 39 MB — a payload
+that would need ten thousand 4 KB escapes. So the shell keeps the original
+bytes alongside the decoded image rather than only the pixels.
 
-Open follow-ups, none blocking: `image` is not a dashboard region kind yet
-(adding one means a case in `dashboard/validate.ts` and one in
-`renderRegion`); the four primitives' inert `sentRef` reset; and the region
-footer hint that still says "Esc: cancel" when Escape closes the whole
-dashboard.
+**Ruling 31: `q=2` on every kitty escape.** Without it kitty writes an
+OK/error reply back on the tty, which arrives on the canvas's **stdin** and
+is handed to Ink's `useInput` as though the user had typed it. `C=1` for the
+same class of reason: an advancing cursor can scroll the pane out from
+under a frame Ink believes it has already drawn.
+
+**Ruling 32: only the image escape is passthrough-wrapped.** The cursor
+save, position and restore are ordinary CSI that tmux understands and should
+act on -- wrapping those would send them past tmux to the outer terminal and
+move the wrong cursor. Each image escape gets its own DCS rather than one
+wrapping the concatenation, so tmux never has to buffer a multi-megabyte
+sequence whole.
+
+**Ruling 33: the graphics view is borderless, and that is a correctness
+choice.** A protocol image is placed at an absolute cursor position, so the
+origin has to be computed. With a border and padding that origin is a pair
+of constants that go stale silently the moment the chrome changes; without
+them it is exactly "under the title, at column one", derived from the same
+prop that decides whether a title renders.
+
+**Ruling 34: the Sixel cell size is assumed small, 8x16.** Sixel places
+pixels rather than scaling into a cell box, so encoding needs to know how
+many pixels a cell is, and that cannot be known without interrogating the
+terminal -- the same reply-may-never-arrive problem `detectGraphics` refuses
+to take on. The asymmetry decides the guess: too small under-fills and
+leaves a gap, too large overflows and pushes the footer off screen. A gap is
+a blemish; an overflow is a bug. `CANVAS_CELL_PIXELS=WxH` overrides it.
+
+**Ruling 35: the repaint effect has no dependency array.** Ink redraws its
+whole frame on every commit, and for iTerm2 and Sixel that redraw erases an
+image drawn into the text grid. Painting only on change would leave a blank
+gap after any unrelated re-render. kitty is the opposite case -- its
+placements survive independently of the grid -- so kitty alone gets an
+`a=d,d=A` delete first, or repaints would stack.
+
+**Ruling 36: the test preload pins `CANVAS_GRAPHICS=halfblocks`.** The tier
+decides which *view* the image canvas mounts, and `detectGraphics` reads
+`TERM_PROGRAM`/`TERM` -- so without this pin the suite would behave
+differently for a developer on kitty or Ghostty than on Apple Terminal, with
+no production change. The fourth environment-dependent input pinned there,
+after TZ, colour and locale.
+
+### The oracle earned its keep: a real bug, invisible from inside
+
+`sixel2png` from libsixel (installed for this) decoded the encoder's output
+and the comparison was damning: **4 distinct colours** where the source had
+7029, mean per-channel error 7.52/255.
+
+The cause was in the median cut. Splitting at the pixel-weighted median puts
+everything on one side when a single colour holds more than half the box AND
+sorts last on the split channel -- which is the *common* case, not a corner
+one, because a screenshot is mostly one background tone. That empty side
+then abandoned the whole splitting loop rather than just that split, so the
+palette froze at a handful of entries.
+
+Reproduced before fixing: 7029 distinct colours in, palette of 4 out. After
+falling back to the index median: palette of 256, output 35 035 bytes rather
+than 4670, **mean per-channel error 1.21/255, correlation 0.9959 with the
+source, dimensions exact**. The residual is inherent -- Sixel quantises to
+256 registers and expresses each component as a 0-100 percentage, so
+255 → 100 → 255 cannot round-trip.
+
+A round trip through my own parser would have passed the whole time. The
+regression test is sabotage-checked: reverting the fix collapses the palette
+to 2 and it fails. The oracle test itself runs when libsixel is present and
+skips when it is not, so CI's green is carried by the structural tests.
+
+### Sabotage matrix, all caught
+
+Cursor not saved/restored (2 fail), kitty not deleting previous placements
+(1), passthrough not doubling ESCs (3), the image ignoring the title's row
+(1), the repaint pinned to `[]` (1). Plus the earlier half-block and image
+matrices.
+
+### Residual: three tiers cannot be seen from this machine
+
+Apple Terminal supports **none** of kitty, iTerm2 or Sixel, so nothing here
+was verified by looking at it. What was verified instead: every escape's
+bytes against the spec, Sixel's pixels against libsixel, and that the
+baseline tier emits no protocol escape at all -- the failure that would
+matter most, since a stray escape prints as garbage on the most common host.
+
+A third verification route was tried and does not exist: running `show image`
+with `CANVAS_GRAPHICS=sixel` and stdout redirected to a file, to inspect the
+bytes the canvas really writes. It produces 3958 bytes of **Ink's raw-mode
+error screen** instead -- `useInput` needs a TTY stdin, and redirecting
+stdout gives it neither. The harness's fake TTY stdin is what makes the tier
+tests possible at all, and it is the only place these bytes can be observed
+without a terminal that supports the protocol. Do not spend time on this
+again.
+
+Still worth someone's eyes on kitty, Ghostty, iTerm2 and WezTerm before
+these are trusted. In particular the Sixel cell-size assumption is a guess
+whose only symptom is a wrongly sized image, and `allow-passthrough` is not
+set by this project -- a tmux user without it sees nothing on a protocol
+tier, which is documented in the skill but not detected.
+
+### Next
+
+Nothing in the image pipeline. The open follow-ups are unchanged and none
+block: `image` is not a dashboard region kind; the four primitives carry an
+inert `sentRef` reset; the dashboard region footer hint still says "Esc:
+cancel" when Escape closes the whole dashboard; and the in-flight read guard
+in `image.tsx` remains correct but untestable from here.

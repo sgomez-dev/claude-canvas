@@ -28878,24 +28878,11 @@ var init_dashboard = __esm(async () => {
   jsx_dev_runtime23 = __toESM(require_jsx_dev_runtime(), 1);
 });
 
-// canvas/src/canvases/halfblocks.ts
-function hex({ r, g, b }) {
-  return `#${(1 << 24 | r << 16 | g << 8 | b).toString(16).slice(1)}`;
-}
-function fitToCells(imageWidth, imageHeight, maxColumns, maxRows) {
-  if (imageWidth <= 0 || imageHeight <= 0 || maxColumns <= 0 || maxRows <= 0) {
-    return { columns: 1, rows: 1 };
-  }
-  const byWidth = {
-    columns: maxColumns,
-    rows: Math.max(1, Math.round(maxColumns * imageHeight / (imageWidth * 2)))
-  };
-  if (byWidth.rows <= maxRows)
-    return byWidth;
-  return {
-    rows: maxRows,
-    columns: Math.max(1, Math.round(maxRows * 2 * imageWidth / imageHeight))
-  };
+// canvas/src/canvases/graphics/resample.ts
+function span(index, targetExtent, sourceExtent) {
+  const start = Math.floor(index * sourceExtent / targetExtent);
+  const end = Math.floor((index + 1) * sourceExtent / targetExtent);
+  return [start, Math.max(end, start + 1)];
 }
 function averageBox(img, x0, x1, y0, y1, background) {
   let r = 0;
@@ -28916,10 +28903,44 @@ function averageBox(img, x0, x1, y0, y1, background) {
     return background;
   return { r: Math.round(r / n), g: Math.round(g / n), b: Math.round(b / n) };
 }
-function span(index, targetExtent, sourceExtent) {
-  const start = Math.floor(index * sourceExtent / targetExtent);
-  const end = Math.floor((index + 1) * sourceExtent / targetExtent);
-  return [start, Math.max(end, start + 1)];
+function resampleRGB(img, width, height, background = DEFAULT_BACKGROUND) {
+  const out = new Uint8Array(width * height * 3);
+  for (let y = 0;y < height; y++) {
+    const [y0, y1] = span(y, height, img.height);
+    for (let x = 0;x < width; x++) {
+      const [x0, x1] = span(x, width, img.width);
+      const c = averageBox(img, x0, x1, y0, y1, background);
+      const o = (y * width + x) * 3;
+      out[o] = c.r;
+      out[o + 1] = c.g;
+      out[o + 2] = c.b;
+    }
+  }
+  return out;
+}
+var DEFAULT_BACKGROUND;
+var init_resample = __esm(() => {
+  DEFAULT_BACKGROUND = { r: 0, g: 0, b: 0 };
+});
+
+// canvas/src/canvases/halfblocks.ts
+function hex({ r, g, b }) {
+  return `#${(1 << 24 | r << 16 | g << 8 | b).toString(16).slice(1)}`;
+}
+function fitToCells(imageWidth, imageHeight, maxColumns, maxRows) {
+  if (imageWidth <= 0 || imageHeight <= 0 || maxColumns <= 0 || maxRows <= 0) {
+    return { columns: 1, rows: 1 };
+  }
+  const byWidth = {
+    columns: maxColumns,
+    rows: Math.max(1, Math.round(maxColumns * imageHeight / (imageWidth * 2)))
+  };
+  if (byWidth.rows <= maxRows)
+    return byWidth;
+  return {
+    rows: maxRows,
+    columns: Math.max(1, Math.round(maxRows * 2 * imageWidth / imageHeight))
+  };
 }
 function toHalfBlocks(img, columns, rows, background = DEFAULT_BACKGROUND) {
   const out = [];
@@ -28942,9 +28963,9 @@ function toHalfBlocks(img, columns, rows, background = DEFAULT_BACKGROUND) {
   }
   return out;
 }
-var DEFAULT_BACKGROUND, HALF_BLOCK = "\u2580";
+var HALF_BLOCK = "\u2580";
 var init_halfblocks = __esm(() => {
-  DEFAULT_BACKGROUND = { r: 0, g: 0, b: 0 };
+  init_resample();
 });
 
 // canvas/src/canvases/halfblock-view.tsx
@@ -29021,6 +29042,341 @@ var init_view6 = __esm(async () => {
     init_halfblock_view()
   ]);
   jsx_dev_runtime25 = __toESM(require_jsx_dev_runtime(), 1);
+});
+
+// canvas/src/canvases/graphics/kitty.ts
+function encodeKitty(png, placement) {
+  const payload = Buffer.from(png).toString("base64");
+  const chunks = [];
+  for (let at = 0;at < payload.length; at += MAX_CHUNK_BASE64) {
+    chunks.push(payload.slice(at, at + MAX_CHUNK_BASE64));
+  }
+  if (chunks.length === 0)
+    chunks.push("");
+  const control = `a=T,f=100,q=2,C=1,c=${placement.columns},r=${placement.rows}`;
+  return chunks.map((chunk, i) => {
+    const last = i === chunks.length - 1;
+    const head = i === 0 ? `${control},m=${last ? 0 : 1}` : `m=${last ? 0 : 1}`;
+    return `\x1B_G${head};${chunk}\x1B\\`;
+  });
+}
+var MAX_CHUNK_BASE64 = 4096;
+
+// canvas/src/canvases/graphics/iterm2.ts
+function encodeITerm2(png, placement) {
+  const payload = Buffer.from(png).toString("base64");
+  const args = [
+    "inline=1",
+    `size=${png.byteLength}`,
+    `width=${placement.columns}`,
+    `height=${placement.rows}`,
+    "preserveAspectRatio=1"
+  ].join(";");
+  return [`\x1B]1337;File=${args}:${payload}\x07`];
+}
+
+// canvas/src/canvases/graphics/sixel.ts
+function resolveCellPixels(env) {
+  const raw = env.CANVAS_CELL_PIXELS;
+  if (raw === undefined || raw.length === 0)
+    return CELL_PIXELS;
+  const m = /^(\d+)x(\d+)$/.exec(raw);
+  if (m === null) {
+    throw new Error(`Invalid CANVAS_CELL_PIXELS: ${JSON.stringify(raw)}. Expected WIDTHxHEIGHT, e.g. "10x20".`);
+  }
+  const width = Number(m[1]);
+  const height = Number(m[2]);
+  if (width < 1 || height < 1) {
+    throw new Error(`Invalid CANVAS_CELL_PIXELS: ${JSON.stringify(raw)}. Both must be at least 1.`);
+  }
+  return { width, height };
+}
+function boxRange(box) {
+  let lo = [255, 255, 255];
+  let hi = [0, 0, 0];
+  for (const key of box.keys) {
+    const c = [key >> 16 & 255, key >> 8 & 255, key & 255];
+    for (let i = 0;i < 3; i++) {
+      if (c[i] < lo[i])
+        lo[i] = c[i];
+      if (c[i] > hi[i])
+        hi[i] = c[i];
+    }
+  }
+  let channel = 0;
+  let extent = hi[0] - lo[0];
+  for (const i of [1, 2]) {
+    const e = hi[i] - lo[i];
+    if (e > extent) {
+      extent = e;
+      channel = i;
+    }
+  }
+  return { channel, extent };
+}
+function medianCut(rgb, maxColours = MAX_COLOURS) {
+  const histogram = new Map;
+  for (let i = 0;i < rgb.length; i += 3) {
+    const key = rgb[i] << 16 | rgb[i + 1] << 8 | rgb[i + 2];
+    histogram.set(key, (histogram.get(key) ?? 0) + 1);
+  }
+  const keys = [...histogram.keys()];
+  const counts = keys.map((k) => histogram.get(k));
+  let boxes = [{ keys, counts, total: counts.reduce((a, b) => a + b, 0) }];
+  while (boxes.length < maxColours) {
+    let pick = -1;
+    let best = -1;
+    for (let i = 0;i < boxes.length; i++) {
+      const b = boxes[i];
+      if (b.keys.length < 2)
+        continue;
+      if (b.total > best) {
+        best = b.total;
+        pick = i;
+      }
+    }
+    if (pick < 0)
+      break;
+    const box = boxes[pick];
+    const { channel } = boxRange(box);
+    const shift = channel === 0 ? 16 : channel === 1 ? 8 : 0;
+    const order = box.keys.map((k, i) => ({ k, c: box.counts[i] })).sort((a, b) => (a.k >> shift & 255) - (b.k >> shift & 255));
+    let half = box.total / 2;
+    let at = 0;
+    for (;at < order.length - 1; at++) {
+      half -= order[at].c;
+      if (half <= 0)
+        break;
+    }
+    if (at >= order.length - 1)
+      at = Math.floor(order.length / 2) - 1;
+    const left = order.slice(0, at + 1);
+    const right = order.slice(at + 1);
+    const mk = (arr) => ({
+      keys: arr.map((e) => e.k),
+      counts: arr.map((e) => e.c),
+      total: arr.reduce((a, e) => a + e.c, 0)
+    });
+    boxes = [...boxes.slice(0, pick), mk(left), mk(right), ...boxes.slice(pick + 1)];
+  }
+  return boxes.map((box) => {
+    let r = 0;
+    let g = 0;
+    let b = 0;
+    for (let i = 0;i < box.keys.length; i++) {
+      const k = box.keys[i];
+      const w = box.counts[i];
+      r += (k >> 16 & 255) * w;
+      g += (k >> 8 & 255) * w;
+      b += (k & 255) * w;
+    }
+    return {
+      r: Math.round(r / box.total),
+      g: Math.round(g / box.total),
+      b: Math.round(b / box.total)
+    };
+  });
+}
+function nearestIndexes(rgb, palette) {
+  const cube = new Uint8Array(32 * 32 * 32);
+  for (let r = 0;r < 32; r++) {
+    for (let g = 0;g < 32; g++) {
+      for (let b = 0;b < 32; b++) {
+        const cr = r * 8 + 4;
+        const cg = g * 8 + 4;
+        const cb = b * 8 + 4;
+        let best = 0;
+        let bestD = Infinity;
+        for (let i = 0;i < palette.length; i++) {
+          const p = palette[i];
+          const d = (p.r - cr) ** 2 + (p.g - cg) ** 2 + (p.b - cb) ** 2;
+          if (d < bestD) {
+            bestD = d;
+            best = i;
+          }
+        }
+        cube[r << 10 | g << 5 | b] = best;
+      }
+    }
+  }
+  const out = new Uint8Array(rgb.length / 3);
+  for (let i = 0, o = 0;i < rgb.length; i += 3, o++) {
+    out[o] = cube[rgb[i] >> 3 << 10 | rgb[i + 1] >> 3 << 5 | rgb[i + 2] >> 3];
+  }
+  return out;
+}
+function rle(masks) {
+  let out = "";
+  let i = 0;
+  while (i < masks.length) {
+    const value = masks[i];
+    let run = 1;
+    while (i + run < masks.length && masks[i + run] === value)
+      run++;
+    const char = String.fromCharCode(63 + value);
+    if (run >= 4)
+      out += `!${run}${char}`;
+    else
+      out += char.repeat(run);
+    i += run;
+  }
+  return out;
+}
+function encodeSixel(img, placement, background = DEFAULT_BACKGROUND, cell = CELL_PIXELS, maxColours = MAX_COLOURS) {
+  const width = Math.max(1, placement.columns * cell.width);
+  const height = Math.max(1, placement.rows * cell.height);
+  const rgb = resampleRGB(img, width, height, background);
+  const palette = medianCut(rgb, maxColours);
+  const indexes = nearestIndexes(rgb, palette);
+  const parts = [];
+  parts.push("\x1BP0;1;0q");
+  parts.push(`"1;1;${width};${height}`);
+  for (let i = 0;i < palette.length; i++) {
+    const p = palette[i];
+    const pc = (v) => Math.round(v * 100 / 255);
+    parts.push(`#${i};2;${pc(p.r)};${pc(p.g)};${pc(p.b)}`);
+  }
+  const bands = Math.ceil(height / 6);
+  const masks = new Map;
+  for (let band = 0;band < bands; band++) {
+    masks.clear();
+    const y0 = band * 6;
+    const rowsInBand = Math.min(6, height - y0);
+    for (let dy = 0;dy < rowsInBand; dy++) {
+      const bit = 1 << dy;
+      const rowStart = (y0 + dy) * width;
+      for (let x = 0;x < width; x++) {
+        const idx = indexes[rowStart + x];
+        let m = masks.get(idx);
+        if (m === undefined) {
+          m = new Uint8Array(width);
+          masks.set(idx, m);
+        }
+        m[x] = m[x] | bit;
+      }
+    }
+    const present = [...masks.keys()].sort((a, b) => a - b);
+    present.forEach((idx, i) => {
+      parts.push(`#${idx}${rle(masks.get(idx))}`);
+      if (i < present.length - 1)
+        parts.push("$");
+    });
+    if (band < bands - 1)
+      parts.push("-");
+  }
+  parts.push("\x1B\\");
+  return [parts.join("")];
+}
+var MAX_COLOURS = 256, CELL_PIXELS;
+var init_sixel = __esm(() => {
+  init_resample();
+  CELL_PIXELS = { width: 8, height: 16 };
+});
+
+// canvas/src/canvases/graphics/passthrough.ts
+function wrapPassthrough(escape) {
+  return `\x1BPtmux;${escape.replaceAll("\x1B", "\x1B\x1B")}\x1B\\`;
+}
+function needsPassthrough(env) {
+  return env.TMUX !== undefined && env.TMUX.length > 0;
+}
+function forTerminal(escapes, env) {
+  const wrap = needsPassthrough(env);
+  return escapes.map((e) => wrap ? wrapPassthrough(e) : e).join("");
+}
+
+// canvas/src/canvases/graphics/paint.ts
+function paintBytes(req) {
+  const escapes = imageEscapes(req);
+  if (escapes.length === 0)
+    return "";
+  const clear = req.tier === "kitty" ? forTerminal([KITTY_CLEAR], req.env) : "";
+  const position = `\x1B[${req.originRow};${req.originColumn}H`;
+  return `\x1B7${clear}${position}${forTerminal(escapes, req.env)}\x1B8`;
+}
+function imageEscapes(req) {
+  const placement = { columns: req.columns, rows: req.rows };
+  switch (req.tier) {
+    case "kitty":
+      return encodeKitty(req.png, placement);
+    case "iterm2":
+      return encodeITerm2(req.png, placement);
+    case "sixel":
+      return encodeSixel(req.image, placement, req.background ?? DEFAULT_BACKGROUND, req.cell ?? CELL_PIXELS);
+    case "halfblocks":
+    case "none":
+      return [];
+  }
+}
+function usesProtocol(tier) {
+  return tier === "kitty" || tier === "iterm2" || tier === "sixel";
+}
+var KITTY_CLEAR = "\x1B_Ga=d,d=A,q=2\x1B\\";
+var init_paint = __esm(() => {
+  init_sixel();
+  init_resample();
+});
+
+// canvas/src/canvases/image/graphics-view.tsx
+function GraphicsImageView({
+  image,
+  png,
+  tier,
+  title,
+  background,
+  budget,
+  terminalWidth,
+  cell
+}) {
+  const { stdout } = use_stdout_default();
+  const footerText = `${image.width}\xD7${image.height}  ${tier}  ${FOOTER_HINT6}`;
+  const footerOverflow = Math.max(0, wrappedLineCount(footerText, terminalWidth) - 1);
+  const titleRows = title !== undefined ? 1 : 0;
+  const availableRows = Math.max(1, budget - titleRows - 1 - footerOverflow);
+  const fit = fitToCells(image.width, image.height, terminalWidth, availableRows);
+  const originRow = titleRows + 1;
+  import_react46.useEffect(() => {
+    const bytes = paintBytes({
+      tier,
+      png,
+      image,
+      columns: fit.columns,
+      rows: fit.rows,
+      originRow,
+      originColumn: 1,
+      background,
+      cell,
+      env: process.env
+    });
+    if (bytes.length > 0)
+      stdout?.write(bytes);
+  });
+  return /* @__PURE__ */ jsx_dev_runtime26.jsxDEV(Box_default, {
+    flexDirection: "column",
+    children: [
+      title !== undefined && /* @__PURE__ */ jsx_dev_runtime26.jsxDEV(Text, {
+        bold: true,
+        color: "cyan",
+        children: title
+      }, undefined, false, undefined, this),
+      Array.from({ length: fit.rows }, (_, i) => /* @__PURE__ */ jsx_dev_runtime26.jsxDEV(Text, {
+        children: " "
+      }, i, false, undefined, this)),
+      /* @__PURE__ */ jsx_dev_runtime26.jsxDEV(Text, {
+        dimColor: true,
+        children: footerText
+      }, undefined, false, undefined, this)
+    ]
+  }, undefined, true, undefined, this);
+}
+var import_react46, jsx_dev_runtime26, FOOTER_HINT6 = "Esc: close";
+var init_graphics_view = __esm(async () => {
+  init_halfblocks();
+  init_paint();
+  init_width();
+  await init_build2();
+  import_react46 = __toESM(require_react(), 1);
+  jsx_dev_runtime26 = __toESM(require_jsx_dev_runtime(), 1);
 });
 
 // canvas/src/canvases/image/validate.ts
@@ -29249,22 +29605,41 @@ function Image({
 }) {
   const { exit } = use_app_default();
   const { stdout } = use_stdout_default();
-  const [config, setConfig] = import_react46.useState(initialConfig);
-  const { source, title, background, error } = import_react46.useMemo(() => validateImage(config), [config]);
-  const [image, setImage] = import_react46.useState(null);
-  const [loadError, setLoadError] = import_react46.useState(null);
-  import_react46.useEffect(() => {
+  const [config, setConfig] = import_react47.useState(initialConfig);
+  const { source, title, background, error } = import_react47.useMemo(() => validateImage(config), [config]);
+  const environment = import_react47.useMemo(() => {
+    try {
+      return {
+        tier: resolveGraphics(process.env),
+        cell: resolveCellPixels(process.env),
+        error: null
+      };
+    } catch (e) {
+      return {
+        tier: "halfblocks",
+        cell: { width: 8, height: 16 },
+        error: e instanceof Error ? e.message : String(e)
+      };
+    }
+  }, []);
+  const [png, setPng] = import_react47.useState(null);
+  const [image, setImage] = import_react47.useState(null);
+  const [loadError, setLoadError] = import_react47.useState(null);
+  import_react47.useEffect(() => {
     if (source === null)
       return;
     let cancelled = false;
     setImage(null);
+    setPng(null);
     setLoadError(null);
     (async () => {
       try {
         const bytes = source.kind === "data" ? source.bytes : await Bun.file(source.path).bytes();
         const decoded = decodePng(bytes);
-        if (!cancelled)
+        if (!cancelled) {
+          setPng(bytes);
           setImage(decoded);
+        }
       } catch (e) {
         const where = source.kind === "data" ? "inline data" : source.path;
         const why = e instanceof Error ? e.message : String(e);
@@ -29276,9 +29651,9 @@ function Image({
       cancelled = true;
     };
   }, [source]);
-  const problem = error ?? loadError;
-  const submittedRef = import_react46.useRef(false);
-  const sentRef = import_react46.useRef(false);
+  const problem = error ?? environment.error ?? loadError;
+  const submittedRef = import_react47.useRef(false);
+  const sentRef = import_react47.useRef(false);
   const ipc = useCanvasServer({
     id,
     kind: "image",
@@ -29289,7 +29664,7 @@ function Image({
       setConfig(next);
     }
   });
-  import_react46.useEffect(() => {
+  import_react47.useEffect(() => {
     if (problem !== null && ipc.isConnected && !sentRef.current) {
       sentRef.current = true;
       ipc.sendError(problem);
@@ -29305,30 +29680,42 @@ function Image({
     exit();
   });
   if (problem !== null) {
-    return /* @__PURE__ */ jsx_dev_runtime26.jsxDEV(Box_default, {
+    return /* @__PURE__ */ jsx_dev_runtime27.jsxDEV(Box_default, {
       flexDirection: "column",
       borderStyle: "round",
       borderColor: "red",
       padding: 1,
-      children: /* @__PURE__ */ jsx_dev_runtime26.jsxDEV(Text, {
+      children: /* @__PURE__ */ jsx_dev_runtime27.jsxDEV(Text, {
         color: "red",
         children: problem
       }, undefined, false, undefined, this)
     }, undefined, false, undefined, this);
   }
-  if (image === null) {
-    return /* @__PURE__ */ jsx_dev_runtime26.jsxDEV(Box_default, {
+  if (image === null || png === null) {
+    return /* @__PURE__ */ jsx_dev_runtime27.jsxDEV(Box_default, {
       flexDirection: "column",
       borderStyle: "round",
       borderColor: "cyan",
       paddingX: 1,
-      children: /* @__PURE__ */ jsx_dev_runtime26.jsxDEV(Text, {
+      children: /* @__PURE__ */ jsx_dev_runtime27.jsxDEV(Text, {
         dimColor: true,
         children: loadingLabel(source)
       }, undefined, false, undefined, this)
     }, undefined, false, undefined, this);
   }
-  return /* @__PURE__ */ jsx_dev_runtime26.jsxDEV(ImageView, {
+  if (usesProtocol(environment.tier)) {
+    return /* @__PURE__ */ jsx_dev_runtime27.jsxDEV(GraphicsImageView, {
+      image,
+      png,
+      tier: environment.tier,
+      title,
+      background,
+      budget: stdout?.rows ?? 24,
+      terminalWidth: stdout?.columns ?? 80,
+      cell: environment.cell
+    }, undefined, false, undefined, this);
+  }
+  return /* @__PURE__ */ jsx_dev_runtime27.jsxDEV(ImageView, {
     image,
     title,
     background,
@@ -29341,17 +29728,21 @@ function loadingLabel(source) {
     return "Loading\u2026";
   return source.kind === "data" ? "Decoding\u2026" : `Loading ${source.path}\u2026`;
 }
-var import_react46, jsx_dev_runtime26;
+var import_react47, jsx_dev_runtime27;
 var init_image = __esm(async () => {
   init_validate5();
   init_png();
+  init_graphics();
+  init_sixel();
+  init_paint();
   await __promiseAll([
     init_build2(),
     init_use_canvas_server(),
-    init_view6()
+    init_view6(),
+    init_graphics_view()
   ]);
-  import_react46 = __toESM(require_react(), 1);
-  jsx_dev_runtime26 = __toESM(require_jsx_dev_runtime(), 1);
+  import_react47 = __toESM(require_react(), 1);
+  jsx_dev_runtime27 = __toESM(require_jsx_dev_runtime(), 1);
 });
 
 // canvas/src/canvases/index.tsx
@@ -29403,7 +29794,7 @@ async function renderCanvas(kind, id, config, options) {
   }
 }
 async function renderCalendar(id, config, options) {
-  const { waitUntilExit } = render_default(/* @__PURE__ */ jsx_dev_runtime27.jsxDEV(Calendar, {
+  const { waitUntilExit } = render_default(/* @__PURE__ */ jsx_dev_runtime28.jsxDEV(Calendar, {
     id,
     config,
     enabled: options?.enabled ?? false,
@@ -29414,7 +29805,7 @@ async function renderCalendar(id, config, options) {
   await waitUntilExit();
 }
 async function renderDocument(id, config, options) {
-  const { waitUntilExit } = render_default(/* @__PURE__ */ jsx_dev_runtime27.jsxDEV(Document, {
+  const { waitUntilExit } = render_default(/* @__PURE__ */ jsx_dev_runtime28.jsxDEV(Document, {
     id,
     config,
     enabled: options?.enabled ?? false,
@@ -29425,7 +29816,7 @@ async function renderDocument(id, config, options) {
   await waitUntilExit();
 }
 async function renderFlight(id, config, options) {
-  const { waitUntilExit } = render_default(/* @__PURE__ */ jsx_dev_runtime27.jsxDEV(FlightCanvas, {
+  const { waitUntilExit } = render_default(/* @__PURE__ */ jsx_dev_runtime28.jsxDEV(FlightCanvas, {
     id,
     config,
     enabled: options?.enabled ?? false,
@@ -29436,7 +29827,7 @@ async function renderFlight(id, config, options) {
   await waitUntilExit();
 }
 async function renderDiff(id, config, options) {
-  const { waitUntilExit } = render_default(/* @__PURE__ */ jsx_dev_runtime27.jsxDEV(Diff, {
+  const { waitUntilExit } = render_default(/* @__PURE__ */ jsx_dev_runtime28.jsxDEV(Diff, {
     id,
     config,
     enabled: options?.enabled ?? false,
@@ -29447,7 +29838,7 @@ async function renderDiff(id, config, options) {
   await waitUntilExit();
 }
 async function renderPicker(id, config, options) {
-  const { waitUntilExit } = render_default(/* @__PURE__ */ jsx_dev_runtime27.jsxDEV(Picker, {
+  const { waitUntilExit } = render_default(/* @__PURE__ */ jsx_dev_runtime28.jsxDEV(Picker, {
     id,
     config,
     enabled: options?.enabled ?? false,
@@ -29458,7 +29849,7 @@ async function renderPicker(id, config, options) {
   await waitUntilExit();
 }
 async function renderForm(id, config, options) {
-  const { waitUntilExit } = render_default(/* @__PURE__ */ jsx_dev_runtime27.jsxDEV(Form, {
+  const { waitUntilExit } = render_default(/* @__PURE__ */ jsx_dev_runtime28.jsxDEV(Form, {
     id,
     config,
     enabled: options?.enabled ?? false,
@@ -29469,7 +29860,7 @@ async function renderForm(id, config, options) {
   await waitUntilExit();
 }
 async function renderTable(id, config, options) {
-  const { waitUntilExit } = render_default(/* @__PURE__ */ jsx_dev_runtime27.jsxDEV(Table, {
+  const { waitUntilExit } = render_default(/* @__PURE__ */ jsx_dev_runtime28.jsxDEV(Table, {
     id,
     config,
     enabled: options?.enabled ?? false,
@@ -29480,7 +29871,7 @@ async function renderTable(id, config, options) {
   await waitUntilExit();
 }
 async function renderImage(id, config, options) {
-  const { waitUntilExit } = render_default(/* @__PURE__ */ jsx_dev_runtime27.jsxDEV(Image, {
+  const { waitUntilExit } = render_default(/* @__PURE__ */ jsx_dev_runtime28.jsxDEV(Image, {
     id,
     config,
     enabled: options?.enabled ?? false,
@@ -29491,7 +29882,7 @@ async function renderImage(id, config, options) {
   await waitUntilExit();
 }
 async function renderDashboard(id, config, options) {
-  const { waitUntilExit } = render_default(/* @__PURE__ */ jsx_dev_runtime27.jsxDEV(Dashboard, {
+  const { waitUntilExit } = render_default(/* @__PURE__ */ jsx_dev_runtime28.jsxDEV(Dashboard, {
     id,
     config,
     enabled: options?.enabled ?? false,
@@ -29501,7 +29892,7 @@ async function renderDashboard(id, config, options) {
   });
   await waitUntilExit();
 }
-var jsx_dev_runtime27;
+var jsx_dev_runtime28;
 var init_canvases = __esm(async () => {
   init_paths();
   await __promiseAll([
@@ -29516,7 +29907,7 @@ var init_canvases = __esm(async () => {
     init_dashboard(),
     init_image()
   ]);
-  jsx_dev_runtime27 = __toESM(require_jsx_dev_runtime(), 1);
+  jsx_dev_runtime28 = __toESM(require_jsx_dev_runtime(), 1);
 });
 
 // node_modules/.bun/commander@14.0.3/node_modules/commander/index.js

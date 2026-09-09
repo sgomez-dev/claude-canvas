@@ -42,6 +42,20 @@ process.env.TZ = "UTC";
 // it is what the existing baselines were captured under.
 process.env.CANVAS_LOCALE = "en-GB";
 
+// The image tier is the fourth environment-dependent input, and it decides
+// which VIEW the image canvas renders: `halfblocks` paints through Ink as
+// styled text, while kitty, iTerm2 and Sixel reserve blank rows and paint
+// with a terminal protocol. detectGraphics reads TERM_PROGRAM and TERM, so
+// without this pin the suite would behave differently for a developer
+// running kitty or Ghostty than for one running Apple Terminal -- the image
+// snapshots would capture reserved blank rows instead of half-blocks, and
+// nothing in the production code would have changed.
+//
+// Pinned to the baseline tier because that is the one whose output is
+// ordinary text and therefore snapshottable. The tests that exercise a
+// protocol tier set CANVAS_GRAPHICS themselves, per test.
+process.env.CANVAS_GRAPHICS = "halfblocks";
+
 // Without this, the whole test suite reads, writes, and PRUNES the real
 // machine-global canvas registry directory (%LOCALAPPDATA%\claude-canvas on
 // Windows, ~/Library/Application Support/claude-canvas on macOS, etc.) --

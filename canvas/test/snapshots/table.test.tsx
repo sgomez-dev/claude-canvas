@@ -32,6 +32,46 @@ test("table renders columns, auto-sized and truncated cells", async () => {
   r.dispose();
 });
 
+// Regression tests for Fix 2: table/validate.ts used to accept a `rows`
+// array containing `null`, a non-object, or a cell holding a nested object
+// without rejecting it -- the rendering code then threw when it hit one of
+// these (`row[col.key]` on `null` throws; an object cell reaches
+// `<Text>{cell}</Text>` and throws React's "Objects are not valid as a
+// React child"). Render must succeed and show a validation error, not
+// throw.
+test("a null row produces a validation error instead of crashing the render", async () => {
+  const r = renderCanvas(
+    <Table
+      id="table-6"
+      config={{ ...CONFIG, rows: [{ id: "1", name: "ok", detail: "fine" }, null as never] }}
+      enabled={false}
+    />,
+    { columns: 70, rows: 12 }
+  );
+  const frame = await r.settle();
+  expect(frame).toContain("rows[1]");
+  expect(frame).toContain("not an object");
+  r.dispose();
+});
+
+test("an object-valued cell produces a validation error instead of crashing the render", async () => {
+  const r = renderCanvas(
+    <Table
+      id="table-7"
+      config={{
+        ...CONFIG,
+        rows: [{ id: "1", name: "ok", detail: { nested: true } as never }],
+      }}
+      enabled={false}
+    />,
+    { columns: 70, rows: 12 }
+  );
+  const frame = await r.settle();
+  expect(frame).toContain("detail");
+  expect(frame).toContain("must be a string");
+  r.dispose();
+});
+
 test("table renders an explicit no-data state rather than a blank frame", async () => {
   const r = renderCanvas(
     <Table id="table-2" config={{ ...CONFIG, rows: [] }} enabled={false} />,
@@ -92,6 +132,38 @@ const WIDE_CONFIG: TableConfig = {
     { name: CJK + CJK, note: "truncated CJK" },
   ],
 };
+
+// Regression test for Fix 3's footer-wrap half: at a narrow terminal width
+// the footer hint text wraps onto a second line, which the row-budget
+// math's flat "one line of hint text" assumption didn't account for.
+// Verified at the exact dimensions the independent review reproduced this
+// at. Uses columns whose widths comfortably fit a 30-column terminal (fixed
+// widths well under the 26-column inner width) so the only thing under
+// test is the footer wrap -- CONFIG's own auto-width `name` column wrapping
+// its cell content at this narrow a terminal is a separate, pre-existing
+// horizontal-fit concern outside Fix 3's row-budget scope.
+const NARROW_FIT_CONFIG: TableConfig = {
+  title: "Narrow",
+  columns: [
+    { key: "a", label: "A", width: 5 },
+    { key: "b", label: "B", width: 8 },
+  ],
+  rows: [
+    { a: "1", b: "ok" },
+    { a: "2", b: "ok" },
+  ],
+};
+
+test("at a narrow terminal width, the frame never exceeds the terminal's row count", async () => {
+  const rows = 12;
+  const r = renderCanvas(<Table id="table-8" config={NARROW_FIT_CONFIG} enabled={false} />, {
+    columns: 30,
+    rows,
+  });
+  const frame = await r.settle();
+  expect(frame.split("\n").length).toBeLessThanOrEqual(rows);
+  r.dispose();
+});
 
 test("table aligns cells of mixed display width", async () => {
   const r = renderCanvas(<Table id="table-5" config={WIDE_CONFIG} enabled={false} />, {

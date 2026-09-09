@@ -1,6 +1,6 @@
 import React, { useMemo, useState } from "react";
 import { Box, Text, useInput } from "ink";
-import { displayWidth, padToWidth, truncateToWidth } from "../width";
+import { displayWidth, padToWidth, truncateToWidth, wrappedLineCount } from "../width";
 import type { TableColumn } from "./types";
 
 export interface TableViewProps {
@@ -9,6 +9,14 @@ export interface TableViewProps {
   title?: string;
   /** Total rows this view may paint into; it subtracts its own chrome. */
   budget: number;
+  /**
+   * Terminal width, for estimating whether the footer hint wraps at a
+   * narrow width. Named `terminalWidth` rather than `columns` because that
+   * name is already taken by the table's own column definitions above.
+   * Optional and defaults to 80 (Ink's own stdout default) so a composing
+   * canvas without a meaningful per-region width doesn't have to pass one.
+   */
+  terminalWidth?: number;
   focused: boolean;
 }
 
@@ -16,6 +24,10 @@ const MAX_AUTO_WIDTH = 40;
 // Rows this component spends on chrome rather than data: two border rows,
 // the title, the column header, a blank line, and the footer hint.
 const HEADER_OVERHEAD_ROWS = 6;
+// Horizontal chrome the outer box spends: one column of border on each side
+// plus one column of paddingX on each side.
+const HORIZONTAL_CHROME = 4;
+const FOOTER_HINT = "↑/↓/PgUp/PgDn: scroll  Esc: close";
 
 function computeWidth(col: TableColumn, rows: Array<Record<string, string>>): number {
   if (col.width !== undefined) return col.width;
@@ -59,12 +71,28 @@ export function TableView({
   rows,
   title,
   budget,
+  terminalWidth = 80,
   focused,
 }: TableViewProps): React.JSX.Element {
   const widths = useMemo(() => columns.map((c) => computeWidth(c, rows)), [columns, rows]);
 
-  const visibleCount = Math.max(1, budget - HEADER_OVERHEAD_ROWS);
+  // At a narrow terminal width the footer hint itself wraps onto a second
+  // line, which HEADER_OVERHEAD_ROWS's flat "one line of hint text"
+  // assumption doesn't account for -- so reserve however many extra rows
+  // the footer's actual wrapped height needs, on top of the fixed chrome.
+  const footerRows = wrappedLineCount(FOOTER_HINT, Math.max(1, terminalWidth - HORIZONTAL_CHROME));
+  const footerOverflow = Math.max(0, footerRows - 1);
+  const visibleCount = Math.max(1, budget - HEADER_OVERHEAD_ROWS - footerOverflow);
 
+  // Audited against the same stale-ref-in-useInput bug class fixed in
+  // diff/view.tsx, picker/view.tsx and form/view.tsx (see their cursorRef/
+  // checkedRef/focusIndexRef comments): unlike those, `scrollOffset` here is
+  // never mirrored into a ref and read back inside the useInput handler --
+  // every handler below reads it exclusively through `setScrollOffset`'s
+  // own functional updater (`(o) => ...`), whose `o` React guarantees is
+  // the latest queued value regardless of render/effect timing, the same
+  // reason form.tsx's `values` doesn't need the ref treatment either. So
+  // there is nothing here for two zero-delay keystrokes to race.
   const [scrollOffset, setScrollOffset] = useState(0);
   const maxOffset = Math.max(0, rows.length - visibleCount);
 

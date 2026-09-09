@@ -50,9 +50,40 @@ export function validateTable(config: TableConfig | undefined): ValidatedTable {
   if (rawRows !== undefined && !Array.isArray(rawRows)) {
     return { columns: [], rows: [], error: "table config: 'rows' must be an array" };
   }
+  const rowsArray = (rawRows ?? []) as unknown[];
+  const validColumns = rawColumns as TableColumn[];
+  // Each row and each cell is checked before anything downstream indexes
+  // into it or renders it as a React child. `null`, a non-object, or an
+  // array in the `rows` list used to reach `row[col.key]` in view.tsx and
+  // throw ("not an object" / "Cannot convert undefined or null to
+  // object"-shaped errors); a cell holding an object or array used to reach
+  // `<Text>{cell}</Text>` and throw React's "Objects are not valid as a
+  // React child". Both crashes happened during render, after this validator
+  // would otherwise have already returned successfully, so the check has to
+  // live here rather than only shape-checking `rows` as an array. The
+  // SKILL.md contract is that "all cell values must be strings" -- callers
+  // format numbers and dates themselves -- so a non-string, non-undefined
+  // cell (including numbers and booleans, not only objects) is rejected the
+  // same as a malformed row.
+  for (let i = 0; i < rowsArray.length; i++) {
+    const row: unknown = rowsArray[i];
+    if (row === null || typeof row !== "object" || Array.isArray(row)) {
+      return { columns: [], rows: [], error: `table config: rows[${i}] is not an object` };
+    }
+    for (const col of validColumns) {
+      const cell: unknown = (row as Record<string, unknown>)[col.key];
+      if (cell !== undefined && typeof cell !== "string") {
+        return {
+          columns: [],
+          rows: [],
+          error: `table config: rows[${i}][${JSON.stringify(col.key)}] must be a string`,
+        };
+      }
+    }
+  }
   return {
-    columns: rawColumns as TableColumn[],
-    rows: (rawRows ?? []) as Array<Record<string, string>>,
+    columns: validColumns,
+    rows: rowsArray as Array<Record<string, string>>,
     error: null,
   };
 }

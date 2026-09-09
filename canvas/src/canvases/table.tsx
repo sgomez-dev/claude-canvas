@@ -93,6 +93,7 @@ export function Table({
       rows={rows}
       title={config?.title}
       budget={stdout?.rows ?? 24}
+      terminalWidth={stdout?.columns ?? 80}
       focused
     />
   );

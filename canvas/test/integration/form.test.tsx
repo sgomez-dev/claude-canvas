@@ -225,6 +225,183 @@ test("Enter then Escape in quick succession only sends one outcome message", asy
   r.dispose();
 });
 
+// --------------------------------------------------------------------------
+// Regression tests for the incomplete Fix 1 patch: `valuesRef` was declared
+// as a render-body-only mirror of `values` state (identical in SHAPE to the
+// zero-delay-safe `focusIndexRef` pattern above), but none of the setValues
+// call sites in the useInput handler also wrote `valuesRef.current` directly
+// -- so the mirror only ever caught up on the NEXT render, typically 2-4ms
+// later. A burst with truly zero delay between keystrokes (no settle(), no
+// await, not even a microtask, between any of the writes below) reaches
+// attemptSubmit before that render commits, so attemptSubmit (and
+// isMissing) read a STALE valuesRef.current -- the field's pre-edit value,
+// not what was actually just entered. Every scenario below is exactly the
+// kind of burst the pre-existing tests above never exercised: they all
+// separate the value-changing keystroke from Tab/Enter with a settle().
+// --------------------------------------------------------------------------
+
+const BURST_TEXT: FormConfig = {
+  fields: [{ id: "name", type: "text", label: "Name" }],
+};
+const BURST_TEXT_REQUIRED: FormConfig = {
+  fields: [{ id: "name", type: "text", label: "Name", required: true }],
+};
+const BURST_TEXTAREA: FormConfig = {
+  fields: [{ id: "notes", type: "textarea", label: "Notes" }],
+};
+const BURST_NUMBER_OPTIONAL: FormConfig = {
+  fields: [{ id: "count", type: "number", label: "Count", min: 1, max: 10 }],
+};
+const BURST_NUMBER_REQUIRED: FormConfig = {
+  fields: [{ id: "count", type: "number", label: "Count", required: true }],
+};
+const BURST_CHECKBOX: FormConfig = {
+  fields: [{ id: "urgent", type: "checkbox", label: "Urgent" }],
+};
+const BURST_SELECT: FormConfig = {
+  fields: [
+    {
+      id: "level",
+      type: "select",
+      label: "Level",
+      options: [
+        { value: "a", label: "A" },
+        { value: "b", label: "B" },
+      ],
+    },
+  ],
+};
+const BURST_COMPOUND: FormConfig = {
+  fields: [
+    { id: "urgent", type: "checkbox", label: "Urgent" },
+    {
+      id: "level",
+      type: "select",
+      label: "Level",
+      options: [
+        { value: "a", label: "A" },
+        { value: "b", label: "B" },
+      ],
+    },
+  ],
+};
+
+test("burst (text): type, Tab, Enter with zero delay submits the typed character, not the default empty string", async () => {
+  const r = await mount("form-it-burst-text", BURST_TEXT);
+  const conn = await openConnection("form-it-burst-text");
+
+  r.stdin.write("A");
+  r.stdin.write(TAB);
+  r.stdin.write(ENTER);
+  await r.settle();
+
+  const msg = await nextOutcome(conn, 2000);
+  expect(msg).toEqual({ type: "selected", data: { values: { name: "A" } } });
+  conn.close();
+  r.dispose();
+});
+
+test("burst (textarea): type, Tab, Enter with zero delay submits the typed character, not the default empty string", async () => {
+  const r = await mount("form-it-burst-textarea", BURST_TEXTAREA);
+  const conn = await openConnection("form-it-burst-textarea");
+
+  r.stdin.write("x");
+  r.stdin.write(TAB);
+  r.stdin.write(ENTER);
+  await r.settle();
+
+  const msg = await nextOutcome(conn, 2000);
+  expect(msg).toEqual({ type: "selected", data: { values: { notes: "x" } } });
+  conn.close();
+  r.dispose();
+});
+
+test("burst (optional number): type, Tab, Enter with zero delay submits the typed digit, not an omitted/default value", async () => {
+  const r = await mount("form-it-burst-number-optional", BURST_NUMBER_OPTIONAL);
+  const conn = await openConnection("form-it-burst-number-optional");
+
+  r.stdin.write("7");
+  r.stdin.write(TAB);
+  r.stdin.write(ENTER);
+  await r.settle();
+
+  const msg = await nextOutcome(conn, 2000);
+  expect(msg).toEqual({ type: "selected", data: { values: { count: 7 } } });
+  conn.close();
+  r.dispose();
+});
+
+test("burst (required number): type, Tab, Enter with zero delay submits the typed digit and is not flagged missing", async () => {
+  const r = await mount("form-it-burst-number-required", BURST_NUMBER_REQUIRED);
+  const conn = await openConnection("form-it-burst-number-required");
+
+  r.stdin.write("7");
+  r.stdin.write(TAB);
+  r.stdin.write(ENTER);
+  await r.settle();
+
+  const msg = await nextOutcome(conn, 2000);
+  expect(msg).toEqual({ type: "selected", data: { values: { count: 7 } } });
+  const frame = await r.settle();
+  expect(frame).not.toContain("<- required");
+  conn.close();
+  r.dispose();
+});
+
+test("burst (checkbox): toggle, Tab, Enter with zero delay submits true, not the untouched false default", async () => {
+  const r = await mount("form-it-burst-checkbox", BURST_CHECKBOX);
+  const conn = await openConnection("form-it-burst-checkbox");
+
+  r.stdin.write(" ");
+  r.stdin.write(TAB);
+  r.stdin.write(ENTER);
+  await r.settle();
+
+  const msg = await nextOutcome(conn, 2000);
+  expect(msg).toEqual({ type: "selected", data: { values: { urgent: true } } });
+  conn.close();
+  r.dispose();
+});
+
+test("burst (select): change, Tab, Enter with zero delay submits the changed option, not the untouched default", async () => {
+  const r = await mount("form-it-burst-select", BURST_SELECT);
+  const conn = await openConnection("form-it-burst-select");
+
+  r.stdin.write(RIGHT);
+  r.stdin.write(TAB);
+  r.stdin.write(ENTER);
+  await r.settle();
+
+  const msg = await nextOutcome(conn, 2000);
+  expect(msg).toEqual({ type: "selected", data: { values: { level: "b" } } });
+  conn.close();
+  r.dispose();
+});
+
+// The compound case the reviewer specifically called out: two DIFFERENT
+// fields each edited in the same zero-delay burst. This is the scenario
+// that a partial, single-site ref patch would most plausibly still get
+// wrong even after "fixing" the first field it was tested against.
+test("burst (compound): toggling a checkbox then changing a select then Tab then Enter, all zero delay, submits BOTH new values", async () => {
+  const r = await mount("form-it-burst-compound", BURST_COMPOUND);
+  const conn = await openConnection("form-it-burst-compound");
+
+  r.stdin.write(" "); // toggle checkbox (focus 0)
+  r.stdin.write(TAB); // move to select (focus 1)
+  r.stdin.write(RIGHT); // change select a -> b
+  r.stdin.write(TAB); // move to Submit (focus 2)
+  r.stdin.write(ENTER); // submit
+  await r.settle();
+
+  const msg = await nextOutcome(conn, 2000);
+  expect(msg).toEqual({
+    type: "selected",
+    data: { values: { urgent: true, level: "b" } },
+  });
+  conn.close();
+  r.dispose();
+});
+
 // NOTE on what is deliberately NOT tested here: the `sendError` path for a
 // config error (e.g. a select with no options) is not observable from a
 // controller in this flow, and neither picker.tsx's nor diff.tsx's

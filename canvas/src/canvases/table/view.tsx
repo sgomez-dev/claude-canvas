@@ -86,13 +86,27 @@ export function TableView({
 
   // Audited against the same stale-ref-in-useInput bug class fixed in
   // diff/view.tsx, picker/view.tsx and form/view.tsx (see their cursorRef/
-  // checkedRef/focusIndexRef comments): unlike those, `scrollOffset` here is
-  // never mirrored into a ref and read back inside the useInput handler --
-  // every handler below reads it exclusively through `setScrollOffset`'s
-  // own functional updater (`(o) => ...`), whose `o` React guarantees is
-  // the latest queued value regardless of render/effect timing, the same
-  // reason form.tsx's `values` doesn't need the ref treatment either. So
-  // there is nothing here for two zero-delay keystrokes to race.
+  // checkedRef/focusIndexRef/valuesRef comments): unlike those, `scrollOffset`
+  // here is never mirrored into a ref and read back inside the useInput
+  // handler -- every handler below reads it exclusively through
+  // `setScrollOffset`'s own functional updater (`(o) => ...`), whose `o`
+  // React guarantees is the latest queued value regardless of render/effect
+  // timing. So there is nothing here for two zero-delay keystrokes to race.
+  //
+  // That guarantee covers WRITES only, and is not a reason a value never
+  // needs the ref treatment -- it was previously (and wrongly) cited here to
+  // justify form.tsx's `values` skipping it too. form.tsx's bug was never in
+  // how `values` was written (its updater form is exactly as safe as
+  // `scrollOffset`'s); it was that `values` also needed to be READ outside
+  // of any setState updater -- in `attemptSubmit`, to build the submitted
+  // payload, and in `isMissing`, to validate it -- and a value read that way
+  // has no updater to guarantee freshness. Reading it from a mirror ref that
+  // was only ever written in the render body (not directly at each handler
+  // call site) left exactly the same one-render-lag window the cursorRef/
+  // checkedRef/focusIndexRef comments describe. `scrollOffset` here has no
+  // equivalent read site -- nothing outside a `setScrollOffset` updater ever
+  // reads it inside the handler -- which is the actual reason it is safe
+  // without a ref, not because its writes are functional updates.
   const [scrollOffset, setScrollOffset] = useState(0);
   const maxOffset = Math.max(0, rows.length - visibleCount);
 

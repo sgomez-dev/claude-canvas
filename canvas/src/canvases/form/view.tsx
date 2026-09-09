@@ -1,4 +1,4 @@
-import React, { useRef, useState } from "react";
+import React, { useReducer, useRef, useState } from "react";
 import { Box, Text, useInput } from "ink";
 import { wrappedLineCount } from "../width";
 import type { FormField, FormResult } from "./types";
@@ -88,25 +88,44 @@ export function FormView({
   focused,
   onSubmit,
 }: FormViewProps): React.JSX.Element {
-  const [values, setValues] = useState<Record<string, FieldState>>(() => {
-    const init: Record<string, FieldState> = {};
-    for (const f of fields) init[f.id] = initialValue(f);
-    return init;
-  });
-  // Mirrors `values` synchronously into a ref on every render (NOT inside a
-  // useEffect, which would reintroduce the same one-render lag this is
-  // fixing). useInput's handler is re-registered in a passive effect that
-  // lags a state commit by roughly 2-4ms, so reading the closed-over
-  // `values` directly inside the useInput callback (or in attemptSubmit,
-  // which the callback invokes) can observe a stale snapshot: two
-  // keystrokes arriving within that window could read a value one
-  // keystroke behind. Reading from this ref always sees the latest
-  // committed values regardless of which render's useInput registration is
-  // currently active. See picker.tsx's `cursorRef`/`checkedRef` and
-  // diff.tsx's `cursorRef` for the reference implementation of this
-  // pattern.
-  const valuesRef = useRef(values);
-  valuesRef.current = values;
+  // `values` used to be a `useState` with a `useRef` mirror written only in
+  // the render body -- the same pattern used successfully for `focusIndex`
+  // below. That works when every place a new value is decided also writes
+  // the ref directly at that moment. It does NOT work when there are many
+  // call sites deciding new values (this component's useInput handler has
+  // one per field type: text, textarea, number, checkbox, select) and even
+  // one of them is missed, because a render-body-only mirror only catches
+  // up on the NEXT commit -- typically 2-4ms later, well after a second
+  // zero-delay keystroke in the same burst can already have reached the
+  // handler and read the stale value. That is exactly what happened here:
+  // the mirror was added, but none of the (then eleven) setValues call
+  // sites also wrote `valuesRef.current` directly, so a burst like "type a
+  // character, then Tab, then Enter" with no delay at all between any of
+  // the three could submit successfully with the field's PRE-edit value --
+  // worse than a hang, because the controller has no way to tell the
+  // submission was wrong.
+  //
+  // Rather than hand-patch eleven call sites with a matching direct ref
+  // write each (the approach that let this slip through once already),
+  // `values` now lives ONLY in this ref. There is no separate `useState`
+  // for it and therefore no second copy that can fall out of sync: every
+  // read (in the handler, in attemptSubmit, in the render body) goes
+  // through `valuesRef.current`, and every write mutates it directly via
+  // `setValue` below, which also fires a bare re-render so the pane
+  // actually repaints. This makes the missed-call-site failure mode
+  // structurally impossible rather than merely audited against.
+  const valuesRef = useRef<Record<string, FieldState>>(
+    (() => {
+      const init: Record<string, FieldState> = {};
+      for (const f of fields) init[f.id] = initialValue(f);
+      return init;
+    })()
+  );
+  const [, forceRender] = useReducer((n: number) => n + 1, 0);
+  function setValue(id: string, value: FieldState): void {
+    valuesRef.current = { ...valuesRef.current, [id]: value };
+    forceRender();
+  }
 
   const [focusIndex, setFocusIndex] = useState(0); // fields.length === the Submit position
   // Same stale-closure hazard as valuesRef above, for the onSubmit check,
@@ -120,14 +139,14 @@ export function FormView({
   function moveFocus(delta: number) {
     const currentField = fields[focusIndexRef.current];
     if (currentField?.type === "number") {
-      setValues((prev) => ({
-        ...prev,
-        [currentField.id]: clampNumber(
-          (prev[currentField.id] as string) ?? "",
+      setValue(
+        currentField.id,
+        clampNumber(
+          (valuesRef.current[currentField.id] as string) ?? "",
           currentField.min,
           currentField.max
-        ),
-      }));
+        )
+      );
     }
     const total = fields.length + 1; // + Submit
     // Written directly into the ref here, not left to the render-body
@@ -212,65 +231,48 @@ export function FormView({
     if (!field) return;
 
     if (field.type === "checkbox") {
-      if (input === " ") setValues((prev) => ({ ...prev, [field.id]: !prev[field.id] }));
+      if (input === " ") setValue(field.id, !valuesRef.current[field.id]);
       return;
     }
     if (field.type === "select") {
       const opts = field.options;
       if (opts.length === 0) return;
       if (key.leftArrow) {
-        setValues((prev) => {
-          const current = prev[field.id];
-          const currentIndex = Math.max(0, opts.findIndex((o) => o.value === current));
-          const next = opts[(currentIndex - 1 + opts.length) % opts.length]!;
-          return { ...prev, [field.id]: next.value };
-        });
+        const current = valuesRef.current[field.id];
+        const currentIndex = Math.max(0, opts.findIndex((o) => o.value === current));
+        const nextOpt = opts[(currentIndex - 1 + opts.length) % opts.length]!;
+        setValue(field.id, nextOpt.value);
       } else if (key.rightArrow) {
-        setValues((prev) => {
-          const current = prev[field.id];
-          const currentIndex = Math.max(0, opts.findIndex((o) => o.value === current));
-          const next = opts[(currentIndex + 1) % opts.length]!;
-          return { ...prev, [field.id]: next.value };
-        });
+        const current = valuesRef.current[field.id];
+        const currentIndex = Math.max(0, opts.findIndex((o) => o.value === current));
+        const nextOpt = opts[(currentIndex + 1) % opts.length]!;
+        setValue(field.id, nextOpt.value);
       }
       return;
     }
     if (field.type === "number") {
       if (key.backspace || key.delete) {
-        setValues((prev) => {
-          const raw = (prev[field.id] as string) ?? "";
-          return { ...prev, [field.id]: raw.slice(0, -1) };
-        });
+        const raw = (valuesRef.current[field.id] as string) ?? "";
+        setValue(field.id, raw.slice(0, -1));
       } else if (/^[0-9]$/.test(input)) {
-        setValues((prev) => {
-          const raw = (prev[field.id] as string) ?? "";
-          return { ...prev, [field.id]: raw + input };
-        });
+        const raw = (valuesRef.current[field.id] as string) ?? "";
+        setValue(field.id, raw + input);
       } else if (input === "-" && (field.min ?? -1) < 0) {
-        setValues((prev) => {
-          const raw = (prev[field.id] as string) ?? "";
-          if (raw.length !== 0) return prev;
-          return { ...prev, [field.id]: raw + input };
-        });
+        const raw = (valuesRef.current[field.id] as string) ?? "";
+        if (raw.length === 0) setValue(field.id, raw + input);
       }
       return;
     }
     // text or textarea
     if (key.backspace || key.delete) {
-      setValues((prev) => {
-        const text = (prev[field.id] as string) ?? "";
-        return { ...prev, [field.id]: text.slice(0, -1) };
-      });
+      const text = (valuesRef.current[field.id] as string) ?? "";
+      setValue(field.id, text.slice(0, -1));
     } else if (field.type === "textarea" && key.return) {
-      setValues((prev) => {
-        const text = (prev[field.id] as string) ?? "";
-        return { ...prev, [field.id]: text + "\n" };
-      });
+      const text = (valuesRef.current[field.id] as string) ?? "";
+      setValue(field.id, text + "\n");
     } else if (input && !key.return) {
-      setValues((prev) => {
-        const text = (prev[field.id] as string) ?? "";
-        return { ...prev, [field.id]: text + input };
-      });
+      const text = (valuesRef.current[field.id] as string) ?? "";
+      setValue(field.id, text + input);
     }
   }, { isActive: focused });
 
@@ -309,7 +311,7 @@ export function FormView({
       {windowFields.map((f, visibleIndex) => {
         const i = windowStart + visibleIndex;
         const isFocused = i === focusIndex;
-        const value = values[f.id] ?? initialValue(f);
+        const value = valuesRef.current[f.id] ?? initialValue(f);
         // `errors` only ever GROWS a field into it, at submit-attempt time
         // -- it never removes one, because removing it eagerly on every
         // keystroke would need its own effect. Gating the marker on

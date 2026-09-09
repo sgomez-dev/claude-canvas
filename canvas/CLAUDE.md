@@ -172,3 +172,45 @@ before closing, so a multi-megabyte config is not truncated.
 
 Host backends (`src/host/`) open the canvas in a new pane: `tmux` or
 Windows Terminal, whichever is detected (`detectHost()`).
+
+## Verifying a fix
+
+A fix that reads correctly is not the same as a fix that works. This
+project has repeatedly shipped fixes that were structurally right and
+incompletely applied — a ref-mirror pattern added to three call sites
+out of eleven, a windowing fix that closed one overflow path but left
+an identical sibling path open, a bug fixed for the exact numeric case
+a test used and not for a neighboring one. Every one of these passed a
+first read. None of them survived someone actually reproducing the
+failure.
+
+**Before calling anything fixed:**
+1. Reproduce the bug on the unfixed code first, with a concrete
+   input/action and the exact wrong output it produces. If you can't
+   make it fail on demand, you don't understand it well enough to fix
+   it.
+2. Apply the fix.
+3. Reproduce the same scenario again and confirm the correct output —
+   not "looks right," the actual before/after evidence.
+4. Try at least one variant harder than what you just proved: a
+   different ratio/size/count than the first case, a rapid/zero-delay
+   sequence instead of a slow one, the sibling code path that shares
+   the same bug's shape. A fix that only survives the exact case that
+   found it is not yet a fix.
+
+**Reviewing someone else's fix (including a prior session's):** don't
+accept "it looks correct," "this is probably just timing/flakiness,"
+or "this doesn't need to be tested, it's obviously fine" as a
+substitute for reproducing it yourself. Every one of these
+characterizations has turned out to be wrong in this project when
+someone actually checked — including "0 flakes under load" claims that
+were false under load, and "this residual is structurally unfixable"
+claims that were true only after someone tried hard to disprove them
+first. An identical failure across every platform/environment is
+evidence of a real bug, not evidence of flakiness — flaky failures
+vary, deterministic bugs don't.
+
+A fix wave that gets independently re-reviewed with real reproduction,
+not just a diff read, reliably finds something the original pass
+missed — this has held true across every area of this codebase
+reviewed this way so far. Budget for it.

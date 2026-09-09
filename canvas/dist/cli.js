@@ -2150,6 +2150,9 @@ var init_validate = __esm(() => {
 import { homedir } from "os";
 import { join } from "path";
 function dataDir() {
+  const override = process.env.CANVAS_DATA_DIR;
+  if (override)
+    return override;
   if (process.platform === "win32") {
     const base = process.env.LOCALAPPDATA ?? join(homedir(), "AppData", "Local");
     return join(base, APP);
@@ -2269,8 +2272,8 @@ function newToken() {
 }
 
 // canvas/src/runtime/registry.ts
-import { mkdir, unlink, chmod, readdir, rename } from "fs/promises";
-import { mkdirSync, writeFileSync, chmodSync, renameSync } from "fs";
+import { mkdir, unlink, rename, readdir, stat, writeFile } from "fs/promises";
+import { mkdirSync, writeFileSync, renameSync, readFileSync, unlinkSync } from "fs";
 import { join as join2 } from "path";
 function isAlive(pid) {
   try {
@@ -2281,27 +2284,55 @@ function isAlive(pid) {
   }
 }
 function tmpPath(path) {
-  return `${path}.${process.pid}.tmp`;
+  tmpCounter += 1;
+  return `${path}.${process.pid}.${tmpCounter}.tmp`;
+}
+function isTransientRenameError(e) {
+  const code = e?.code;
+  return code === "EPERM" || code === "EBUSY";
+}
+async function renameWithRetry(tmp, dest, delaysMs = RETRY_DELAYS_MS) {
+  for (let attempt = 0;; attempt++) {
+    try {
+      await rename(tmp, dest);
+      return;
+    } catch (e) {
+      if (!isTransientRenameError(e) || attempt >= delaysMs.length)
+        throw e;
+      await new Promise((res) => setTimeout(res, delaysMs[attempt]));
+    }
+  }
+}
+function sleepSyncMs(ms) {
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+}
+function renameWithRetrySync(tmp, dest, delaysMs = SYNC_RETRY_DELAYS_MS) {
+  for (let attempt = 0;; attempt++) {
+    try {
+      renameSync(tmp, dest);
+      return;
+    } catch (e) {
+      if (!isTransientRenameError(e) || attempt >= delaysMs.length)
+        throw e;
+      sleepSyncMs(delaysMs[attempt]);
+    }
+  }
 }
 async function writeRecord(r) {
   assertIdent("id", r.id);
-  await mkdir(canvasesDir(), { recursive: true });
+  await mkdir(canvasesDir(), { recursive: true, mode: 448 });
   const path = recordPath(r.id);
   const tmp = tmpPath(path);
-  await Bun.write(tmp, JSON.stringify(r, null, 2));
-  if (process.platform !== "win32")
-    await chmod(tmp, 384);
-  await rename(tmp, path);
+  await writeFile(tmp, JSON.stringify(r, null, 2), { mode: 384 });
+  await renameWithRetry(tmp, path);
 }
 function writeRecordSync(r) {
   assertIdent("id", r.id);
-  mkdirSync(canvasesDir(), { recursive: true });
+  mkdirSync(canvasesDir(), { recursive: true, mode: 448 });
   const path = recordPath(r.id);
   const tmp = tmpPath(path);
-  writeFileSync(tmp, JSON.stringify(r, null, 2));
-  if (process.platform !== "win32")
-    chmodSync(tmp, 384);
-  renameSync(tmp, path);
+  writeFileSync(tmp, JSON.stringify(r, null, 2), { mode: 384 });
+  renameWithRetrySync(tmp, path);
 }
 async function readRecord(id) {
   assertIdent("id", id);
@@ -2334,7 +2365,15 @@ async function listRecords() {
   const out = [];
   for (const name of names) {
     if (name.endsWith(".tmp")) {
-      await unlink(join2(canvasesDir(), name)).catch(() => {});
+      const full = join2(canvasesDir(), name);
+      try {
+        const info = await stat(full);
+        if (Date.now() - info.mtimeMs < TMP_FILE_MIN_AGE_MS)
+          continue;
+      } catch {
+        continue;
+      }
+      await unlink(full).catch(() => {});
       continue;
     }
     if (!name.endsWith(".json"))
@@ -2357,7 +2396,8 @@ async function listRecords() {
     if (r.lastError)
       continue;
     if (r.outcome) {
-      const age = Date.now() - Date.parse(r.startedAt);
+      const recordedAt = r.outcomeAt ?? r.startedAt;
+      const age = Date.now() - Date.parse(recordedAt);
       if (!isAlive(r.pid) && Number.isFinite(age) && age > OUTCOME_TTL_MS) {
         await deleteRecord(r.id);
       }
@@ -2367,11 +2407,11 @@ async function listRecords() {
   }
   return out;
 }
-async function awaitRecord(id, timeoutMs) {
+async function awaitRecord(id, timeoutMs, opts) {
   const deadline = Date.now() + timeoutMs;
   for (;; ) {
     const r = await readRecord(id);
-    if (r)
+    if (r && (opts?.after === undefined || Date.parse(r.startedAt) >= opts.after))
       return r;
     if (Date.now() >= deadline)
       return null;
@@ -2384,15 +2424,37 @@ async function deleteRecord(id) {
     await unlink(recordPath(id));
   } catch {}
 }
-var OUTCOME_TTL_MS;
+function readRecordSync(id) {
+  assertIdent("id", id);
+  let raw;
+  try {
+    raw = readFileSync(recordPath(id), "utf8");
+  } catch {
+    return null;
+  }
+  try {
+    return JSON.parse(raw);
+  } catch {
+    return null;
+  }
+}
+function deleteRecordSync(id) {
+  assertIdent("id", id);
+  try {
+    unlinkSync(recordPath(id));
+  } catch {}
+}
+var OUTCOME_TTL_MS, TMP_FILE_MIN_AGE_MS = 2000, tmpCounter = 0, RETRY_DELAYS_MS, SYNC_RETRY_DELAYS_MS;
 var init_registry = __esm(() => {
   init_paths();
   init_validate();
   OUTCOME_TTL_MS = 60 * 60 * 1000;
+  RETRY_DELAYS_MS = [5, 10, 20, 30, 40, 40];
+  SYNC_RETRY_DELAYS_MS = [5, 10, 20, 40, 80, 150, 200, 250, 300, 300, 300, 300, 300, 300, 300, 300];
 });
 
 // canvas/src/runtime/socket-writer.ts
-function createQueuedWriter(socket, onError) {
+function createQueuedWriter(socket, onError, maxQueuedBytes = DEFAULT_MAX_QUEUED_BYTES) {
   let queue = [];
   let queued = 0;
   let waiters = [];
@@ -2440,6 +2502,10 @@ function createQueuedWriter(socket, onError) {
     write(data) {
       if (dead || data.byteLength === 0)
         return;
+      if (queued + data.byteLength > maxQueuedBytes) {
+        onError?.(new Error(`queued writer backpressure limit exceeded: ${queued + data.byteLength} > ` + `${maxQueuedBytes} bytes; dropping write`));
+        return;
+      }
       if (queue.length === 0) {
         let written;
         try {
@@ -2479,6 +2545,10 @@ function createQueuedWriter(socket, onError) {
     }
   };
 }
+var DEFAULT_MAX_QUEUED_BYTES;
+var init_socket_writer = __esm(() => {
+  DEFAULT_MAX_QUEUED_BYTES = 32 * 1024 * 1024;
+});
 
 // canvas/src/host/types.ts
 function baseCapabilities(env) {
@@ -23184,6 +23254,7 @@ async function startCanvasServer(o) {
 }
 var init_server = __esm(() => {
   init_protocol();
+  init_socket_writer();
 });
 
 // canvas/src/runtime/use-canvas-server.ts
@@ -23292,8 +23363,13 @@ function useCanvasServer(o) {
       live = false;
       serverRef.current?.stop();
       serverRef.current = null;
-      if (!outcomeRef.current)
+      if (!outcomeRef.current) {
         deleteRecord(id);
+        return;
+      }
+      const current = readRecordSync(id);
+      if (!current || current.outcomeConsumed)
+        deleteRecordSync(id);
     };
   }, [enabled, id, kind, scenario, exit]);
   const send = import_react30.useCallback((msg) => {
@@ -23303,21 +23379,26 @@ function useCanvasServer(o) {
     if (outcomeRef.current)
       return;
     outcomeRef.current = msg;
+    const outcomeAt = new Date().toISOString();
     try {
       const base = recordRef.current;
-      writeRecordSync(base ? { ...base, outcome: msg } : {
+      writeRecordSync(base ? { ...base, outcome: msg, outcomeAt } : {
         id,
         kind,
         scenario,
         port: 0,
         token: "",
         pid: process.pid,
-        startedAt: new Date().toISOString(),
+        startedAt: outcomeAt,
         host: "none",
-        outcome: msg
+        outcome: msg,
+        outcomeAt
       });
     } catch (e) {
-      logToFile(id, `failed to persist outcome: ${e.message}`);
+      const message = `failed to persist outcome: ${e.message}`;
+      process.stderr.write(`${message}
+`);
+      logToFile(id, message);
     }
     send(msg);
   }, [id, kind, scenario, send]);
@@ -28608,6 +28689,7 @@ init_paths();
 // canvas/src/runtime/client.ts
 init_protocol();
 init_registry();
+init_socket_writer();
 var DEFAULT_WAIT_MS = 55000;
 
 class NoSuchCanvasError extends Error {
@@ -28755,9 +28837,13 @@ async function consumeOutcome(id) {
   } catch {
     return null;
   }
-  if (!record?.outcome)
+  if (!record?.outcome || record.outcomeConsumed)
     return null;
-  await deleteRecord(id);
+  if (isAlive(record.pid)) {
+    await writeRecord({ ...record, outcomeConsumed: true }).catch(() => {});
+  } else {
+    await deleteRecord(id);
+  }
   return record.outcome;
 }
 async function waitForOutcome(id, timeoutMs = DEFAULT_WAIT_MS) {
@@ -28984,6 +29070,7 @@ async function runShow(kind, opts, io = defaultIO) {
 }
 var SPAWN_READY_MS = 1e4;
 async function runSpawn(kind, opts, io = defaultIO) {
+  const spawnStartedAt = Date.now();
   try {
     const id = assertIdent("id", opts.id ?? `${kind}-1`);
     assertIdent("kind", kind);
@@ -29012,7 +29099,7 @@ async function runSpawn(kind, opts, io = defaultIO) {
     }
     const host = detectHost();
     const handle = await host.open({ argv, title: `canvas: ${kind}`, ratio: 0.67 });
-    const record = await awaitRecord(id, SPAWN_READY_MS);
+    const record = await awaitRecord(id, SPAWN_READY_MS, { after: spawnStartedAt });
     if (!record) {
       throw new Error(`Pane opened, but canvas ${id} did not become reachable within ${SPAWN_READY_MS / 1000}s. It may have failed to start; see ${logPath(id)}. The pane may still be open and must be closed by hand.`);
     }

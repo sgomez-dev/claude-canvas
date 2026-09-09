@@ -1,9 +1,19 @@
 import { test, expect } from "bun:test";
 import { startCanvasServer } from "./server";
 import { encodeFrame, FrameDecoder, type CanvasMessage } from "./protocol";
+import { waitUntil } from "../../test/harness/ipc";
 import type { Socket } from "bun";
 
-async function talk(port: number, frames: Uint8Array[]): Promise<CanvasMessage[]> {
+/**
+ * `expectCount`, when given, polls until at least that many frames have
+ * arrived (or a 2 s deadline), instead of a fixed sleep -- see waitUntil.
+ * Omitted for a call asserting an ABSENCE (nothing arrives): there is no
+ * positive condition to poll for there, so a small bounded delay is the
+ * only way to give a would-be delivery a chance to show up before
+ * concluding it didn't. That is the one legitimate remaining raw sleep in
+ * this file.
+ */
+async function talk(port: number, frames: Uint8Array[], expectCount?: number): Promise<CanvasMessage[]> {
   const got: CanvasMessage[] = [];
   const dec = new FrameDecoder();
   let closed = false;
@@ -17,7 +27,8 @@ async function talk(port: number, frames: Uint8Array[]): Promise<CanvasMessage[]
   });
   try {
     for (const f of frames) socket.write(f);
-    await new Promise((r) => setTimeout(r, 60));
+    if (expectCount !== undefined) await waitUntil(() => got.length >= expectCount);
+    else await new Promise((r) => setTimeout(r, 60));
   } finally {
     if (!closed) socket.end();
   }
@@ -36,7 +47,7 @@ test("listens on an ephemeral loopback port", async () => {
 test("accepts the correct token", async () => {
   const s = await startCanvasServer({ onMessage() {} });
   try {
-    const got = await talk(s.port, [encodeFrame({ type: "hello", token: s.token })]);
+    const got = await talk(s.port, [encodeFrame({ type: "hello", token: s.token })], 1);
     expect(got[0]).toEqual({ type: "hello-ok" });
   } finally {
     s.stop();
@@ -47,10 +58,11 @@ test("rejects a wrong token and delivers no message", async () => {
   let delivered = 0;
   const s = await startCanvasServer({ onMessage() { delivered++; } });
   try {
-    const got = await talk(s.port, [
-      encodeFrame({ type: "hello", token: "0".repeat(64) }),
-      encodeFrame({ type: "get", key: "content" }),
-    ]);
+    const got = await talk(
+      s.port,
+      [encodeFrame({ type: "hello", token: "0".repeat(64) }), encodeFrame({ type: "get", key: "content" })],
+      1
+    );
     expect(got[0]?.type).toBe("error");
     expect(delivered).toBe(0);
   } finally {
@@ -62,7 +74,7 @@ test("rejects a first frame that is not hello", async () => {
   let delivered = 0;
   const s = await startCanvasServer({ onMessage() { delivered++; } });
   try {
-    const got = await talk(s.port, [encodeFrame({ type: "ping" })]);
+    const got = await talk(s.port, [encodeFrame({ type: "ping" })], 1);
     expect(got[0]?.type).toBe("error");
     expect(delivered).toBe(0);
   } finally {
@@ -77,10 +89,11 @@ test("routes messages after a successful handshake", async () => {
     },
   });
   try {
-    const got = await talk(s.port, [
-      encodeFrame({ type: "hello", token: s.token }),
-      encodeFrame({ type: "get", key: "content" }),
-    ]);
+    const got = await talk(
+      s.port,
+      [encodeFrame({ type: "hello", token: s.token }), encodeFrame({ type: "get", key: "content" })],
+      2
+    );
     expect(got).toEqual([{ type: "hello-ok" }, { type: "value", key: "content", data: "hi" }]);
   } finally {
     s.stop();
@@ -98,9 +111,9 @@ test("broadcast reaches an authenticated client", async () => {
       socket: { data(_x, d) { for (const m of dec.push(new Uint8Array(d))) got.push(m as CanvasMessage); } },
     });
     socket.write(encodeFrame({ type: "hello", token: s.token }));
-    await new Promise((r) => setTimeout(r, 40));
+    await waitUntil(() => got.some((m) => m.type === "hello-ok"));
     s.broadcast({ type: "selected", data: { ok: true } });
-    await new Promise((r) => setTimeout(r, 40));
+    await waitUntil(() => got.some((m) => m.type === "selected"));
     expect(got).toContainEqual({ type: "selected", data: { ok: true } });
   } finally {
     socket?.end();
@@ -158,20 +171,20 @@ test("keeps authentication per-connection: one bad socket cannot ride another's 
     socketA.write(encodeFrame({ type: "hello", token: s.token }));
     socketB.write(encodeFrame({ type: "hello", token: "0".repeat(64) }));
     socketB.write(encodeFrame({ type: "get", key: "bad-key" }));
-    await new Promise((r) => setTimeout(r, 60));
+    await waitUntil(() => gotA.length >= 1 && gotB.length >= 1);
 
     expect(gotA).toEqual([{ type: "hello-ok" }]);
     expect(gotB[0]?.type).toBe("error");
 
     socketA.write(encodeFrame({ type: "get", key: "good-key" }));
-    await new Promise((r) => setTimeout(r, 40));
+    await waitUntil(() => delivered.length >= 1);
 
     // The one thing that matters: nothing socket B sent ever reached
     // onMessage, even though it arrived after a peer had authenticated.
     expect(delivered).toEqual(["good-key"]);
 
     s.broadcast({ type: "selected", data: { ok: true } });
-    await new Promise((r) => setTimeout(r, 40));
+    await waitUntil(() => gotA.some((m) => m.type === "selected"));
 
     expect(gotA).toContainEqual({ type: "selected", data: { ok: true } });
     expect(gotB).not.toContainEqual({ type: "selected", data: { ok: true } });
@@ -197,7 +210,7 @@ test("onAuthenticated fires after hello-ok, with a reply bound to that connectio
     },
   });
   try {
-    const got = await talk(s.port, [encodeFrame({ type: "hello", token: s.token })]);
+    const got = await talk(s.port, [encodeFrame({ type: "hello", token: s.token })], 2);
     // hello-ok must arrive first: a controller that saw an outcome before
     // its handshake was acknowledged would have no way to know it was
     // authenticated at all.
@@ -238,10 +251,11 @@ test("a throwing onAuthenticated is routed to onError, not out of the socket cal
     onError: (e) => errors.push(e.message),
   });
   try {
-    const got = await talk(s.port, [
-      encodeFrame({ type: "hello", token: s.token }),
-      encodeFrame({ type: "ping" }),
-    ]);
+    const got = await talk(
+      s.port,
+      [encodeFrame({ type: "hello", token: s.token }), encodeFrame({ type: "ping" })],
+      2
+    );
     // The connection survives the throw: hello-ok landed and ping is still
     // answered. A canvas process must always be able to exit 0.
     expect(got.map((m) => m.type)).toEqual(["hello-ok", "pong"]);

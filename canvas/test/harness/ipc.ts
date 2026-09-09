@@ -51,3 +51,31 @@ export async function settleUntil(
   }
   return frame;
 }
+
+/**
+ * The general-purpose sibling of `settleUntil`, for a condition that is not
+ * about an Ink frame: a connection flag flipping, a message array reaching
+ * some length, a callback having fired, a registry record's field changing.
+ * Same ruling either way ("assert on a condition, never on a fixed number of
+ * turns/a guessed clock delay"): `server.test.ts`, `client.test.ts`,
+ * `integration.test.ts` and `use-canvas-server.test.tsx` used fixed
+ * `setTimeout` sleeps (40/60/150/400 ms) before asserting on exactly this
+ * kind of state, which is what produced 7-9 real failures per run under CPU
+ * load in an independent review -- the machine was simply slower than
+ * whatever guess produced that number. Polling returns the instant the real
+ * condition is true instead of waiting a fixed guess and hoping the machine
+ * wasn't busy, and still fails (via the caller's own assertion) if the
+ * condition never becomes true within `timeoutMs`.
+ */
+export async function waitUntil(
+  predicate: () => boolean | Promise<boolean>,
+  timeoutMs = 2000,
+  intervalMs = 5
+): Promise<boolean> {
+  const deadline = Date.now() + timeoutMs;
+  for (;;) {
+    if (await predicate()) return true;
+    if (Date.now() >= deadline) return await predicate();
+    await new Promise((res) => setTimeout(res, intervalMs));
+  }
+}

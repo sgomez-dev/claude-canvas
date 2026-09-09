@@ -2,6 +2,7 @@ import { test, expect, afterEach } from "bun:test";
 import { startCanvasServer } from "./server";
 import { writeRecord, deleteRecord } from "./registry";
 import { openConnection, waitForOutcome, getValue } from "./client";
+import { waitUntil } from "../../test/harness/ipc";
 import type { ControllerMessage } from "./protocol";
 
 const ids: string[] = [];
@@ -45,7 +46,7 @@ test("full round trip: ready, update, get, selected, close", async () => {
     expect((await conn.next(1000))?.type).toBe("ready");
 
     conn.send({ type: "update", config: { content: "v2" } });
-    await new Promise((r) => setTimeout(r, 40));
+    await waitUntil(() => (config as { content?: string })?.content === "v2");
     expect(await getValue(id, "content")).toEqual({ content: "v2" });
 
     armed = true;
@@ -53,7 +54,7 @@ test("full round trip: ready, update, get, selected, close", async () => {
     armed = false;
 
     conn.send({ type: "close" });
-    await new Promise((r) => setTimeout(r, 40));
+    await waitUntil(() => closed);
     expect(closed).toBe(true);
   } finally {
     conn?.close();
@@ -77,7 +78,10 @@ test("a payload larger than the old newline protocol could carry survives", asyn
 
     conn = await openConnection(id);
     conn.send({ type: "update", config: { blob: big } });
-    await new Promise((r) => setTimeout(r, 400));
+    // A 4 MB frame needs many event-loop turns to arrive and decode; poll
+    // for it rather than guessing a fixed wall-clock budget (the same
+    // reasoning as the poll a few lines below, for the other direction).
+    await waitUntil(() => received.length === big.length, 10_000);
     expect(received.length).toBe(big.length);
   } finally {
     conn?.close();

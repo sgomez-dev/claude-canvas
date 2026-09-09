@@ -5,6 +5,7 @@ import type { Socket } from "bun";
 import { unlink } from "node:fs/promises";
 import { useCanvasServer, type CanvasServerHandle } from "./use-canvas-server";
 import { renderCanvas } from "../../test/harness/render";
+import { waitUntil } from "../../test/harness/ipc";
 import { readRecord, deleteRecord } from "./registry";
 import { logPath } from "./paths";
 import { encodeFrame, FrameDecoder, type CanvasMessage, type ControllerMessage } from "./protocol";
@@ -145,7 +146,7 @@ test("enabled hook starts a real server, registers it, and round-trips every mes
 
     client = await connectClient(record.port);
     client.send({ type: "hello", token: record.token });
-    await new Promise((res) => setTimeout(res, 60));
+    await waitUntil(() => client!.messages.some((m) => (m as { type: string }).type === "hello-ok"));
     expect(client.messages).toContainEqual({ type: "hello-ok" });
     // `ready` used to be unassertable: the hook broadcast it the instant
     // the record was written, before any controller could have read the
@@ -154,17 +155,18 @@ test("enabled hook starts a real server, registers it, and round-trips every mes
     // all. Capabilities are deliberately not asserted -- trueColor comes
     // from COLORTERM and the dimensions from the terminal, so pinning them
     // would pin the machine.
+    await waitUntil(() => client!.messages.some((m) => (m as { type: string }).type === "ready"));
     const ready = client.messages.find((m) => (m as { type: string }).type === "ready");
     expect(ready).toBeDefined();
     expect((ready as unknown as { scenario: string }).scenario).toBe("display");
 
     client.send({ type: "get", key: "content" });
-    await new Promise((res) => setTimeout(res, 60));
+    await waitUntil(() => getSeen === "content");
     expect(getSeen).toBe("content");
     expect(client.messages).toContainEqual({ type: "value", key: "content", data: { echoed: "content" } });
 
     client.send({ type: "update", config: { x: 1 } });
-    await new Promise((res) => setTimeout(res, 60));
+    await waitUntil(() => updateSeen !== undefined);
     expect(updateSeen).toEqual({ x: 1 });
 
     // First outcome wins, and the two after it are dropped. A canvas has
@@ -175,15 +177,15 @@ test("enabled hook starts a real server, registers it, and round-trips every mes
     handle!.sendSelected({ picked: 2 });
     handle!.sendCancelled("nvm");
     handle!.sendError("oops");
-    await new Promise((res) => setTimeout(res, 60));
+    await waitUntil(() => outcomesIn(client!.messages).length >= 1);
     expect(client.messages).toContainEqual({ type: "selected", data: { picked: 2 } });
     expect(outcomesIn(client.messages)).toHaveLength(1);
   } finally {
     client?.close();
     r.dispose();
-    // Unmount's effect cleanup (server.stop() + deleteRecord()) runs as a
-    // passive effect, one macrotask after synchronous unmount returns.
-    await new Promise((res) => setTimeout(res, 40));
+    // No assertion depends on the passive unmount cleanup having finished
+    // here -- the explicit deleteRecord below is an idempotent backstop
+    // regardless of whether it has -- so nothing to poll for; just clean up.
     await deleteRecord(id);
     restoreEnv();
   }
@@ -205,7 +207,10 @@ test("unmounting stops the server and removes the registry record", async () => 
     expect(await r.settle()).toContain("connected=true");
 
     r.dispose();
-    await new Promise((res) => setTimeout(res, 60));
+    // Unmount's cleanup (server.stop() + deleteRecord()) is a passive
+    // effect, so it runs some macrotasks after synchronous unmount returns
+    // -- poll for it rather than guessing how many.
+    await waitUntil(async () => (await readRecord(id)) === null);
 
     // The record is gone (not merely stale/dead-pid gone -- readRecord would
     // also return null for a dead pid -- so also prove the port itself is
@@ -247,11 +252,12 @@ test("a throwing onUpdate callback is routed to the log file, not dropped or cra
 
     client = await connectClient(record.port);
     client.send({ type: "hello", token: record.token });
-    await new Promise((res) => setTimeout(res, 60));
+    await waitUntil(() => client!.messages.some((m) => (m as { type: string }).type === "hello-ok"));
     client.send({ type: "update", config: { anything: true } });
     // Give the throw time to travel: server.ts's try/catch around
-    // onMessage -> our onError -> logToFile's async appendFile.
-    await new Promise((res) => setTimeout(res, 150));
+    // onMessage -> our onError -> logToFile's async appendFile. Poll the log
+    // file directly rather than guessing how long that chain takes.
+    await waitUntil(async () => (await Bun.file(path).text().catch(() => "")).includes("boom-from-onUpdate"));
 
     const log = await Bun.file(path).text();
     expect(log).toContain("ipc error:");
@@ -260,12 +266,11 @@ test("a throwing onUpdate callback is routed to the log file, not dropped or cra
     // The connection itself must still be alive: Task 6's contract is that
     // a throwing onMessage is caught per-message, not fatal to the socket.
     client.send({ type: "ping" });
-    await new Promise((res) => setTimeout(res, 60));
+    await waitUntil(() => client!.messages.some((m) => (m as { type: string }).type === "pong"));
     expect(client.messages).toContainEqual({ type: "pong" });
   } finally {
     client?.close();
     r.dispose();
-    await new Promise((res) => setTimeout(res, 40));
     await deleteRecord(id);
     await unlink(path).catch(() => {});
     restoreEnv();
@@ -308,7 +313,7 @@ test("a missing host at startup still starts the server, host-less, instead of f
     const client = await connectClient(record.port);
     try {
       client.send({ type: "hello", token: record.token });
-      await new Promise((res) => setTimeout(res, 60));
+      await waitUntil(() => client.messages.some((m) => (m as { type: string }).type === "hello-ok"));
       expect(client.messages).toContainEqual({ type: "hello-ok" });
     } finally {
       client.close();
@@ -318,7 +323,6 @@ test("a missing host at startup still starts the server, host-less, instead of f
     expect(log).not.toContain("startup failed:");
   } finally {
     r.dispose();
-    await new Promise((res) => setTimeout(res, 40));
     await deleteRecord(id);
     await unlink(path).catch(() => {});
     if (savedTmux === undefined) delete process.env.TMUX;

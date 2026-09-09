@@ -177,15 +177,17 @@ add as `anthropics/claude-plugins-community` and install from as
    is declared for update purposes — all four are things a submission and
    its reviewers want, and attribution in particular matters here given the
    fork.
-2. **`canvas` is the name of both a skill and a command.**
-   `claude plugin details canvas` reports `Skills (10)` and lists `canvas`
-   twice: once for `skills/canvas/SKILL.md` and once for
-   `commands/canvas.md`. The docs also now describe `commands/` as the
-   legacy layout ("Skills as flat Markdown files. Use `skills/` for new
-   plugins"), so the fix is probably to fold `commands/canvas.md` into the
-   skills layout under a name that does not collide — and to decide whether
-   an interactive `/canvas` entry point is still worth having now that every
-   canvas has its own skill with a "when to reach for this" section.
+2. ~~**`canvas` is the name of both a skill and a command.**~~ Fixed: this
+   collided because both `skills/canvas/SKILL.md` and `commands/canvas.md`
+   declared `name: canvas`. Renamed the command's frontmatter `name` to
+   `canvas-legacy` — the least disruptive fix that removes the collision
+   without moving or rewriting either file's content. `commands/canvas.md`'s
+   stale frontmatter description (it listed 5 of the 8 canvas kinds, though
+   the file's own body already covered all eight) was corrected at the same
+   time. Folding `commands/canvas.md` into the skills layout outright, and
+   deciding whether an interactive `/canvas` entry point is still worth
+   having now that every canvas has its own skill, remain open — this was
+   the minimal fix, not that larger decision.
 
 
 Depends on 1 and 2 being real. Docs, versioning, marketplace, contributions.

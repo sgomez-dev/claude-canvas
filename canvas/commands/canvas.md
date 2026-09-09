@@ -1,6 +1,6 @@
 ---
-name: canvas
-description: Spawn interactive terminal canvases for calendars, documents, flight booking, diff review, and option pickers
+name: canvas-legacy
+description: Spawn interactive terminal canvases for calendars, documents, flight booking, diff review, option pickers, forms, tables, and dashboards
 ---
 
 # Canvas Command
@@ -172,3 +172,4 @@ Read these skills for detailed configuration options:
 - `picker` - Option picker
 - `form` - Structured fields with validation
 - `table` - Tabular display, view-only
+- `dashboard` - Several of the above composed in one pane

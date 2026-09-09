@@ -1,6 +1,6 @@
 ---
 name: canvas-legacy
-description: Spawn interactive terminal canvases for calendars, documents, flight booking, diff review, option pickers, forms, tables, and dashboards
+description: Spawn interactive terminal canvases for calendars, documents, flight booking, diff review, option pickers, forms, tables, images, and dashboards
 ---
 
 # Canvas Command
@@ -118,6 +118,9 @@ bun run ${CLAUDE_PLUGIN_ROOT}/dist/cli.js spawn form --config '{"fields": [...]}
 
 # Tabular display (view-only: closes with cancelled, never selected)
 bun run ${CLAUDE_PLUGIN_ROOT}/dist/cli.js spawn table --config '{"columns": [...], "rows": [...]}'
+
+# A PNG, scaled to the pane (view-only)
+bun run ${CLAUDE_PLUGIN_ROOT}/dist/cli.js spawn image --config '{"path": "media/screenshot.png"}'
 ```
 
 ### Step 3b: Update a canvas in place (optional)
@@ -172,4 +175,5 @@ Read these skills for detailed configuration options:
 - `picker` - Option picker
 - `form` - Structured fields with validation
 - `table` - Tabular display, view-only
+- `image` - PNG display, scaled to the pane, view-only
 - `dashboard` - Several of the above composed in one pane

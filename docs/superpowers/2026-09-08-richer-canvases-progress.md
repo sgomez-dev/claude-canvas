@@ -495,18 +495,130 @@ something about the age of Apple's ncurses database and nothing whatsoever
 about the terminal. `COLORTERM=truecolor` was the accurate signal, and
 `supports-color` keys off exactly that.
 
-### Next: the `image` canvas on half-blocks, before any other tier
+### The `image` canvas — DONE
 
-Reordered deliberately. The plan had step 4 as Sixel, but nothing
-user-facing reaches the image pipeline yet: the decoder and the renderer are
-both verified and neither is reachable from the CLI, so on the machine this
-was built on there is still no way to look at an image. Wiring the `image`
-canvas to the tier that works everywhere makes the pipeline visible and
-usable on the default macOS terminal first, and turns every later tier into
+Registered in all three places the CLAUDE.md checklist names, so `spawn
+image` is reachable: `KIND_DEFAULT_SCENARIO` in `cli.ts`, a case in
+`renderCanvas`, and `image:display` in the scenario registry. Three files as
+the anatomy requires -- `image.tsx` (shell), `image/view.tsx`,
+`image/validate.ts` -- plus a skill, and updates to the main canvas skill,
+`README.md` and `commands/canvas.md`. 22 tests. 484 in total.
+
+**Ruling 26: the decode lives in the shell, not the validator.** Every other
+validator here is pure, and this one stays pure: a `path` is shape-checked
+only, because whether the file exists, is readable and is really a PNG can
+only be answered by reading it. So the shell has two error sources -- a
+config the validator rejected and a file that turned out not to be a PNG --
+and funnels both through one channel. Base64 *is* decoded in the validator,
+since that needs no I/O. Cost if wrong: a composing canvas could not
+validate a region config without touching the disk.
+
+**Ruling 27: exactly one of `path` and `data`.** Both set is rejected rather
+than one silently winning, because then the other's typo would be
+invisible. `data` exists at all because a controller and a canvas need not
+share a filesystem: the canvas runs on the machine hosting the terminal.
+
+**Ruling 28: the view takes no `focused` prop.** Every other view here takes
+one and gates its keys on it. This one has no keys -- the image is scaled to
+the pane, so there is nothing to scroll or pan -- and a prop accepted and
+ignored reads as a contract to whoever finds it next.
+
+**Ruling 29: the footer string that is measured is the string that is
+rendered.** `${'${image.width}×${image.height}'}` plus the hint, bound once and used for both
+the wrap budget and the render. This is the same defect that was latent in
+five views earlier this phase, so it was not going to be reintroduced in the
+sixth.
+
+**Sabotage-checked, and two mechanisms did not survive it.** Four
+sabotages of the surviving code are caught: not reporting a decode error
+(1 fail), a title that does not cost its row (2), a footer that drops the
+dimensions (5), and an image that ignores the chrome and overflows the pane
+(3).
+
+Two things I had copied from the primitives turned out to cause nothing, and
+both are now gone rather than left as scaffolding:
+
+- **The `generation` counter.** The four primitives remount their view on a
+  pushed config because their interaction state is keyed by field or hunk
+  id. `ImageView` holds no state at all, so deleting the `key` moved no
+  test. Removed, with a note to add one back the moment the view grows zoom
+  or pan.
+- **`sentRef.current = false` in `onUpdate`.** Meant to re-arm the error
+  channel so a second bad config reports its own reason. It cannot: an
+  error is a **terminal outcome**, and `emitOutcome` returns early once one
+  exists (`if (outcomeRef.current) return;`). The second report was already
+  being dropped by the runtime, so re-arming only made the shell attempt
+  it.
+
+**A protocol consequence worth knowing before writing a controller.** Once
+any config is rejected, the canvas has spent its single answer: a second bad
+config reports nothing, and a controller attaching afterwards is replayed
+the FIRST error rather than the current state. There is a test pinning
+exactly that, written after my own assumption to the contrary failed. The
+four primitives carry the same inert `sentRef` reset -- a follow-up, not
+touched here, because a drive-by edit across four shells is not this step.
+
+### Residual: the in-flight read guard is correct and untested
+
+The load effect discards a decode that resolves after the config changed.
+The race is real and reachable -- the `await` on the file read is a genuine
+yield point, so a config pushed during it runs the cleanup and starts a
+second read while the first is suspended -- and the guard is NOT covered by
+a test. Two attempts, both recorded so nobody repeats them:
+
+1. **Through IPC.** Push a slow payload, then immediately a fast one.
+   `decodePng` is synchronous, so a payload slow enough to overlap also
+   blocks the event loop the IPC needs: the first attempt failed with
+   "handshake failed", and a second version **hung for over four minutes**
+   rather than failing. The hang was not diagnosed. A hanging test is worse
+   than no test, so it was removed.
+2. **Through props.** Re-render the root with a new `config`. Does not
+   reach it: the config lives in `useState`, fed only by IPC, so a prop
+   change is ignored by design. The `rerender` helper added to the harness
+   for this was removed again, since nothing used it.
+
+What would make it testable: an asynchronous or chunked decoder, or a seam
+that lets a test drive the config without a socket. **Do not remove the
+guard on the strength of no test covering it** -- the comment in
+`image.tsx` says so too.
+
+### Found while smoke-testing: the pane capture proved nothing
+
+`smoke.sh` captured each pane at a fixed moment after the record appeared.
+For `image` that landed on the "Loading media/screenshot.png…" frame, so the
+one case whose whole point was visual evidence was showing the state before
+the image existed. The outcome assertion still passed, which is exactly how
+a check that verifies nothing looks from the outside.
+
+Fixed with `wait_for_pane`, which polls `capture-pane` for a marker the case
+declares, and **counts as a pass or a fail** rather than merely delaying the
+screenshot. The image case declares `▀`. Verified in a real tmux pane on
+Apple Terminal: the pane shows the marker in under a second and the
+screenshot renders. 16 smoke cases, 0 fail.
+
+### Also measured: the decoder blocks the canvas
+
+`decodePng` is synchronous, so a large image freezes the canvas -- including
+its IPC -- for the duration. The repository's 3384×2160 screenshot takes
+about 36 ms, which is invisible; the 16-megapixel ceiling bounds the worst
+case, but a file near it would stall a canvas for a noticeable moment and
+make it briefly unable to answer a `ping` or a `close`. Not fixed, and it is
+what defeated the race test above.
+
+### Next: Kitty, then tmux passthrough, then Sixel last
+
+The pipeline is now reachable end to end on the tier that works everywhere,
+which was the point of doing it before any protocol. Each remaining tier is
 a swap behind a working canvas rather than a leap of faith.
 
-Then Kitty (a straightforward base64 payload, and Ghostty reports as kitty),
-then tmux passthrough, and **Sixel last** -- unchanged reasoning: it is the
-one part that cannot be verified from here without `brew install libsixel`
-for `sixel2png` as an independent oracle, and everything before it carries
-no verification risk at all.
+Kitty next: a base64 payload, and Ghostty reports as kitty so one
+implementation covers both. Then tmux passthrough, which every protocol tier
+needs and half-blocks does not. **Sixel last**, unchanged reasoning: it is
+the only part that cannot be verified from here without `brew install
+libsixel` for `sixel2png` as an independent oracle.
+
+Open follow-ups, none blocking: `image` is not a dashboard region kind yet
+(adding one means a case in `dashboard/validate.ts` and one in
+`renderRegion`); the four primitives' inert `sentRef` reset; and the region
+footer hint that still says "Esc: cancel" when Escape closes the whole
+dashboard.

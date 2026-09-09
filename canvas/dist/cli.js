@@ -28878,6 +28878,482 @@ var init_dashboard = __esm(async () => {
   jsx_dev_runtime23 = __toESM(require_jsx_dev_runtime(), 1);
 });
 
+// canvas/src/canvases/halfblocks.ts
+function hex({ r, g, b }) {
+  return `#${(1 << 24 | r << 16 | g << 8 | b).toString(16).slice(1)}`;
+}
+function fitToCells(imageWidth, imageHeight, maxColumns, maxRows) {
+  if (imageWidth <= 0 || imageHeight <= 0 || maxColumns <= 0 || maxRows <= 0) {
+    return { columns: 1, rows: 1 };
+  }
+  const byWidth = {
+    columns: maxColumns,
+    rows: Math.max(1, Math.round(maxColumns * imageHeight / (imageWidth * 2)))
+  };
+  if (byWidth.rows <= maxRows)
+    return byWidth;
+  return {
+    rows: maxRows,
+    columns: Math.max(1, Math.round(maxRows * 2 * imageWidth / imageHeight))
+  };
+}
+function averageBox(img, x0, x1, y0, y1, background) {
+  let r = 0;
+  let g = 0;
+  let b = 0;
+  let n = 0;
+  for (let y = y0;y < y1; y++) {
+    for (let x = x0;x < x1; x++) {
+      const o = (y * img.width + x) * 4;
+      const a = img.pixels[o + 3] / 255;
+      r += img.pixels[o] * a + background.r * (1 - a);
+      g += img.pixels[o + 1] * a + background.g * (1 - a);
+      b += img.pixels[o + 2] * a + background.b * (1 - a);
+      n++;
+    }
+  }
+  if (n === 0)
+    return background;
+  return { r: Math.round(r / n), g: Math.round(g / n), b: Math.round(b / n) };
+}
+function span(index, targetExtent, sourceExtent) {
+  const start = Math.floor(index * sourceExtent / targetExtent);
+  const end = Math.floor((index + 1) * sourceExtent / targetExtent);
+  return [start, Math.max(end, start + 1)];
+}
+function toHalfBlocks(img, columns, rows, background = DEFAULT_BACKGROUND) {
+  const out = [];
+  const pixelRows = rows * 2;
+  for (let row = 0;row < rows; row++) {
+    const [topY0, topY1] = span(row * 2, pixelRows, img.height);
+    const [botY0, botY1] = span(row * 2 + 1, pixelRows, img.height);
+    const runs = [];
+    for (let col = 0;col < columns; col++) {
+      const [x0, x1] = span(col, columns, img.width);
+      const fg = hex(averageBox(img, x0, x1, topY0, topY1, background));
+      const bg = hex(averageBox(img, x0, x1, botY0, botY1, background));
+      const last = runs[runs.length - 1];
+      if (last !== undefined && last.fg === fg && last.bg === bg)
+        last.count++;
+      else
+        runs.push({ fg, bg, count: 1 });
+    }
+    out.push(runs);
+  }
+  return out;
+}
+var DEFAULT_BACKGROUND, HALF_BLOCK = "\u2580";
+var init_halfblocks = __esm(() => {
+  DEFAULT_BACKGROUND = { r: 0, g: 0, b: 0 };
+});
+
+// canvas/src/canvases/halfblock-view.tsx
+function HalfBlockImage({
+  image,
+  columns,
+  rows,
+  background = DEFAULT_BACKGROUND
+}) {
+  const grid = import_react45.useMemo(() => toHalfBlocks(image, columns, rows, background), [image, columns, rows, background]);
+  return /* @__PURE__ */ jsx_dev_runtime24.jsxDEV(Box_default, {
+    flexDirection: "column",
+    children: grid.map((runs, y) => /* @__PURE__ */ jsx_dev_runtime24.jsxDEV(Box_default, {
+      children: runs.map((run, i) => /* @__PURE__ */ jsx_dev_runtime24.jsxDEV(Text, {
+        color: run.fg,
+        backgroundColor: run.bg,
+        children: HALF_BLOCK.repeat(run.count)
+      }, i, false, undefined, this))
+    }, y, false, undefined, this))
+  }, undefined, false, undefined, this);
+}
+var import_react45, jsx_dev_runtime24;
+var init_halfblock_view = __esm(async () => {
+  init_halfblocks();
+  await init_build2();
+  import_react45 = __toESM(require_react(), 1);
+  jsx_dev_runtime24 = __toESM(require_jsx_dev_runtime(), 1);
+});
+
+// canvas/src/canvases/image/view.tsx
+function ImageView({
+  image,
+  title,
+  background,
+  budget,
+  terminalWidth
+}) {
+  const innerWidth = Math.max(1, terminalWidth - HORIZONTAL_CHROME6);
+  const footerText = `${image.width}\xD7${image.height}  ${FOOTER_HINT5}`;
+  const footerOverflow = Math.max(0, wrappedLineCount(footerText, innerWidth) - 1);
+  const chrome = BASE_CHROME_ROWS + (title !== undefined ? 1 : 0) + footerOverflow;
+  const availableRows = Math.max(1, budget - chrome);
+  const fit = fitToCells(image.width, image.height, innerWidth, availableRows);
+  return /* @__PURE__ */ jsx_dev_runtime25.jsxDEV(Box_default, {
+    flexDirection: "column",
+    borderStyle: "round",
+    borderColor: "cyan",
+    paddingX: 1,
+    children: [
+      title !== undefined && /* @__PURE__ */ jsx_dev_runtime25.jsxDEV(Text, {
+        bold: true,
+        color: "cyan",
+        children: title
+      }, undefined, false, undefined, this),
+      /* @__PURE__ */ jsx_dev_runtime25.jsxDEV(HalfBlockImage, {
+        image,
+        columns: fit.columns,
+        rows: fit.rows,
+        background
+      }, undefined, false, undefined, this),
+      /* @__PURE__ */ jsx_dev_runtime25.jsxDEV(Text, {
+        dimColor: true,
+        children: footerText
+      }, undefined, false, undefined, this)
+    ]
+  }, undefined, true, undefined, this);
+}
+var jsx_dev_runtime25, HORIZONTAL_CHROME6 = 4, BASE_CHROME_ROWS = 3, FOOTER_HINT5 = "Esc: close";
+var init_view6 = __esm(async () => {
+  init_halfblocks();
+  init_width();
+  await __promiseAll([
+    init_build2(),
+    init_halfblock_view()
+  ]);
+  jsx_dev_runtime25 = __toESM(require_jsx_dev_runtime(), 1);
+});
+
+// canvas/src/canvases/image/validate.ts
+function fail(error) {
+  return { source: null, title: undefined, background: DEFAULT_BACKGROUND, error };
+}
+function validateImage(config) {
+  const path = config?.path;
+  const data = config?.data;
+  if (path !== undefined && data !== undefined) {
+    return fail("image config: give either 'path' or 'data', not both");
+  }
+  if (path === undefined && data === undefined) {
+    return fail("image config: needs a 'path' or 'data'");
+  }
+  const title = config?.title;
+  if (title !== undefined && typeof title !== "string") {
+    return fail("image config: 'title' must be a string");
+  }
+  const rawBackground = config?.background;
+  let background = DEFAULT_BACKGROUND;
+  if (rawBackground !== undefined) {
+    if (typeof rawBackground !== "string" || !HEX.test(rawBackground)) {
+      return fail(`image config: 'background' must be a hex colour like "#1e2a34", got ${JSON.stringify(rawBackground)}`);
+    }
+    background = {
+      r: parseInt(rawBackground.slice(1, 3), 16),
+      g: parseInt(rawBackground.slice(3, 5), 16),
+      b: parseInt(rawBackground.slice(5, 7), 16)
+    };
+  }
+  if (path !== undefined) {
+    if (typeof path !== "string" || path.length === 0) {
+      return fail("image config: 'path' must be a non-empty string");
+    }
+    return { source: { kind: "path", path }, title, background, error: null };
+  }
+  if (typeof data !== "string" || data.length === 0) {
+    return fail("image config: 'data' must be a non-empty base64 string");
+  }
+  let bytes;
+  try {
+    const buf = Buffer.from(data, "base64");
+    if (buf.length === 0) {
+      return fail("image config: 'data' is not valid base64");
+    }
+    bytes = new Uint8Array(buf);
+  } catch {
+    return fail("image config: 'data' is not valid base64");
+  }
+  return { source: { kind: "data", bytes }, title, background, error: null };
+}
+var HEX;
+var init_validate5 = __esm(() => {
+  init_halfblocks();
+  HEX = /^#[0-9a-fA-F]{6}$/;
+});
+
+// canvas/src/canvases/png.ts
+import { inflateSync } from "zlib";
+function u32(bytes, at) {
+  return bytes[at] * 16777216 + bytes[at + 1] * 65536 + bytes[at + 2] * 256 + bytes[at + 3];
+}
+function paeth(a, b, c) {
+  const p = a + b - c;
+  const pa = Math.abs(p - a);
+  const pb = Math.abs(p - b);
+  const pc = Math.abs(p - c);
+  if (pa <= pb && pa <= pc)
+    return a;
+  if (pb <= pc)
+    return b;
+  return c;
+}
+function decodePng(bytes) {
+  if (bytes.byteLength < 8 + 25) {
+    throw new PngDecodeError("not a PNG: too short to contain a header");
+  }
+  for (let i = 0;i < SIGNATURE.length; i++) {
+    if (bytes[i] !== SIGNATURE[i]) {
+      throw new PngDecodeError("not a PNG: signature does not match");
+    }
+  }
+  let width = 0;
+  let height = 0;
+  let channels = 0;
+  let sawHeader = false;
+  const idat = [];
+  let at = 8;
+  while (at + 8 <= bytes.byteLength) {
+    const length = u32(bytes, at);
+    const type = String.fromCharCode(bytes[at + 4], bytes[at + 5], bytes[at + 6], bytes[at + 7]);
+    const dataAt = at + 8;
+    if (dataAt + length + 4 > bytes.byteLength) {
+      throw new PngDecodeError(`truncated PNG: chunk ${type} claims ${length} bytes past the end`);
+    }
+    if (type === "IHDR") {
+      if (length !== 13)
+        throw new PngDecodeError(`malformed IHDR: ${length} bytes, expected 13`);
+      width = u32(bytes, dataAt);
+      height = u32(bytes, dataAt + 4);
+      const bitDepth = bytes[dataAt + 8];
+      const colourType = bytes[dataAt + 9];
+      const interlace = bytes[dataAt + 12];
+      if (width === 0 || height === 0) {
+        throw new PngDecodeError(`PNG has zero extent: ${width}x${height}`);
+      }
+      if (width * height > MAX_PIXELS) {
+        throw new PngDecodeError(`PNG is too large: ${width}x${height} exceeds the ${MAX_PIXELS} pixel ceiling`);
+      }
+      if (bitDepth !== 8) {
+        throw new PngDecodeError(`unsupported PNG bit depth ${bitDepth}: only 8 bits per channel is supported`);
+      }
+      if (interlace !== 0) {
+        throw new PngDecodeError("unsupported PNG: interlaced (Adam7) files are not supported");
+      }
+      const named = {
+        0: "greyscale",
+        3: "palette",
+        4: "greyscale with alpha"
+      };
+      if (named[colourType] !== undefined) {
+        throw new PngDecodeError(`unsupported PNG colour type ${colourType} (${named[colourType]}): only RGB and RGBA are supported`);
+      }
+      const c = CHANNELS[colourType];
+      if (c === undefined) {
+        throw new PngDecodeError(`unrecognised PNG colour type ${colourType}`);
+      }
+      channels = c;
+      sawHeader = true;
+    } else if (type === "IDAT") {
+      if (!sawHeader)
+        throw new PngDecodeError("malformed PNG: IDAT before IHDR");
+      idat.push(bytes.subarray(dataAt, dataAt + length));
+    } else if (type === "IEND") {
+      break;
+    }
+    at = dataAt + length + 4;
+  }
+  if (!sawHeader)
+    throw new PngDecodeError("malformed PNG: no IHDR chunk");
+  if (idat.length === 0)
+    throw new PngDecodeError("malformed PNG: no image data");
+  const total = idat.reduce((sum, c) => sum + c.byteLength, 0);
+  const joined = new Uint8Array(total);
+  let offset = 0;
+  for (const chunk of idat) {
+    joined.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  let raw;
+  try {
+    raw = new Uint8Array(inflateSync(joined));
+  } catch (e) {
+    throw new PngDecodeError(`PNG image data could not be decompressed: ${e.message}`);
+  }
+  const stride = width * channels;
+  const expected = (stride + 1) * height;
+  if (raw.byteLength < expected) {
+    throw new PngDecodeError(`truncated PNG image data: ${raw.byteLength} bytes, expected ${expected}`);
+  }
+  const lines = new Uint8Array(stride * height);
+  for (let y = 0;y < height; y++) {
+    const filter = raw[y * (stride + 1)];
+    const src = y * (stride + 1) + 1;
+    const dst = y * stride;
+    const up = dst - stride;
+    for (let i = 0;i < stride; i++) {
+      const x = raw[src + i];
+      const a = i >= channels ? lines[dst + i - channels] : 0;
+      const b = y > 0 ? lines[up + i] : 0;
+      const c = y > 0 && i >= channels ? lines[up + i - channels] : 0;
+      let value;
+      switch (filter) {
+        case 0:
+          value = x;
+          break;
+        case 1:
+          value = x + a;
+          break;
+        case 2:
+          value = x + b;
+          break;
+        case 3:
+          value = x + (a + b >> 1);
+          break;
+        case 4:
+          value = x + paeth(a, b, c);
+          break;
+        default:
+          throw new PngDecodeError(`unrecognised PNG scanline filter ${filter} on row ${y}`);
+      }
+      lines[dst + i] = value & 255;
+    }
+  }
+  if (channels === 4)
+    return { width, height, pixels: lines };
+  const pixels = new Uint8Array(width * height * 4);
+  for (let p = 0, q = 0;p < lines.byteLength; p += 3, q += 4) {
+    pixels[q] = lines[p];
+    pixels[q + 1] = lines[p + 1];
+    pixels[q + 2] = lines[p + 2];
+    pixels[q + 3] = 255;
+  }
+  return { width, height, pixels };
+}
+var PngDecodeError, SIGNATURE, MAX_PIXELS, CHANNELS;
+var init_png = __esm(() => {
+  PngDecodeError = class PngDecodeError extends Error {
+    constructor(message) {
+      super(message);
+      this.name = "PngDecodeError";
+    }
+  };
+  SIGNATURE = [137, 80, 78, 71, 13, 10, 26, 10];
+  MAX_PIXELS = 16 * 1024 * 1024;
+  CHANNELS = { 2: 3, 6: 4 };
+});
+
+// canvas/src/canvases/image.tsx
+function Image({
+  id,
+  config: initialConfig,
+  scenario = "display",
+  enabled
+}) {
+  const { exit } = use_app_default();
+  const { stdout } = use_stdout_default();
+  const [config, setConfig] = import_react46.useState(initialConfig);
+  const { source, title, background, error } = import_react46.useMemo(() => validateImage(config), [config]);
+  const [image, setImage] = import_react46.useState(null);
+  const [loadError, setLoadError] = import_react46.useState(null);
+  import_react46.useEffect(() => {
+    if (source === null)
+      return;
+    let cancelled = false;
+    setImage(null);
+    setLoadError(null);
+    (async () => {
+      try {
+        const bytes = source.kind === "data" ? source.bytes : await Bun.file(source.path).bytes();
+        const decoded = decodePng(bytes);
+        if (!cancelled)
+          setImage(decoded);
+      } catch (e) {
+        const where = source.kind === "data" ? "inline data" : source.path;
+        const why = e instanceof Error ? e.message : String(e);
+        if (!cancelled)
+          setLoadError(`image: could not read ${where}: ${why}`);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [source]);
+  const problem = error ?? loadError;
+  const submittedRef = import_react46.useRef(false);
+  const sentRef = import_react46.useRef(false);
+  const ipc = useCanvasServer({
+    id,
+    kind: "image",
+    scenario,
+    enabled,
+    onClose: () => {},
+    onUpdate: (next) => {
+      setConfig(next);
+    }
+  });
+  import_react46.useEffect(() => {
+    if (problem !== null && ipc.isConnected && !sentRef.current) {
+      sentRef.current = true;
+      ipc.sendError(problem);
+    }
+  }, [problem, ipc.isConnected, ipc.sendError]);
+  use_input_default((_input, key) => {
+    if (!key.escape)
+      return;
+    if (submittedRef.current)
+      return;
+    submittedRef.current = true;
+    ipc.sendCancelled("escape");
+    exit();
+  });
+  if (problem !== null) {
+    return /* @__PURE__ */ jsx_dev_runtime26.jsxDEV(Box_default, {
+      flexDirection: "column",
+      borderStyle: "round",
+      borderColor: "red",
+      padding: 1,
+      children: /* @__PURE__ */ jsx_dev_runtime26.jsxDEV(Text, {
+        color: "red",
+        children: problem
+      }, undefined, false, undefined, this)
+    }, undefined, false, undefined, this);
+  }
+  if (image === null) {
+    return /* @__PURE__ */ jsx_dev_runtime26.jsxDEV(Box_default, {
+      flexDirection: "column",
+      borderStyle: "round",
+      borderColor: "cyan",
+      paddingX: 1,
+      children: /* @__PURE__ */ jsx_dev_runtime26.jsxDEV(Text, {
+        dimColor: true,
+        children: loadingLabel(source)
+      }, undefined, false, undefined, this)
+    }, undefined, false, undefined, this);
+  }
+  return /* @__PURE__ */ jsx_dev_runtime26.jsxDEV(ImageView, {
+    image,
+    title,
+    background,
+    budget: stdout?.rows ?? 24,
+    terminalWidth: stdout?.columns ?? 80
+  }, undefined, false, undefined, this);
+}
+function loadingLabel(source) {
+  if (source === null)
+    return "Loading\u2026";
+  return source.kind === "data" ? "Decoding\u2026" : `Loading ${source.path}\u2026`;
+}
+var import_react46, jsx_dev_runtime26;
+var init_image = __esm(async () => {
+  init_validate5();
+  init_png();
+  await __promiseAll([
+    init_build2(),
+    init_use_canvas_server(),
+    init_view6()
+  ]);
+  import_react46 = __toESM(require_react(), 1);
+  jsx_dev_runtime26 = __toESM(require_jsx_dev_runtime(), 1);
+});
+
 // canvas/src/canvases/index.tsx
 import { appendFile as appendFile2, mkdir as mkdir3 } from "fs/promises";
 import { dirname as dirname2 } from "path";
@@ -28919,13 +29395,15 @@ async function renderCanvas(kind, id, config, options) {
       return renderForm(id, config, options);
     case "picker":
       return renderPicker(id, config, options);
+    case "image":
+      return renderImage(id, config, options);
     default:
       await logUnknownKind(id, kind);
       return;
   }
 }
 async function renderCalendar(id, config, options) {
-  const { waitUntilExit } = render_default(/* @__PURE__ */ jsx_dev_runtime24.jsxDEV(Calendar, {
+  const { waitUntilExit } = render_default(/* @__PURE__ */ jsx_dev_runtime27.jsxDEV(Calendar, {
     id,
     config,
     enabled: options?.enabled ?? false,
@@ -28936,7 +29414,7 @@ async function renderCalendar(id, config, options) {
   await waitUntilExit();
 }
 async function renderDocument(id, config, options) {
-  const { waitUntilExit } = render_default(/* @__PURE__ */ jsx_dev_runtime24.jsxDEV(Document, {
+  const { waitUntilExit } = render_default(/* @__PURE__ */ jsx_dev_runtime27.jsxDEV(Document, {
     id,
     config,
     enabled: options?.enabled ?? false,
@@ -28947,7 +29425,7 @@ async function renderDocument(id, config, options) {
   await waitUntilExit();
 }
 async function renderFlight(id, config, options) {
-  const { waitUntilExit } = render_default(/* @__PURE__ */ jsx_dev_runtime24.jsxDEV(FlightCanvas, {
+  const { waitUntilExit } = render_default(/* @__PURE__ */ jsx_dev_runtime27.jsxDEV(FlightCanvas, {
     id,
     config,
     enabled: options?.enabled ?? false,
@@ -28958,7 +29436,7 @@ async function renderFlight(id, config, options) {
   await waitUntilExit();
 }
 async function renderDiff(id, config, options) {
-  const { waitUntilExit } = render_default(/* @__PURE__ */ jsx_dev_runtime24.jsxDEV(Diff, {
+  const { waitUntilExit } = render_default(/* @__PURE__ */ jsx_dev_runtime27.jsxDEV(Diff, {
     id,
     config,
     enabled: options?.enabled ?? false,
@@ -28969,7 +29447,7 @@ async function renderDiff(id, config, options) {
   await waitUntilExit();
 }
 async function renderPicker(id, config, options) {
-  const { waitUntilExit } = render_default(/* @__PURE__ */ jsx_dev_runtime24.jsxDEV(Picker, {
+  const { waitUntilExit } = render_default(/* @__PURE__ */ jsx_dev_runtime27.jsxDEV(Picker, {
     id,
     config,
     enabled: options?.enabled ?? false,
@@ -28980,7 +29458,7 @@ async function renderPicker(id, config, options) {
   await waitUntilExit();
 }
 async function renderForm(id, config, options) {
-  const { waitUntilExit } = render_default(/* @__PURE__ */ jsx_dev_runtime24.jsxDEV(Form, {
+  const { waitUntilExit } = render_default(/* @__PURE__ */ jsx_dev_runtime27.jsxDEV(Form, {
     id,
     config,
     enabled: options?.enabled ?? false,
@@ -28991,7 +29469,18 @@ async function renderForm(id, config, options) {
   await waitUntilExit();
 }
 async function renderTable(id, config, options) {
-  const { waitUntilExit } = render_default(/* @__PURE__ */ jsx_dev_runtime24.jsxDEV(Table, {
+  const { waitUntilExit } = render_default(/* @__PURE__ */ jsx_dev_runtime27.jsxDEV(Table, {
+    id,
+    config,
+    enabled: options?.enabled ?? false,
+    scenario: options?.scenario || "display"
+  }, undefined, false, undefined, this), {
+    exitOnCtrlC: true
+  });
+  await waitUntilExit();
+}
+async function renderImage(id, config, options) {
+  const { waitUntilExit } = render_default(/* @__PURE__ */ jsx_dev_runtime27.jsxDEV(Image, {
     id,
     config,
     enabled: options?.enabled ?? false,
@@ -29002,7 +29491,7 @@ async function renderTable(id, config, options) {
   await waitUntilExit();
 }
 async function renderDashboard(id, config, options) {
-  const { waitUntilExit } = render_default(/* @__PURE__ */ jsx_dev_runtime24.jsxDEV(Dashboard, {
+  const { waitUntilExit } = render_default(/* @__PURE__ */ jsx_dev_runtime27.jsxDEV(Dashboard, {
     id,
     config,
     enabled: options?.enabled ?? false,
@@ -29012,7 +29501,7 @@ async function renderDashboard(id, config, options) {
   });
   await waitUntilExit();
 }
-var jsx_dev_runtime24;
+var jsx_dev_runtime27;
 var init_canvases = __esm(async () => {
   init_paths();
   await __promiseAll([
@@ -29024,9 +29513,10 @@ var init_canvases = __esm(async () => {
     init_picker(),
     init_form(),
     init_table(),
-    init_dashboard()
+    init_dashboard(),
+    init_image()
   ]);
-  jsx_dev_runtime24 = __toESM(require_jsx_dev_runtime(), 1);
+  jsx_dev_runtime27 = __toESM(require_jsx_dev_runtime(), 1);
 });
 
 // node_modules/.bun/commander@14.0.3/node_modules/commander/index.js
@@ -29379,6 +29869,14 @@ var dashboardDisplayScenario = {
   interactionMode: "selection"
 };
 
+// canvas/src/scenarios/image/display.ts
+var imageDisplayScenario = {
+  name: "display",
+  description: "Show a PNG scaled to fit the pane, using half-block cells",
+  canvasKind: "image",
+  interactionMode: "view-only"
+};
+
 // canvas/src/scenarios/registry.ts
 var registry = new Map;
 registry.set("calendar:display", displayScenario);
@@ -29392,6 +29890,7 @@ registry.set("picker:select", pickerSelectScenario);
 registry.set("form:fill", formFillScenario);
 registry.set("table:display", tableDisplayScenario);
 registry.set("dashboard:display", dashboardDisplayScenario);
+registry.set("image:display", imageDisplayScenario);
 function getScenario(canvasKind, scenarioName) {
   return registry.get(`${canvasKind}:${scenarioName}`);
 }
@@ -29416,7 +29915,8 @@ var KIND_DEFAULT_SCENARIO = new Map([
   ["picker", "select"],
   ["form", "fill"],
   ["table", "display"],
-  ["dashboard", "display"]
+  ["dashboard", "display"],
+  ["image", "display"]
 ]);
 function assertKnownKind(kind) {
   if (!KIND_DEFAULT_SCENARIO.has(kind)) {
@@ -29447,7 +29947,7 @@ function resolveWaitTimeout(seconds) {
 async function listCanvases() {
   return { status: "ok", canvases: await listRecords() };
 }
-function fail(message) {
+function fail2(message) {
   process.stderr.write(`${message}
 `);
   emit({ status: "error", message });
@@ -29541,7 +30041,7 @@ program.command("wait <id>").option("--timeout <seconds>").action(async (id, opt
     emit(result);
     process.exit(result.status === "disconnected" || result.status === "error" ? 1 : 0);
   } catch (e) {
-    fail(e.message);
+    fail2(e.message);
   }
 });
 async function resolveUpdateConfig(opts) {
@@ -29562,7 +30062,7 @@ program.command("update <id>").option("--config <json>").option("--config-file <
     await pushUpdate(id, await resolveUpdateConfig(opts));
     emit({ status: "updated", id });
   } catch (e) {
-    fail(e.message);
+    fail2(e.message);
   }
 });
 program.command("get <id> <key>").action(async (id, key) => {
@@ -29571,7 +30071,7 @@ program.command("get <id> <key>").action(async (id, key) => {
     assertIdent("key", key);
     emit({ status: "ok", key, data: await getValue(id, key) });
   } catch (e) {
-    fail(e.message);
+    fail2(e.message);
   }
 });
 program.command("close <id>").action(async (id) => {
@@ -29580,7 +30080,7 @@ program.command("close <id>").action(async (id) => {
     await requestClose(id);
     emit({ status: "closing", id });
   } catch (e) {
-    fail(e.message);
+    fail2(e.message);
   }
 });
 program.command("list").action(async () => {
@@ -29603,7 +30103,7 @@ program.command("scenarios").argument("[kind]").action((kind) => {
       }))
     });
   } catch (e) {
-    fail(e.message);
+    fail2(e.message);
   }
 });
 program.command("env").action(() => {

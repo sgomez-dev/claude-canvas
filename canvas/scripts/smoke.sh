@@ -47,6 +47,23 @@ wait_for_record() {
   return 1
 }
 
+# Waits until the pane actually shows something, rather than capturing at a
+# fixed moment and hoping. `image` is what forced this: its first frame says
+# "Loading …" while the file is read and decoded, so the capture landed on
+# the loading state and proved nothing about whether the image ever painted.
+wait_for_pane() {
+  local target=$1 marker=$2 start=$SECONDS
+  for _ in $(seq 1 150); do
+    if tmux capture-pane -p -t "$target" | grep -q -- "$marker"; then
+      echo "      pane shows $marker after $((SECONDS - start))s"
+      return 0
+    fi
+    sleep 0.1
+  done
+  echo "      PANE NEVER SHOWED $marker"
+  return 1
+}
+
 check() {
   local label=$1 got=$2 want=$3
   if [[ "$got" == *"$want"* ]]; then
@@ -103,6 +120,14 @@ run_case() {
     return
   }
   echo "  pane: $target"
+  if [ -n "${PANE_MARKER:-}" ]; then
+    if ! wait_for_pane "$target" "$PANE_MARKER"; then
+      FAIL=$((FAIL + 1))
+    else
+      PASS=$((PASS + 1))
+      echo "  PASS  $kind pinta $PANE_MARKER en un terminal real"
+    fi
+  fi
   echo "  --- lo que el usuario ve en el panel ---"
   tmux capture-pane -p -t "$target" | sed 's/^/  | /' | head -14
 
@@ -133,6 +158,14 @@ run_case picker sm-picker select \
 
 run_case table sm-table display \
   '{"title":"Smoke table","columns":[{"key":"a","label":"Col A","width":8},{"key":"b","label":"Col B"}],"rows":[{"a":"one","b":"first"},{"a":"two","b":"second"}]}' \
+  '{"status":"cancelled","reason":"escape"}' \
+  Escape
+
+# The image case renders the repository's own 3384x2160 screenshot as
+# half-block cells, so the captured pane below is the actual proof that the
+# tier works in a real terminal rather than only in the snapshot harness.
+PANE_MARKER='▀' run_case image sm-image display \
+  '{"title":"Smoke image","path":"media/screenshot.png"}' \
   '{"status":"cancelled","reason":"escape"}' \
   Escape
 

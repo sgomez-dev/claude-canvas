@@ -40,6 +40,7 @@ export const KIND_DEFAULT_SCENARIO = new Map([
   ["form", "fill"],
   ["table", "display"],
   ["dashboard", "display"],
+  ["image", "display"],
 ]);
 
 function assertKnownKind(kind: string): string {

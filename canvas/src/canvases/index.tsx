@@ -17,6 +17,8 @@ import { Table } from "./table";
 import type { TableConfig } from "./table/types";
 import { Dashboard } from "./dashboard";
 import type { DashboardConfig } from "./dashboard/types";
+import { Image } from "./image";
+import type { ImageConfig } from "./image/types";
 import { logPath } from "../runtime/paths";
 
 // Defense in depth: cli.ts already rejects an unknown kind before this ever
@@ -113,6 +115,12 @@ export async function renderCanvas(
       return renderPicker(
         id,
         config as PickerConfig | undefined,
+        options
+      );
+    case "image":
+      return renderImage(
+        id,
+        config as ImageConfig | undefined,
         options
       );
     default:
@@ -242,6 +250,25 @@ async function renderTable(
 ): Promise<void> {
   const { waitUntilExit } = render(
     <Table
+      id={id}
+      config={config}
+      enabled={options?.enabled ?? false}
+      scenario={options?.scenario || "display"}
+    />,
+    {
+      exitOnCtrlC: true,
+    }
+  );
+  await waitUntilExit();
+}
+
+async function renderImage(
+  id: string,
+  config?: ImageConfig,
+  options?: RenderOptions
+): Promise<void> {
+  const { waitUntilExit } = render(
+    <Image
       id={id}
       config={config}
       enabled={options?.enabled ?? false}

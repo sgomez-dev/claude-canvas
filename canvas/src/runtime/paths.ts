@@ -4,6 +4,15 @@ import { join } from "node:path";
 const APP = "claude-canvas";
 
 export function dataDir(): string {
+  // Test-only escape hatch. Without it, running the test suite reads,
+  // writes to, and PRUNES the real machine-global registry directory --
+  // which is also used by any real canvas the developer has running at the
+  // time. That caused genuine, reproducible test interference (a stale
+  // record left by an interrupted run failed unrelated tests later). Wired
+  // up by test/setup.ts to a per-run temp directory; unset in normal use, so
+  // production behavior is completely unchanged.
+  const override = process.env.CANVAS_DATA_DIR;
+  if (override) return override;
   if (process.platform === "win32") {
     const base = process.env.LOCALAPPDATA ?? join(homedir(), "AppData", "Local");
     return join(base, APP);

@@ -1,6 +1,20 @@
-import { test, expect } from "bun:test";
+import { test, expect, beforeEach, afterEach } from "bun:test";
 import { dataDir, recordPath, configPath, canvasesDir, logPath } from "./paths";
 import { homedir } from "node:os";
+import { join } from "node:path";
+
+// test/setup.ts pins CANVAS_DATA_DIR for the whole suite (Fix 9), which
+// would otherwise make every test below observe the override instead of the
+// platform-specific logic it exists to exercise. Suspend it for the
+// duration of each test in this file and restore it afterward.
+let savedCanvasDataDir: string | undefined;
+beforeEach(() => {
+  savedCanvasDataDir = process.env.CANVAS_DATA_DIR;
+  delete process.env.CANVAS_DATA_DIR;
+});
+afterEach(() => {
+  if (savedCanvasDataDir !== undefined) process.env.CANVAS_DATA_DIR = savedCanvasDataDir;
+});
 
 // Original tests
 test("dataDir is absolute and contains the app name", () => {
@@ -137,6 +151,15 @@ test("canvasesDir returns path under dataDir", () => {
   } finally {
     Object.defineProperty(process, "platform", originalPlatformDescriptor ?? { value: "win32" });
   }
+});
+
+// Fix 9: without this override, the test suite reads/writes/prunes the
+// real machine-global registry directory.
+test("CANVAS_DATA_DIR overrides dataDir on every platform", () => {
+  const marker = join("test-marker-override", "canvas-data");
+  process.env.CANVAS_DATA_DIR = marker;
+  expect(dataDir()).toBe(marker);
+  expect(canvasesDir()).toBe(join(marker, "canvases"));
 });
 
 test("logPath returns path under dataDir with .log extension", () => {

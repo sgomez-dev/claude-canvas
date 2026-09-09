@@ -1,3 +1,6 @@
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+
 // Colour output is all-or-nothing and environment-dependent: the same frame
 // measured 752 chars without colour and 1057 with. NO_COLOR does NOT override
 // FORCE_COLOR, so pin it explicitly. Pin to "1", not "0" — a render refactor
@@ -38,3 +41,14 @@ process.env.TZ = "UTC";
 // captured on one machine reproduces on another. en-GB chosen only because
 // it is what the existing baselines were captured under.
 process.env.CANVAS_LOCALE = "en-GB";
+
+// Without this, the whole test suite reads, writes, and PRUNES the real
+// machine-global canvas registry directory (%LOCALAPPDATA%\claude-canvas on
+// Windows, ~/Library/Application Support/claude-canvas on macOS, etc.) --
+// which any real canvas the developer has running also uses. That produced
+// real test interference: a stale record left by an interrupted run caused
+// spurious failures in unrelated tests later. CANVAS_DATA_DIR (paths.ts)
+// redirects dataDir() here instead, isolating every test run to its own
+// throwaway directory. A pid + timestamp suffix keeps concurrent test runs
+// (e.g. two `bun test` invocations) from colliding on the same directory.
+process.env.CANVAS_DATA_DIR = join(tmpdir(), `claude-canvas-test-${process.pid}-${Date.now()}`);

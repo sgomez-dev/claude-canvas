@@ -47,6 +47,20 @@ function firstEnabledIndex(options: PickerOption[]): number {
 }
 
 /**
+ * The dynamic position-indicator prefix the footer actually renders (e.g.
+ * "12-19 of 40  "), or "" when the list fits without windowing at all --
+ * exactly mirroring the footer's own render-time condition and computation
+ * below, so the row-budget math can measure the string that will actually
+ * appear instead of just the static hint.
+ */
+function positionPrefix(total: number, cursor: number, visibleCount: number): string {
+  if (total <= visibleCount) return "";
+  const start = Math.floor(cursor / visibleCount) * visibleCount;
+  const visibleLen = Math.min(visibleCount, total - start);
+  return `${start + 1}-${start + visibleLen} of ${total}  `;
+}
+
+/**
  * The picker's rendering and local interaction, knowing nothing about IPC,
  * registry records or outcomes.
  *
@@ -156,10 +170,33 @@ export function PickerView({
   // line, which CHROME_ROWS's flat "one line of hint text" assumption
   // doesn't account for -- so reserve however many extra rows the footer's
   // actual wrapped height needs, on top of the fixed chrome.
+  //
+  // The footer that actually renders is a dynamic position prefix (e.g.
+  // "12-19 of 40  ") followed by the static hint -- not the hint alone --
+  // and the prefix widens the string enough to push it onto an extra
+  // wrapped row the hint-only measurement never accounted for. Measuring
+  // just the hint reproduced a real overflow: at both 60 and 70 columns
+  // with a long options list, the footer wrapped onto one more row than
+  // was reserved for it.
+  //
+  // The prefix's own width depends on `visibleCount`, which is what this
+  // budget calculation produces -- so this runs the estimate twice: once
+  // with just the hint to get a candidate `visibleCount`, then measures the
+  // ACTUAL footer string that candidate would produce and re-derives
+  // `visibleCount` from that. A `visibleCount` that changes between passes
+  // by enough to alter the prefix's own digit count is vanishingly rare in
+  // practice (it would need to land exactly on a power-of-ten boundary),
+  // and even then this is a one-row budget reservation, not a precise
+  // layout -- two passes closes the gap the single-pass version had.
   const footerHint = mode === "multi" ? MULTI_FOOTER_HINT : SINGLE_FOOTER_HINT;
-  const footerRows = wrappedLineCount(footerHint, Math.max(1, columns - HORIZONTAL_CHROME));
-  const footerOverflow = Math.max(0, footerRows - 1);
-  const visibleCount = Math.max(1, rows - CHROME_ROWS - footerOverflow - (prompt ? 1 : 0));
+  const innerWidth = Math.max(1, columns - HORIZONTAL_CHROME);
+  let footerRows = wrappedLineCount(footerHint, innerWidth);
+  let footerOverflow = Math.max(0, footerRows - 1);
+  let visibleCount = Math.max(1, rows - CHROME_ROWS - footerOverflow - (prompt ? 1 : 0));
+  const actualFooter = positionPrefix(options.length, cursor, visibleCount) + footerHint;
+  footerRows = wrappedLineCount(actualFooter, innerWidth);
+  footerOverflow = Math.max(0, footerRows - 1);
+  visibleCount = Math.max(1, rows - CHROME_ROWS - footerOverflow - (prompt ? 1 : 0));
   const windowStart =
     options.length <= visibleCount ? 0 : Math.floor(cursor / visibleCount) * visibleCount;
   const visibleOptions = options.slice(windowStart, windowStart + visibleCount);

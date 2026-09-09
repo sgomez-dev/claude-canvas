@@ -139,3 +139,58 @@ test("wrappedLineCount never returns less than 1, even for a degenerate width", 
   expect(wrappedLineCount("anything", -5)).toBe(1);
   expect(wrappedLineCount("", 80)).toBe(1);
 });
+
+// Regression for Fix 3: a ceil-of-division estimate under-counts real
+// greedy word-wrap, which breaks only at word boundaries -- a long word
+// that would overflow the remaining space on a line is pushed onto a fresh
+// one instead of being packed in right up to the edge. diff/view.tsx's own
+// 77-column footer hint at 40 terminal columns is the case the independent
+// review reproduced this with: the division estimated 2 rows, but real
+// Ink/terminal wrapping actually produces 3. Confirmed by rendering the
+// exact same string through Ink in a Box of each width (see the git history
+// of this test for the harness used to verify it) -- these numbers are not
+// guesses.
+const DIFF_FOOTER_HINT =
+  "a/r: approve/reject  ↑/↓: hunk  PgUp/PgDn: scroll  Enter: submit  Esc: cancel";
+
+test("wrappedLineCount matches real greedy word-wrap for diff's footer hint", () => {
+  expect(displayWidth(DIFF_FOOTER_HINT)).toBe(77);
+  // The reproduced regression case: the old ceil-of-division estimate said
+  // 2 here; real Ink wrapping (and the fixed estimate) says 3.
+  expect(wrappedLineCount(DIFF_FOOTER_HINT, 40)).toBe(3);
+  // Narrower still -- verified against real Ink rendering too.
+  expect(wrappedLineCount(DIFF_FOOTER_HINT, 20)).toBe(5);
+});
+
+// The doubled space between clauses ("reject  ↑/↓") is a real, deliberate
+// part of these hint strings, and a wrap estimate that collapsed every gap
+// to a single assumed column would under-measure it: the difference
+// between a one- and two-column gap is exactly what decides whether the
+// next word still fits on the current line.
+test("wrappedLineCount treats a doubled space as two columns, not one", () => {
+  // "aaaa" + "  " (2) + "bbbb" = 10 columns exactly at width 10 with a
+  // single-column gap, but this codebase's hints use a double-space
+  // separator, which pushes "bbbb" over by one column and forces a wrap.
+  expect(wrappedLineCount("aaaa  bbbb", 9)).toBe(2);
+  expect(wrappedLineCount("aaaa  bbbb", 10)).toBe(1);
+});
+
+// A single word wider than the entire available width can never be pushed
+// onto a fresh line and still fit -- real word-wrap hard-breaks it instead
+// of leaving it to overflow, so the estimate must too.
+test("wrappedLineCount hard-wraps a single word wider than the available width", () => {
+  expect(wrappedLineCount("supercalifragilisticexpialidocious", 10)).toBe(
+    Math.ceil(displayWidth("supercalifragilisticexpialidocious") / 10)
+  );
+  // Mixed with normal words on either side: the oversized word still
+  // forces its own hard-wrapped run, and a normal word after it starts
+  // fresh rather than trying to continue on the oversized word's last
+  // partial line unless it happens to fit.
+  const text = "short " + "x".repeat(25) + " short";
+  // "short" (5) fits on line 1 alone; the 25-wide unbreakable word can't
+  // follow it (5+1+25=31 > 10), so it starts its own line(s): ceil(25/10)=3
+  // lines, ending with a 5-column remainder; the trailing "short" (5) then
+  // fits on that same remainder line (5+1+5=11 > 10 -- doesn't fit, so it
+  // gets its own line too).
+  expect(wrappedLineCount(text, 10)).toBe(1 + 3 + 1);
+});

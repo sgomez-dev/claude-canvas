@@ -57,6 +57,28 @@ function isMissing(field: FormField, value: FieldState): boolean {
   return false;
 }
 
+function windowStartFor(total: number, focusIndex: number, visibleFields: number): number {
+  if (total <= visibleFields) return 0;
+  return Math.min(
+    Math.floor(Math.min(focusIndex, total - 1) / visibleFields) * visibleFields,
+    total - visibleFields
+  );
+}
+
+/**
+ * The dynamic position-indicator prefix the footer actually renders (e.g.
+ * "3-4 of 9  "), or "" when every field fits without windowing -- exactly
+ * mirroring the footer's own render-time condition and computation below,
+ * so the row-budget math can measure the string that will actually appear
+ * instead of just the static hint.
+ */
+function positionPrefix(total: number, focusIndex: number, visibleFields: number): string {
+  if (total <= visibleFields) return "";
+  const start = windowStartFor(total, focusIndex, visibleFields);
+  const visibleLen = Math.min(visibleFields, total - start);
+  return `${start + 1}-${start + visibleLen} of ${total}  `;
+}
+
 function clampNumber(raw: string, min: number | undefined, max: number | undefined): string {
   if (raw.trim().length === 0) return raw;
   let n = Number(raw);
@@ -290,19 +312,33 @@ export function FormView({
   // line, which CHROME_ROWS's flat "one line of hint text" assumption
   // doesn't account for -- so reserve however many extra rows the footer's
   // actual wrapped height needs, on top of the fixed chrome.
-  const footerRows = wrappedLineCount(FOOTER_HINT, Math.max(1, columns - HORIZONTAL_CHROME));
-  const footerOverflow = Math.max(0, footerRows - 1);
-  const visibleFields = Math.max(
+  //
+  // The footer that actually renders is a dynamic position prefix (e.g.
+  // "3-4 of 9  ") followed by the static hint -- not the hint alone -- and
+  // the prefix widens the string enough to push it onto an extra wrapped
+  // row the hint-only measurement never accounted for. The prefix's own
+  // width depends on `visibleFields`, which is what this budget calculation
+  // produces, so this runs the estimate twice: once with just the hint to
+  // get a candidate `visibleFields`, then measures the ACTUAL footer string
+  // that candidate would produce and re-derives `visibleFields` from that.
+  // See picker/view.tsx's identical two-pass treatment for why one extra
+  // pass is enough in practice.
+  const innerWidth = Math.max(1, columns - HORIZONTAL_CHROME);
+  let footerRows = wrappedLineCount(FOOTER_HINT, innerWidth);
+  let footerOverflow = Math.max(0, footerRows - 1);
+  let visibleFields = Math.max(
     1,
     Math.floor((budget - CHROME_ROWS - footerOverflow) / ROWS_PER_FIELD)
   );
-  const windowStart =
-    fields.length <= visibleFields
-      ? 0
-      : Math.min(
-          Math.floor(Math.min(focusIndex, fields.length - 1) / visibleFields) * visibleFields,
-          fields.length - visibleFields
-        );
+  const actualFooter =
+    positionPrefix(fields.length, focusIndex, visibleFields) + FOOTER_HINT;
+  footerRows = wrappedLineCount(actualFooter, innerWidth);
+  footerOverflow = Math.max(0, footerRows - 1);
+  visibleFields = Math.max(
+    1,
+    Math.floor((budget - CHROME_ROWS - footerOverflow) / ROWS_PER_FIELD)
+  );
+  const windowStart = windowStartFor(fields.length, focusIndex, visibleFields);
   const windowFields = fields.slice(windowStart, windowStart + visibleFields);
 
   return (

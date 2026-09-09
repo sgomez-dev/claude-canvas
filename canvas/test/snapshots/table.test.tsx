@@ -165,6 +165,36 @@ test("at a narrow terminal width, the frame never exceeds the terminal's row cou
   r.dispose();
 });
 
+// Regression test for Fix 2, which is distinct from Fix 3 above: the
+// row-budget reservation measured only the STATIC hint string, not the
+// dynamic "rows X-Y of Z  " position prefix the footer actually prepends
+// once there are more rows than fit -- and that prefix only ever appears
+// when the data needs scrolling, which NARROW_FIT_CONFIG above (2 rows,
+// never windowed) can never exercise. Many rows are needed here so the
+// prefix actually renders and widens the footer enough to wrap it onto a
+// second line the old reservation never accounted for. Verified at the
+// exact width the independent review reproduced this at.
+const MANY_ROWS_CONFIG: TableConfig = {
+  title: "Many rows",
+  columns: [
+    { key: "n", label: "N", width: 4 },
+    { key: "name", label: "Name", width: 10 },
+  ],
+  rows: Array.from({ length: 60 }, (_, i) => ({ n: String(i + 1), name: `row-${i + 1}` })),
+};
+
+test("at a narrow terminal width with many rows, the footer's position prefix does not push the frame past the terminal's row count", async () => {
+  const rows = 16;
+  const r = renderCanvas(<Table id="table-9" config={MANY_ROWS_CONFIG} enabled={false} />, {
+    columns: 50,
+    rows,
+  });
+  const frame = await r.settle();
+  expect(frame).toContain("rows 1-");
+  expect(frame.split("\n").length).toBeLessThanOrEqual(rows);
+  r.dispose();
+});
+
 test("table aligns cells of mixed display width", async () => {
   const r = renderCanvas(<Table id="table-5" config={WIDE_CONFIG} enabled={false} />, {
     columns: 40,

@@ -14,6 +14,16 @@ afterEach(async () => {
 
 // 30 rows in a 12-row terminal. The component reserves 6 rows for chrome,
 // so exactly 6 data rows are visible and the body has somewhere to scroll.
+//
+// 60 columns, not 40: at 40 columns the footer's own dynamic "rows X-Y of
+// 30  " position prefix (which only appears once the data needs scrolling,
+// exactly the case every test below exercises) is wide enough that the
+// footer -- prefix and hint together -- wraps onto a second line, and Fix 2
+// correctly reserves a 7th chrome row for that, dropping visible rows to 5.
+// This suite is about scroll MECHANICS, not the footer-wrap budget (which
+// has its own dedicated regression coverage in test/snapshots/table.test.tsx),
+// so it uses a comfortably wide terminal where the footer never needs to
+// wrap and the 6-visible-row assumption below holds.
 const CONFIG: TableConfig = {
   title: "Thirty rows",
   columns: [
@@ -26,7 +36,7 @@ const CONFIG: TableConfig = {
 function mount(id: string, enabled = false) {
   if (enabled) ids.push(id);
   return renderCanvas(<Table id={id} config={CONFIG} enabled={enabled} />, {
-    columns: 40,
+    columns: 60,
     rows: 12,
   });
 }

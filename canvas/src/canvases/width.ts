@@ -185,19 +185,69 @@ export function padToWidth(text: string, columns: number): string {
  * Estimates how many terminal rows a fixed piece of hint/footer text wraps
  * to inside a box `innerWidth` display columns wide.
  *
- * This is deliberately not a real text-layout engine -- Ink/Yoga wrap on
- * whitespace like a terminal does, and reproducing that exactly would need
- * to know the actual word-break points. What every row-budget calculation
- * in the canvases actually needs is just the row *count* a known, fixed
- * hint string will cost, so it can reserve that many rows instead of
- * silently assuming one. A ceil-of-division estimate is exact for the
- * common cases (comfortably fits in one line at the terminal's default 80
- * columns, or overflows by roughly a multiple of the available width at a
- * narrow one) and, on the rare word-break edge case where actual wrapping
- * costs one row more than this predicts, still gets the reservation much
- * closer than treating every footer as one line.
+ * This used to be a ceil-of-division estimate (`ceil(totalWidth /
+ * innerWidth)`), which UNDER-counts real greedy word-wrapping: word-wrap
+ * breaks only at word boundaries, so a word that would overflow the
+ * remaining space on the current line is pushed onto a fresh one instead of
+ * being packed in right up to the edge, the way pure arithmetic assumes.
+ * That earlier line break can cost a whole extra row the division never
+ * saw coming -- confirmed against diff's own 77-column footer hint at 40
+ * columns, which the division estimated at 2 rows while real (Ink/terminal)
+ * wrapping produces 3, silently under-reserving the row budget this
+ * function exists to protect.
+ *
+ * This simulates the same greedy word-wrap a terminal performs: split into
+ * alternating word/whitespace runs -- preserving each run's EXACT width,
+ * not collapsing it to a single assumed separator column -- and pack words
+ * onto a line up to `innerWidth`, starting a new line whenever the next
+ * word (plus the whitespace run immediately before it) would not fit. That
+ * exact-width preservation matters here: this codebase's own footer hints
+ * use doubled spaces as clause separators (e.g. "approve/reject  ↑/↓:
+ * hunk"), and treating every gap as a single column under-measured exactly
+ * the case above -- a single vs double space is the difference between the
+ * next word fitting in the remaining columns or not. A whitespace run that
+ * a break falls before is dropped rather than carried onto the new line,
+ * matching how a terminal never starts a wrapped line with the space that
+ * caused the wrap. A single word longer than the entire available width
+ * can never be pushed onto a fresh line and still fit, so -- matching how
+ * Ink/terminals actually render an unbreakable overlong token -- it is
+ * itself hard-wrapped at `innerWidth`-column boundaries rather than left to
+ * overflow.
  */
 export function wrappedLineCount(text: string, innerWidth: number): number {
   if (innerWidth <= 0) return 1;
-  return Math.max(1, Math.ceil(displayWidth(text) / innerWidth));
+  const tokens = text.match(/\S+|\s+/g) ?? [];
+  if (tokens.length === 0) return 1;
+
+  let lines = 1;
+  let col = 0; // display columns already committed on the current line
+  let pendingGap = 0; // width of a whitespace run not yet committed
+
+  for (const token of tokens) {
+    if (/^\s+$/.test(token)) {
+      pendingGap += displayWidth(token);
+      continue;
+    }
+    const wordWidth = displayWidth(token);
+    const needed = col + pendingGap + wordWidth;
+    if (needed <= innerWidth) {
+      col = needed;
+    } else if (wordWidth <= innerWidth) {
+      // Doesn't fit alongside the pending gap on this line: drop the gap
+      // (a wrapped line never starts with the whitespace that caused the
+      // break) and start fresh.
+      if (col > 0) lines += 1;
+      col = wordWidth;
+    } else {
+      // Cannot fit on any single line even alone -- hard-wrap it, the same
+      // way real word-wrap breaks an unbreakable overlong token.
+      if (col > 0) lines += 1;
+      const extraLines = Math.ceil(wordWidth / innerWidth);
+      lines += extraLines - 1;
+      const remainder = wordWidth % innerWidth;
+      col = remainder === 0 ? innerWidth : remainder;
+    }
+    pendingGap = 0;
+  }
+  return lines;
 }

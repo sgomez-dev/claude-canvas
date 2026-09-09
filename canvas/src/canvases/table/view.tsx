@@ -29,6 +29,19 @@ const HEADER_OVERHEAD_ROWS = 6;
 const HORIZONTAL_CHROME = 4;
 const FOOTER_HINT = "↑/↓/PgUp/PgDn: scroll  Esc: close";
 
+/**
+ * The dynamic position-indicator prefix the footer actually renders (e.g.
+ * "rows 12-19 of 40  "), or "" when every row fits without scrolling at all
+ * -- exactly mirroring the footer's own render-time condition and
+ * computation below, so the row-budget math can measure the string that
+ * will actually appear instead of just the static hint.
+ */
+function positionPrefix(total: number, scrollOffset: number, visibleCount: number): string {
+  if (total <= visibleCount) return "";
+  const visibleLen = Math.min(visibleCount, total - scrollOffset);
+  return `rows ${scrollOffset + 1}-${scrollOffset + visibleLen} of ${total}  `;
+}
+
 function computeWidth(col: TableColumn, rows: Array<Record<string, string>>): number {
   if (col.width !== undefined) return col.width;
   let longest = displayWidth(col.label);
@@ -76,14 +89,6 @@ export function TableView({
 }: TableViewProps): React.JSX.Element {
   const widths = useMemo(() => columns.map((c) => computeWidth(c, rows)), [columns, rows]);
 
-  // At a narrow terminal width the footer hint itself wraps onto a second
-  // line, which HEADER_OVERHEAD_ROWS's flat "one line of hint text"
-  // assumption doesn't account for -- so reserve however many extra rows
-  // the footer's actual wrapped height needs, on top of the fixed chrome.
-  const footerRows = wrappedLineCount(FOOTER_HINT, Math.max(1, terminalWidth - HORIZONTAL_CHROME));
-  const footerOverflow = Math.max(0, footerRows - 1);
-  const visibleCount = Math.max(1, budget - HEADER_OVERHEAD_ROWS - footerOverflow);
-
   // Audited against the same stale-ref-in-useInput bug class fixed in
   // diff/view.tsx, picker/view.tsx and form/view.tsx (see their cursorRef/
   // checkedRef/focusIndexRef/valuesRef comments): unlike those, `scrollOffset`
@@ -108,6 +113,33 @@ export function TableView({
   // reads it inside the handler -- which is the actual reason it is safe
   // without a ref, not because its writes are functional updates.
   const [scrollOffset, setScrollOffset] = useState(0);
+
+  // At a narrow terminal width the footer hint itself wraps onto a second
+  // line, which HEADER_OVERHEAD_ROWS's flat "one line of hint text"
+  // assumption doesn't account for -- so reserve however many extra rows
+  // the footer's actual wrapped height needs, on top of the fixed chrome.
+  //
+  // The footer that actually renders is a dynamic position prefix (e.g.
+  // "rows 12-19 of 40  ") followed by the static hint -- not the hint alone
+  // -- and the prefix widens the string enough to push it onto an extra
+  // wrapped row the hint-only measurement never accounted for. Reproduced:
+  // the table overflowed its terminal by one row at 50 columns with many
+  // rows. The prefix's own width depends on `visibleCount`, which is what
+  // this budget calculation produces, so this runs the estimate twice: once
+  // with just the hint to get a candidate `visibleCount`, then measures the
+  // ACTUAL footer string that candidate (and the current `scrollOffset`)
+  // would produce and re-derives `visibleCount` from that. See
+  // picker/view.tsx's identical two-pass treatment for why one extra pass
+  // is enough in practice.
+  const innerWidth = Math.max(1, terminalWidth - HORIZONTAL_CHROME);
+  let footerRows = wrappedLineCount(FOOTER_HINT, innerWidth);
+  let footerOverflow = Math.max(0, footerRows - 1);
+  let visibleCount = Math.max(1, budget - HEADER_OVERHEAD_ROWS - footerOverflow);
+  const actualFooter = positionPrefix(rows.length, scrollOffset, visibleCount) + FOOTER_HINT;
+  footerRows = wrappedLineCount(actualFooter, innerWidth);
+  footerOverflow = Math.max(0, footerRows - 1);
+  visibleCount = Math.max(1, budget - HEADER_OVERHEAD_ROWS - footerOverflow);
+
   const maxOffset = Math.max(0, rows.length - visibleCount);
 
   useInput((input, key) => {

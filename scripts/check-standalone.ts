@@ -53,13 +53,9 @@ try {
   //
   // This invokes `show` for real, in `--offline` mode (so it never tries to
   // open an IPC server) with a minimal picker config, against this
-  // process's real -- if non-interactive -- stdio. Measured directly: this
-  // completes in well under a second and exits 0, printing a fully
-  // rendered bordered frame with the configured title, even though Ink's
-  // raw-mode setup fails on non-TTY stdin afterward (expected and harmless
-  // here; irrelevant to what this check verifies). A `race` against a
-  // generous timeout is still a safety net in case some environment makes
-  // it hang instead of exiting.
+  // process's real -- if non-interactive -- stdio. A `race` against a
+  // generous timeout is a safety net in case some environment makes it
+  // hang instead of exiting.
   const configFile = join(dir, "probe-config.json");
   const probeMarker = "canvas-standalone-check-probe";
   await Bun.write(
@@ -86,14 +82,31 @@ try {
     process.exit(1);
   }
   const out = renderResult.r.stdout.toString();
-  // The configured title and a box-drawing border character are what an
-  // actually-completed Ink render produces -- not just "the process didn't
-  // crash". A module-resolution failure (this check's whole reason to
-  // exist) never gets this far: `show`'s own try/catch reports it as a
-  // JSON error instead (`{"status":"error","message":"Cannot find package
-  // 'react-devtools-core'..."}`), with no rendered frame in the output at
-  // all.
-  if (!out.includes(probeMarker) || !out.includes("─")) {
+  // Two different outputs both count as proof Ink/React/Yoga actually ran:
+  //
+  //   1. A fully painted frame -- the configured title plus a box-drawing
+  //      border character.
+  //   2. Ink's OWN rendered error screen for "Raw mode is not supported on
+  //      the current process.stdin", which fires from inside a passive
+  //      effect once React has already committed a render. This is the
+  //      COMMON case here, not an edge case: measured directly across
+  //      Linux, macOS and Windows CI, the initial frame does not reliably
+  //      reach stdout before the raw-mode effect fires and Ink repaints
+  //      with the error screen instead -- on every one of the three CI
+  //      runners this outran the first frame every time, even though a
+  //      local run against a git-bash pty printed the first frame first.
+  //      Both outcomes are real: this check must accept whichever one this
+  //      environment's stdio timing happens to produce, since neither is
+  //      the thing it's checking for.
+  //
+  // A module-resolution failure (this check's whole reason to exist) never
+  // produces either: `show`'s own try/catch reports it as a JSON error
+  // instead (`{"status":"error","message":"Cannot find package
+  // 'react-devtools-core'..."}`), with no rendered frame -- successful OR
+  // an error UI -- anywhere in the output.
+  const paintedFrame = out.includes(probeMarker) && out.includes("─");
+  const rawModeErrorScreen = out.includes("Raw mode is not supported");
+  if (!paintedFrame && !rawModeErrorScreen) {
     console.error(
       `bundle did not render a canvas standalone.\n` +
         `stdout: ${out}\n` +

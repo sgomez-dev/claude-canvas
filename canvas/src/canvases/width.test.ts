@@ -149,6 +149,42 @@ test("common status emoji (✅ ❌ ⭐ ⌚ ☑) measure as width 2", () => {
   expect(displayWidth(BALLOT_BOX_CHECK)).toBe(2);
 });
 
+// Regression tests for this wave's Fix 6: a handful of common status/symbol
+// emoji just outside or at the edge of the previously-curated range still
+// measured as width 1, though every one of them is Emoji_Presentation=Yes
+// per Unicode's emoji-data.txt and every real terminal renders it
+// double-width.
+const WHEELCHAIR = cp(0x267f); // ♿
+const FAST_FORWARD = cp(0x23e9); // ⏩
+const REWIND = cp(0x23ea); // ⏪
+const ALARM_CLOCK = cp(0x23f0); // ⏰
+const HOURGLASS_FLOWING = cp(0x23f3); // ⏳
+const WHITE_MEDIUM_SMALL_SQUARE = cp(0x25fd); // ◽
+const BLACK_MEDIUM_SMALL_SQUARE = cp(0x25fe); // ◾
+
+test("wheelchair, fast-forward/rewind, alarm clock, hourglass and medium-small squares measure as width 2", () => {
+  expect(displayWidth(WHEELCHAIR)).toBe(2);
+  expect(displayWidth(FAST_FORWARD)).toBe(2);
+  expect(displayWidth(REWIND)).toBe(2);
+  expect(displayWidth(ALARM_CLOCK)).toBe(2);
+  expect(displayWidth(HOURGLASS_FLOWING)).toBe(2);
+  expect(displayWidth(WHITE_MEDIUM_SMALL_SQUARE)).toBe(2);
+  expect(displayWidth(BLACK_MEDIUM_SMALL_SQUARE)).toBe(2);
+});
+
+// The negative check this fix's own comment insists on: 25FB/25FC (the
+// LARGER "medium square", as opposed to 25FD/25FE's "medium SMALL square"
+// above) are default-TEXT-presentation and must stay narrow, exactly like
+// ⚠ U+26A0 already does -- this table must not widen a symbol just because
+// it looks similar to one that legitimately needs it.
+const WHITE_MEDIUM_SQUARE = cp(0x25fb); // ◻
+const BLACK_MEDIUM_SQUARE = cp(0x25fc); // ◼
+
+test("the larger medium square (25FB/25FC) stays narrow, unlike medium SMALL square", () => {
+  expect(displayWidth(WHITE_MEDIUM_SQUARE)).toBe(1);
+  expect(displayWidth(BLACK_MEDIUM_SQUARE)).toBe(1);
+});
+
 test("padToWidth pads to display columns, not code units", () => {
   expect(displayWidth(padToWidth(cp(0x65e5), 4))).toBe(4);
   expect(displayWidth(padToWidth(FAMILY, 6))).toBe(6);

@@ -82,13 +82,25 @@ Column widths are measured in display columns, so CJK, fullwidth forms,
 emoji and combining marks all align correctly -- a cell holding `日本語`
 counts as 6 columns, not 3, and a family emoji as 2, not 11. This includes
 the common double-width status glyphs in the Miscellaneous Symbols,
-Dingbats, and Miscellaneous Symbols and Arrows blocks, so a status column
-using `✅`/`❌`/`⭐`/`⌚`/`☑` aligns correctly too -- though that coverage is a
-practical, terminal-observed subset of those blocks rather than every code
-point in them: a handful of default-text-presentation symbols in the same
-blocks (e.g. `⚠`) still measure single-width unless followed by an emoji
-presentation selector (`U+FE0F`), matching how most terminals actually
-render them.
+Dingbats, and Miscellaneous Symbols and Arrows blocks -- things like
+`✅`/`❌`/`⭐`/`⌚`/`☑`, the fast-forward/rewind/alarm-clock/hourglass glyphs
+(`⏩⏪⏫⏬⏰⏳`), `♿`, and `◽`/`◾` -- so a status column using any of them
+aligns correctly too.
+
+That coverage is a practical, terminal-observed subset of those blocks
+rather than every code point in them, and the two kinds of gap that leaves
+are different, not the same thing. Some are genuine exceptions: a handful
+of symbols in the same blocks are default-TEXT-presentation and are
+correctly excluded on purpose -- `⚠` is the standing example, which stays
+single-width unless followed by an emoji presentation selector (`U+FE0F`),
+matching how most terminals actually render it, and `◻`/`◼` (the larger
+"medium square", unlike `◽`/`◾`'s "medium small square" above) are the
+same kind of exception. Others are simply not yet covered: this table
+targets the glyphs most likely to show up in a generated status table
+rather than the full Emoji_Presentation set, so an emoji this list hasn't
+gotten to yet can still measure narrow even though a terminal renders it
+wide -- that is a coverage gap to file, not a deliberate text-presentation
+call like `⚠`'s.
 
 The one case that can still look wrong is a ZWJ sequence (a family or
 profession emoji) in a terminal that does not support ZWJ: it draws the

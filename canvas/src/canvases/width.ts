@@ -52,6 +52,15 @@ const ZERO_WIDTH: ReadonlyArray<readonly [number, number]> = [
 const WIDE: ReadonlyArray<readonly [number, number]> = [
   [0x1100, 0x115f], // Hangul Jamo initial consonants
   [0x231a, 0x231b], // watch, hourglass (⌚⌛) -- default-emoji-presentation
+  [0x23e9, 0x23ec], // fast-forward, rewind, up/down double triangles (⏩⏪⏫⏬)
+  [0x23f0, 0x23f0], // alarm clock (⏰)
+  [0x23f3, 0x23f3], // hourglass with flowing sand (⏳)
+  // 25FD/25FE (medium SMALL square, ◽◾) are Emoji_Presentation=Yes and
+  // double-width, unlike their larger siblings 25FB/25FC (medium square,
+  // ◻◼), which stay default-TEXT-presentation and are correctly NOT in
+  // this table -- checked against Unicode's emoji-data.txt before adding,
+  // the same verification every entry in this table gets.
+  [0x25fd, 0x25fe], // white/black medium small squares (◽◾)
   // Individual code points and small runs within Miscellaneous Symbols
   // (U+2600-U+26FF), Dingbats (U+2700-U+27BF) and Miscellaneous Symbols and
   // Arrows (U+2B00-U+2BFF) that render double-width in real terminals --
@@ -70,6 +79,7 @@ const WIDE: ReadonlyArray<readonly [number, number]> = [
   [0x2611, 0x2611], // ballot box with check (☑)
   [0x2614, 0x2615], // umbrella with rain drops, hot beverage
   [0x2648, 0x2653], // zodiac signs
+  [0x267f, 0x267f], // wheelchair symbol (♿) -- default-emoji-presentation
   [0x2693, 0x2693], // anchor
   [0x26a1, 0x26a1], // high voltage
   [0x26aa, 0x26ab], // circles (white/black)

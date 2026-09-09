@@ -367,11 +367,52 @@ pane. Fixed, with a test that compares the window size at 80 and 34 columns
 and asserts the render never exceeds its budget -- confirmed to fail with
 the budget removed.
 
-### Next: step 2, the PNG decoder
+### Sub-project 3, step 2: the PNG decoder — DONE
 
-Pure logic, fully testable, no dependency needed (`Bun.inflateSync` is
-verified working). Then half-blocks, which is ANSI text and therefore
-snapshot-testable. **Still do not start with Sixel** — see below.
+`canvases/png.ts`, 236 lines, no dependency: chunk parsing, `node:zlib`'s
+inflate, and scanline un-filtering. Output is normalised to RGBA even for an
+RGB source, so half-blocks, Sixel and Kitty each handle one layout instead
+of branching on channel count. 16 tests.
+
+**Ruling 18: the supported subset is stated, and each refusal names what the
+file actually is.** 8-bit RGB and RGBA, non-interlaced. Palette, greyscale,
+greyscale-with-alpha, 16-bit and interlaced are refused with the format
+named -- every screenshot tool in the intended path emits 8-bit RGB or
+RGBA, and a silent wrong render is worse than a refusal, while
+"unsupported" with no detail sends the caller guessing. Cost if wrong: a
+caller with a palette PNG has to convert it, and is told so.
+
+**Ruling 19: the pixel ceiling is checked before allocating.** A PNG header
+is eight bytes that can claim any dimensions, so a malformed file could ask
+for tens of gigabytes. 16 megapixels covers 4K with room to spare -- the
+same check-before-allocating discipline `protocol.ts` applies to its frame
+ceiling, and there is a test asserting a 65535x65535 header is refused
+rather than attempted.
+
+**Ruling 20: CRCs are deliberately not verified.** A corrupted chunk almost
+always makes inflate fail, which surfaces as an error anyway; checking them
+would add a table and a pass over every byte to catch the narrow case where
+corruption inflates cleanly. Cost if wrong: a pathologically corrupt file
+renders wrong instead of being refused.
+
+**Verified against an independent decoder, not just a round trip.** The
+repository's own `media/screenshot.png` is 3384x2160 8-bit RGBA split across
+hundreds of 4096-byte IDAT chunks, which is what exercises the chunk
+joining. Its expected pixel values and a checksum over all 29 million bytes
+were produced by a separate Python implementation over zlib -- a round trip
+against my own encoder cannot catch a decoder that is consistently wrong.
+That real file uses only filter type 2, so the other four filters get
+hand-built fixtures with correct CRC32s, which is where Average and Paeth
+are exercised: both read the pixel above-left and both must treat
+out-of-bounds as zero.
+
+### Next: step 3, half-blocks
+
+`▀` with a foreground and a background colour paints two vertical pixels per
+cell, so a W×H cell grid represents W×2H pixels, box-averaged down from the
+source. Pure ANSI text, so byte-snapshot-testable with the harness already
+here -- and the tier every user gets, which makes it the tier that must be
+provably right. **Still do not start with Sixel** — see below.
 
 **Do not start with Sixel.** It is the part that cannot be verified from
 here without installing libsixel, and the two tiers before it carry no

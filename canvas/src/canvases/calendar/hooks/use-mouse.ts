@@ -1,7 +1,7 @@
 // Mouse tracking hook for Ink components
 // Uses SGR extended mouse mode for accurate position tracking
 
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useStdin } from "ink";
 
 // SGR extended mouse mode escape sequences
@@ -190,84 +190,4 @@ export function useMouse(options: UseMouseOptions = {}): MouseState {
   }, [enabled, stdin, setRawMode, write]);
 
   return state;
-}
-
-// Hook to track mouse position relative to a grid
-export interface GridPosition {
-  col: number; // 0-based column index
-  row: number; // 0-based row index
-}
-
-export interface UseGridMouseOptions {
-  enabled?: boolean;
-  gridLeft: number; // Grid left edge (1-based terminal column)
-  gridTop: number; // Grid top edge (1-based terminal row)
-  cellWidth: number; // Width of each cell in characters
-  cellHeight: number; // Height of each cell in rows
-  cols: number; // Number of columns
-  rows: number; // Number of rows
-  onClick?: (position: GridPosition) => void;
-}
-
-export function useGridMouse(options: UseGridMouseOptions): {
-  hoveredCell: GridPosition | null;
-  clickedCell: GridPosition | null;
-} {
-  const {
-    enabled = true,
-    gridLeft,
-    gridTop,
-    cellWidth,
-    cellHeight,
-    cols,
-    rows,
-    onClick,
-  } = options;
-
-  const [hoveredCell, setHoveredCell] = useState<GridPosition | null>(null);
-  const [clickedCell, setClickedCell] = useState<GridPosition | null>(null);
-
-  const terminalToGrid = useCallback(
-    (x: number, y: number): GridPosition | null => {
-      const relX = x - gridLeft;
-      const relY = y - gridTop;
-
-      if (relX < 0 || relY < 0) return null;
-
-      const col = Math.floor(relX / cellWidth);
-      const row = Math.floor(relY / cellHeight);
-
-      if (col >= cols || row >= rows) return null;
-
-      return { col, row };
-    },
-    [gridLeft, gridTop, cellWidth, cellHeight, cols, rows]
-  );
-
-  const handleClick = useCallback(
-    (event: MouseEvent) => {
-      const gridPos = terminalToGrid(event.x, event.y);
-      if (gridPos) {
-        setClickedCell(gridPos);
-        onClick?.(gridPos);
-      }
-    },
-    [terminalToGrid, onClick]
-  );
-
-  const handleMove = useCallback(
-    (event: MouseEvent) => {
-      const gridPos = terminalToGrid(event.x, event.y);
-      setHoveredCell(gridPos);
-    },
-    [terminalToGrid]
-  );
-
-  useMouse({
-    enabled,
-    onClick: handleClick,
-    onMove: handleMove,
-  });
-
-  return { hoveredCell, clickedCell };
 }

@@ -62,9 +62,12 @@ export interface BaseCalendarConfig {
 export interface MeetingPickerConfig extends BaseCalendarConfig {
   calendars: NamedCalendar[];
   slotGranularity: 15 | 30 | 60; // minutes
-  minDuration: number; // minutes
-  maxDuration: number; // minutes
 }
+
+// The only granularities the grid actually supports: each divides evenly
+// into a full hour, which the slot-to-time-of-day math throughout the
+// meeting picker assumes.
+const VALID_SLOT_GRANULARITIES = [15, 30, 60] as const;
 
 // Meeting picker result
 export interface MeetingPickerResult {
@@ -78,13 +81,21 @@ export type CalendarScenarioConfig = BaseCalendarConfig | MeetingPickerConfig;
 
 // Type guard for meeting picker config.
 //
-// No caller yet, deliberately kept: calendar.tsx currently decides whether
-// it has a meeting-picker config with an inline `config?.calendars` truth
-// test that silently falls through to the read-only view when the config is
-// wrong. This is the guard that check should be, and wiring it is part of
-// closing the scenario-validation gap.
+// Requires a NON-EMPTY calendars array (an empty one is a config error --
+// the message calendar.tsx reports for a bad config, and this project's own
+// calendar skill doc, both already promised this) and, when present, a
+// slotGranularity that's actually one of the values the grid supports --
+// nothing previously enforced that at runtime, so a bad value like `7`
+// reached the grid's slot-count math and produced fractional loop bounds.
 export function isMeetingPickerConfig(
   config: CalendarScenarioConfig
 ): config is MeetingPickerConfig {
-  return "calendars" in config && Array.isArray(config.calendars);
+  if (!("calendars" in config) || !Array.isArray(config.calendars)) return false;
+  if (config.calendars.length === 0) return false;
+  if ("slotGranularity" in config && config.slotGranularity !== undefined) {
+    if (!(VALID_SLOT_GRANULARITIES as readonly number[]).includes(config.slotGranularity)) {
+      return false;
+    }
+  }
+  return true;
 }

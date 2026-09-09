@@ -23,7 +23,7 @@ every claim rather than trusting it.
 | 1. Runtime/transport | ✅ done | ✅ done (found 3 residuals) | ✅ 1 surgical patch | **FULLY COMPLETE** |
 | 2. Four primitives | ✅ done | ✅ done (found 1 Critical + gaps) | ✅ 1 surgical patch | **FULLY COMPLETE** |
 | 3. Registry/CLI/calendar | ✅ done | ✅ done (found 2 Critical + gaps) | ✅ 2 surgical patches | **FULLY COMPLETE** |
-| 4. Phase 3/dashboard/build | ✅ done | ❌ **NOT YET DISPATCHED** | — | **RESUME HERE** |
+| 4. Phase 3/dashboard/build | ✅ done | ✅ done (found 1 coverage gap) | ✅ 1 test patch | **FULLY COMPLETE** |
 
 **Workflow note:** mid-session the user switched this effort from
 feature branches to trunk-based development — every fix wave, patch,
@@ -115,7 +115,7 @@ surgical patches (5 commits total for the second one, after the first
 patch's own residual was self-disclosed and adjudicated to park rather
 than chase a 4th round). Final: 19 commits total, 381 tests, CI green.
 
-## Area 4 (Phase 3 start + build/bundle/CI) — FIX WAVE DONE, RE-REVIEW PENDING
+## Area 4 (Phase 3 start + build/bundle/CI) — COMPLETE
 
 **This is the resume point.** The original review found: the
 dashboard's 11 own tests are provably blind to its own focus routing
@@ -154,23 +154,81 @@ kind or just some; whether the `check:standalone`'s `--no-install` fix
 has any platform-specific gap the way Area 1's Windows-only rename
 retry did.
 
+## Area 4 scoped re-review — DONE
+
+Carried out directly rather than by dispatching an agent. All three
+candidates the previous update flagged were checked, and the fix wave's
+headline claims were verified by sabotage rather than by reading:
+
+**Verified sound:**
+
+- **Focus routing is genuinely covered now.** Two sabotages on the real
+  `Dashboard`: forcing `focused = true` for every region fails 4 tests, and
+  disabling the Home/End handler fails 2. The blindness the original review
+  proved by hardcoding `isActive: true` is closed.
+- **The Home/End key choice collides with nothing.** No other view binds
+  `key.home` or `key.end` anywhere in the tree — checked exhaustively, not
+  spot-checked.
+- **The focus gate reached every composable view.** All five of picker,
+  table, form, diff and tree gate on `focused`, plus the inline `text`
+  region. This was the highest-risk candidate, being the exact
+  "structurally right, incompletely applied" shape `canvas/CLAUDE.md` warns
+  about.
+- **`check:standalone` can actually fail.** Rebuilt the bundle with
+  `--external react-devtools-core` (the original defect) and the check
+  exits 1; restored, it exits 0. No platform-specific gap of the kind Area
+  1's Windows-only rename retry had — the mechanism is Bun's module
+  resolution, not a filesystem behaviour.
+
+**Finding: no dashboard test used a `form` or `diff` region.** Every test
+written for this fix wave used `text`, `picker`, `tree` or `table` — so the
+two region kinds whose own key handling *motivated* moving region-switching
+off Tab had no dashboard coverage at all. `form` binds Tab to its own field
+navigation and `diff` has the densest key set of any region (a/r, PgUp/PgDn,
+Enter). The behaviour turned out to be correct; nothing proved it.
+
+That is the same shape as the gap the original review found in the
+neighbouring file, and the third time in this effort that the surface
+*adjacent* to the scrutinised fix was the one carrying the gap.
+
+Closed with `test/integration/dashboard-form-diff-regions.test.tsx`, 5
+tests, both directions verified by sabotage: putting region-switching back
+on Tab fails the two form tests, and making the diff view ignore focus fails
+the isolation test.
+
+**Ruling: my own first probe failed for the wrong reason, and I nearly
+reported a defect that was not there.** The probe asserted that End moves
+focus off a focused form; it failed, and the obvious reading was that a form
+region blocks region-switching. It did not. `isActive` on a newly-focused
+view only takes effect once Ink re-registers its `useInput` handler, one
+render later, so a keystroke sent after a single `settle()` is still routed
+by the previous assignment — the same registration-lag race that has caught
+this project at least three times, including in a test I wrote myself and
+in a CI-only failure earlier today. Checking what the *passing* neighbour
+test did differently, instead of trusting the first failure, is the only
+reason this went into the ledger as a coverage gap rather than as a
+phantom bug. Cost if wrong: a fix applied to code that was already correct.
+
 ## Next steps for the resuming session
 
-1. `git fetch origin && git log --oneline -10 origin/main` to confirm
-   current state matches `58049cf` as this document's tip (or later,
-   if anything landed since).
-2. Dispatch a scoped Opus re-review of Area 4's fix wave, same process
-   as Areas 1-3: checkout `main` directly (trunk-based, no branch),
-   independently reproduce each of the 9 fix claims with harsher
-   probing than the original implementer used, hunt for anything the
-   fix wave's own new code introduced.
-3. Adjudicate findings the same way every other area did: if the
-   findings are precisely diagnosed with a clear mechanism, one
-   surgical patch (not a second full fix-wave-plus-re-review cycle);
-   if something is genuinely out of scope or lower-severity than
-   everything else found, it's fine to park it with an explicit
-   ruling and a documented reason, the way Area 3's leftover
-   `display`-scenario startHour/endHour validation gap was parked.
+**All four areas are now closed.** This cross-cutting review effort is
+complete: 410 tests, `tsc --noEmit` clean, CI green on all three platforms.
+
+What remains is the process question this review raised for the user's
+judgment, not something a session should decide for itself:
+
+1. **Whether Phase 3 (composition, dashboard, tree) and the plugin
+   packaging work should be formally considered "scoped and accepted".**
+   Phase 3 was thinly pre-authorized by the roadmap, and the same
+   unreviewed session that built it also wrote its own authorization for
+   it. The plugin bundling was not in any phase's scope at all — it came
+   out of the user asking how to try the thing.
+2. **Then Phase 3 sub-project 3**, the image pipeline. Its starting point
+   is written up in `2026-09-08-richer-canvases-progress.md`, including
+   which tier to build first and why not to start with Sixel.
+
+Historical note on what the original plan said to do here:
+
 4. **After Area 4 is fully closed**, this cross-cutting review effort
    is complete. At that point, revisit with the user whether Phase 3
    (dashboard/tree) and the plugin-packaging work should be formally

@@ -158,3 +158,34 @@ test("an empty write is a no-op and never reaches the socket", () => {
   w.write(new Uint8Array(0));
   expect(f.callCount()).toBe(0);
 });
+
+// Fix 5 (Important). Nothing bounded how much this queue could hold: a
+// caller pushing data faster than the socket drains (or a peer that stopped
+// reading entirely) grew it without limit. hasPending()/pendingBytes()
+// existed but had no consumer anywhere -- this is that consumer.
+test("a write past the high-water mark is rejected instead of growing the queue forever", () => {
+  const f = fakeSocket(() => 0); // socket never accepts anything
+  const errors: string[] = [];
+  const w = createQueuedWriter(f.socket, (e) => errors.push(e.message), 10);
+
+  w.write(bytes(1, 2, 3, 4, 5)); // 5 bytes queued, under the 10-byte cap
+  expect(w.pendingBytes()).toBe(5);
+  expect(errors).toEqual([]);
+
+  w.write(bytes(6, 7, 8, 9, 10, 11)); // would bring it to 11, over the cap
+  expect(errors).toHaveLength(1);
+  expect(errors[0]).toContain("backpressure");
+  // The rejected write must not have grown the queue at all -- and must not
+  // have reached the socket either.
+  expect(w.pendingBytes()).toBe(5);
+});
+
+test("a write at or under the high-water mark is still queued normally", () => {
+  const f = fakeSocket(() => 0);
+  const errors: string[] = [];
+  const w = createQueuedWriter(f.socket, (e) => errors.push(e.message), 10);
+  w.write(bytes(1, 2, 3, 4, 5));
+  w.write(bytes(6, 7, 8, 9, 10)); // brings it to exactly 10: at, not over
+  expect(errors).toEqual([]);
+  expect(w.pendingBytes()).toBe(10);
+});

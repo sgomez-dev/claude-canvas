@@ -60,9 +60,22 @@ export interface QueuedWriter {
   destroy(): void;
 }
 
+// The queue this writer holds has no ceiling of its own: a caller pushing
+// data faster than the socket drains (or a peer that stops reading
+// entirely) grows it without limit, and that memory is never reclaimed
+// until the socket closes. protocol.ts's MAX_FRAME_BYTES (16 MB) already
+// bounds any single frame, so a cap of twice that lets one full-size frame
+// finish draining while at most one more of any size sits queued behind it
+// -- generous enough that no legitimate caller in this codebase (the
+// largest observed payload in this project's own tests is ~4 MB) should
+// ever hit it, while still turning "runaway producer" into a clear,
+// immediate error instead of unbounded growth.
+export const DEFAULT_MAX_QUEUED_BYTES = 32 * 1024 * 1024;
+
 export function createQueuedWriter(
   socket: WritableSocket,
-  onError?: (e: Error) => void
+  onError?: (e: Error) => void,
+  maxQueuedBytes: number = DEFAULT_MAX_QUEUED_BYTES
 ): QueuedWriter {
   // Unsent bytes, in order, as a list of views. Deliberately NOT a single
   // re-concatenated buffer: that is the exact O(n^2) growth pattern already
@@ -123,6 +136,20 @@ export function createQueuedWriter(
   return {
     write(data) {
       if (dead || data.byteLength === 0) return;
+      // Backpressure high-water mark (Fix 5): `hasPending`/`pendingBytes`
+      // used to have no production consumer at all, so nothing ever
+      // stopped this queue from growing without limit. Checked before
+      // either path below touches the queue, so a rejected write never
+      // partially enqueues.
+      if (queued + data.byteLength > maxQueuedBytes) {
+        onError?.(
+          new Error(
+            `queued writer backpressure limit exceeded: ${queued + data.byteLength} > ` +
+              `${maxQueuedBytes} bytes; dropping write`
+          )
+        );
+        return;
+      }
       // Fast path: nothing queued, so try the socket directly and only
       // allocate a queue entry for the remainder. This keeps the common
       // case (a small frame that the socket takes whole) identical to the

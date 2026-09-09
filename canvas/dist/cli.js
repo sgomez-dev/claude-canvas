@@ -26972,7 +26972,7 @@ function DiffView({
       /* @__PURE__ */ jsx_dev_runtime14.jsxDEV(Box_default, {
         flexDirection: "column",
         borderStyle: "round",
-        borderColor: "cyan",
+        borderColor: focused ? "cyan" : "gray",
         paddingX: 1,
         children: [
           /* @__PURE__ */ jsx_dev_runtime14.jsxDEV(Text, {
@@ -26987,7 +26987,7 @@ function DiffView({
             const total = f.hunks.length;
             const decided = f.hunks.filter((h) => decisions.has(h.id)).length;
             const marker = f.binary ? "[binary]" : `${decided}/${total} decided`;
-            const isCurrentFile = currentRef?.fileIndex === fileIndex;
+            const isCurrentFile = currentRef?.fileIndex === fileIndex && focused;
             return /* @__PURE__ */ jsx_dev_runtime14.jsxDEV(Text, {
               color: isCurrentFile ? "cyan" : undefined,
               children: [
@@ -27429,7 +27429,7 @@ function PickerView({
   return /* @__PURE__ */ jsx_dev_runtime16.jsxDEV(Box_default, {
     flexDirection: "column",
     borderStyle: "round",
-    borderColor: "cyan",
+    borderColor: focused ? "cyan" : "gray",
     paddingX: 1,
     children: [
       /* @__PURE__ */ jsx_dev_runtime16.jsxDEV(Text, {
@@ -27442,7 +27442,7 @@ function PickerView({
       }, undefined, false, undefined, this) : null,
       visibleOptions.map((opt, visibleIndex) => {
         const i = windowStart + visibleIndex;
-        const isCursor = i === cursor;
+        const isCursor = i === cursor && focused;
         const isChecked = mode === "multi" && checked.has(opt.id);
         const prefix = mode === "multi" ? `${isCursor ? "> " : "  "}${isChecked ? "[x] " : "[ ] "}` : isCursor ? "> " : "  ";
         return /* @__PURE__ */ jsx_dev_runtime16.jsxDEV(Text, {
@@ -27803,7 +27803,7 @@ function FormView({
   return /* @__PURE__ */ jsx_dev_runtime18.jsxDEV(Box_default, {
     flexDirection: "column",
     borderStyle: "round",
-    borderColor: "cyan",
+    borderColor: focused ? "cyan" : "gray",
     paddingX: 1,
     children: [
       /* @__PURE__ */ jsx_dev_runtime18.jsxDEV(Text, {
@@ -27812,7 +27812,7 @@ function FormView({
       }, undefined, false, undefined, this),
       windowFields.map((f, visibleIndex) => {
         const i = windowStart + visibleIndex;
-        const isFocused = i === focusIndex;
+        const isFocused = i === focusIndex && focused;
         const value = valuesRef.current[f.id] ?? initialValue(f);
         const hasError = errors.has(f.id) && isMissing(f, value);
         const labelColor = hasError ? "red" : isFocused ? "cyan" : undefined;
@@ -27873,14 +27873,17 @@ function FormView({
       }),
       /* @__PURE__ */ jsx_dev_runtime18.jsxDEV(Box_default, {
         marginTop: 1,
-        children: /* @__PURE__ */ jsx_dev_runtime18.jsxDEV(Text, {
-          color: focusIndex === fields.length ? "cyan" : undefined,
-          bold: focusIndex === fields.length,
-          children: [
-            focusIndex === fields.length ? "> " : "  ",
-            "[ Submit ]"
-          ]
-        }, undefined, true, undefined, this)
+        children: (() => {
+          const submitFocused = focusIndex === fields.length && focused;
+          return /* @__PURE__ */ jsx_dev_runtime18.jsxDEV(Text, {
+            color: submitFocused ? "cyan" : undefined,
+            bold: submitFocused,
+            children: [
+              submitFocused ? "> " : "  ",
+              "[ Submit ]"
+            ]
+          }, undefined, true, undefined, this);
+        })()
       }, undefined, false, undefined, this),
       /* @__PURE__ */ jsx_dev_runtime18.jsxDEV(Box_default, {
         marginTop: 1,
@@ -28126,13 +28129,16 @@ function TableView({
   return /* @__PURE__ */ jsx_dev_runtime20.jsxDEV(Box_default, {
     flexDirection: "column",
     borderStyle: "round",
-    borderColor: "cyan",
+    borderColor: focused ? "cyan" : "gray",
     paddingX: 1,
     children: [
       /* @__PURE__ */ jsx_dev_runtime20.jsxDEV(Text, {
         bold: true,
-        children: title ?? "Table"
-      }, undefined, false, undefined, this),
+        children: [
+          title ?? "Table",
+          focused ? "" : "  (not focused)"
+        ]
+      }, undefined, true, undefined, this),
       /* @__PURE__ */ jsx_dev_runtime20.jsxDEV(Box_default, {
         children: columns.map((c, i) => /* @__PURE__ */ jsx_dev_runtime20.jsxDEV(Text, {
           bold: true,
@@ -28409,7 +28415,7 @@ function TreeView({
   return /* @__PURE__ */ jsx_dev_runtime22.jsxDEV(Box_default, {
     flexDirection: "column",
     borderStyle: "round",
-    borderColor: "cyan",
+    borderColor: focused ? "cyan" : "gray",
     paddingX: 1,
     children: [
       /* @__PURE__ */ jsx_dev_runtime22.jsxDEV(Text, {
@@ -28422,7 +28428,7 @@ function TreeView({
       }, undefined, false, undefined, this) : null,
       windowRows.map((row, visibleIndex) => {
         const i = windowStart + visibleIndex;
-        const isCursor = i === clamped;
+        const isCursor = i === clamped && focused;
         const marker = row.hasChildren ? collapsed.has(row.node.id) ? "\u25B8 " : "\u25BE " : "  ";
         return /* @__PURE__ */ jsx_dev_runtime22.jsxDEV(Text, {
           color: isCursor ? "cyan" : undefined,
@@ -28652,9 +28658,9 @@ function Dashboard({
       exit();
       return;
     }
-    if (key.tab && focusable.length > 1) {
+    if (focusable.length > 1 && (key.home || key.end)) {
       const total = focusable.length;
-      setFocusSlot((s) => (s + (key.shift ? total - 1 : 1) % total) % total);
+      setFocusSlot((s) => (s + (key.home ? total - 1 : 1) % total) % total);
     }
   });
   function handleSubmit(regionId, result) {
@@ -28700,7 +28706,7 @@ function Dashboard({
         children: /* @__PURE__ */ jsx_dev_runtime23.jsxDEV(Text, {
           dimColor: true,
           children: [
-            focusable.length > 1 ? "Tab: region  " : "",
+            focusable.length > 1 ? "Home/End: region  " : "",
             "Esc: close"
           ]
         }, undefined, true, undefined, this)
@@ -28764,6 +28770,13 @@ function renderRegion(region, rows, focused, onSubmit) {
     }
     case "text": {
       const text = region.config.text;
+      const lines = text.split(`
+`);
+      const chrome = 2 + (region.title ? 1 : 0);
+      const available = Math.max(1, rows - chrome);
+      const truncated = lines.length > available;
+      const shown = truncated ? lines.slice(0, Math.max(0, available - 1)) : lines;
+      const hiddenCount = lines.length - shown.length;
       return /* @__PURE__ */ jsx_dev_runtime23.jsxDEV(Box_default, {
         flexDirection: "column",
         borderStyle: "round",
@@ -28773,9 +28786,17 @@ function renderRegion(region, rows, focused, onSubmit) {
             bold: true,
             children: region.title
           }, undefined, false, undefined, this) : null,
-          /* @__PURE__ */ jsx_dev_runtime23.jsxDEV(Text, {
-            children: text
-          }, undefined, false, undefined, this)
+          shown.map((line, i) => /* @__PURE__ */ jsx_dev_runtime23.jsxDEV(Text, {
+            children: line
+          }, i, false, undefined, this)),
+          truncated ? /* @__PURE__ */ jsx_dev_runtime23.jsxDEV(Text, {
+            dimColor: true,
+            children: [
+              "(",
+              hiddenCount,
+              " more lines)"
+            ]
+          }, undefined, true, undefined, this) : null
         ]
       }, undefined, true, undefined, this);
     }

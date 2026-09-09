@@ -80,7 +80,15 @@ footer shows the visible range whenever the data does not fit.
 
 Column widths are measured in display columns, so CJK, fullwidth forms,
 emoji and combining marks all align correctly -- a cell holding `日本語`
-counts as 6 columns, not 3, and a family emoji as 2, not 11.
+counts as 6 columns, not 3, and a family emoji as 2, not 11. This includes
+the common double-width status glyphs in the Miscellaneous Symbols,
+Dingbats, and Miscellaneous Symbols and Arrows blocks, so a status column
+using `✅`/`❌`/`⭐`/`⌚`/`☑` aligns correctly too -- though that coverage is a
+practical, terminal-observed subset of those blocks rather than every code
+point in them: a handful of default-text-presentation symbols in the same
+blocks (e.g. `⚠`) still measure single-width unless followed by an emoji
+presentation selector (`U+FE0F`), matching how most terminals actually
+render them.
 
 The one case that can still look wrong is a ZWJ sequence (a family or
 profession emoji) in a terminal that does not support ZWJ: it draws the

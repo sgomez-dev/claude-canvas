@@ -1,5 +1,5 @@
 import { test, expect } from "bun:test";
-import { displayWidth, truncateToWidth, padToWidth } from "./width";
+import { displayWidth, truncateToWidth, padToWidth, wrappedLineCount } from "./width";
 
 // Fixtures are built from code points rather than written as literals. Half
 // of these characters are invisible, zero-width, or indistinguishable from
@@ -94,10 +94,48 @@ test("truncateToWidth handles degenerate widths", () => {
   expect(truncateToWidth(cp(0x65e5), 1)).toBe("");
 });
 
+// Regression tests for Fix 6: the width table had no entry for the
+// U+2600-U+2BFF range (Miscellaneous Symbols, Dingbats, Miscellaneous
+// Symbols and Arrows), which includes some of the single most likely
+// characters an LLM would put in a generated status table. These measured
+// as width 1 before the fix, but every real terminal renders them as width
+// 2, causing real column misalignment in any table containing one.
+const CHECK_MARK = cp(0x2705); // ✅
+const CROSS_MARK = cp(0x274c); // ❌
+const STAR = cp(0x2b50); // ⭐
+const WATCH = cp(0x231a); // ⌚
+const BALLOT_BOX_CHECK = cp(0x2611); // ☑
+
+test("common status emoji (✅ ❌ ⭐ ⌚ ☑) measure as width 2", () => {
+  expect(displayWidth(CHECK_MARK)).toBe(2);
+  expect(displayWidth(CROSS_MARK)).toBe(2);
+  expect(displayWidth(STAR)).toBe(2);
+  expect(displayWidth(WATCH)).toBe(2);
+  expect(displayWidth(BALLOT_BOX_CHECK)).toBe(2);
+});
+
 test("padToWidth pads to display columns, not code units", () => {
   expect(displayWidth(padToWidth(cp(0x65e5), 4))).toBe(4);
   expect(displayWidth(padToWidth(FAMILY, 6))).toBe(6);
   // Already at or over width: left alone rather than truncated.
   expect(padToWidth(CJK_FIRST_TWO, 4)).toBe(CJK_FIRST_TWO);
   expect(padToWidth(CJK, 4)).toBe(CJK);
+});
+
+test("wrappedLineCount is 1 when the text fits within the width", () => {
+  expect(wrappedLineCount("short", 80)).toBe(1);
+  expect(wrappedLineCount("exactly ten", 11)).toBe(1);
+});
+
+test("wrappedLineCount counts additional rows once the text exceeds the width", () => {
+  expect(wrappedLineCount("a".repeat(56), 56)).toBe(1);
+  expect(wrappedLineCount("a".repeat(57), 56)).toBe(2);
+  expect(wrappedLineCount("a".repeat(112), 56)).toBe(2);
+  expect(wrappedLineCount("a".repeat(113), 56)).toBe(3);
+});
+
+test("wrappedLineCount never returns less than 1, even for a degenerate width", () => {
+  expect(wrappedLineCount("anything", 0)).toBe(1);
+  expect(wrappedLineCount("anything", -5)).toBe(1);
+  expect(wrappedLineCount("", 80)).toBe(1);
 });

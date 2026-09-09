@@ -106,9 +106,21 @@ A dashboard of only `text` and `table` regions can never produce
 
 ## Keys
 
-`Tab` / `Shift+Tab` move between the interactive regions, skipping `text`.
-The focused region gets every other key, so `↑`/`↓`, `Enter`, `Space` and
-`←`/`→` mean whatever that region kind says they mean. `Esc` always closes.
+`Home` / `End` move between the interactive regions, skipping `text`. This
+is deliberately **not** `Tab`/`Shift+Tab`: a composed `form` region binds
+Tab itself, to move between its own fields, and Ink calls every active key
+handler for the same keystroke rather than routing it to one -- so if the
+dashboard also bound Tab, a single press inside a focused form would both
+advance its field cursor and hand focus to a different region, and there
+would be no way to move within a multi-field form without also leaving it
+early. `Shift+Tab` was considered too and rejected for the same reason:
+`form` already binds it for backward field navigation.
+
+Besides Home/End, the focused region gets every other key, so `↑`/`↓`,
+`Enter`, `Space`, `Tab`/`Shift+Tab` and `←`/`→` mean whatever that region
+kind says they mean -- a focused `form`'s own Tab moves within its fields
+and never changes which region the dashboard considers focused. `Esc`
+always closes.
 
 ## Refresh
 

@@ -13,15 +13,15 @@ exports[`dashboard renders several region kinds in one pane 1`] = `
 \x1B[36m│\x1B[39m                                                          \x1B[36m│\x1B[39m
 \x1B[36m│\x1B[39m \x1B[2mrows 1-1 of 2  ↑/↓/PgUp/PgDn: scroll  Esc: close\x1B[22m         \x1B[36m│\x1B[39m
 \x1B[36m╰──────────────────────────────────────────────────────────╯\x1B[39m
-\x1B[36m╭──────────────────────────────────────────────────────────╮\x1B[39m
-\x1B[36m│\x1B[39m \x1B[1mNext\x1B[22m                                                     \x1B[36m│\x1B[39m
-\x1B[36m│\x1B[39m \x1B[36m> Sixel encoder\x1B[39m                                          \x1B[36m│\x1B[39m
-\x1B[36m│\x1B[39m   PNG decoder                                            \x1B[36m│\x1B[39m
-\x1B[36m│\x1B[39m                                                          \x1B[36m│\x1B[39m
-\x1B[36m│\x1B[39m \x1B[2m↑/↓: navigate  Enter: select  Esc: cancel\x1B[22m                \x1B[36m│\x1B[39m
-\x1B[36m╰──────────────────────────────────────────────────────────╯\x1B[39m
+\x1B[90m╭──────────────────────────────────────────────────────────╮\x1B[39m
+\x1B[90m│\x1B[39m \x1B[1mNext\x1B[22m                                                     \x1B[90m│\x1B[39m
+\x1B[90m│\x1B[39m   Sixel encoder                                          \x1B[90m│\x1B[39m
+\x1B[90m│\x1B[39m   PNG decoder                                            \x1B[90m│\x1B[39m
+\x1B[90m│\x1B[39m                                                          \x1B[90m│\x1B[39m
+\x1B[90m│\x1B[39m \x1B[2m↑/↓: navigate  Enter: select  Esc: cancel\x1B[22m                \x1B[90m│\x1B[39m
+\x1B[90m╰──────────────────────────────────────────────────────────╯\x1B[39m
 
-\x1B[2mTab: region  Esc: close\x1B[22m"
+\x1B[2mHome/End: region  Esc: close\x1B[22m"
 `;
 
 exports[`dashboard renders a config error for an unknown region kind 1`] = `

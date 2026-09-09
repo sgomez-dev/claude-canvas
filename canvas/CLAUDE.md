@@ -87,8 +87,12 @@ Three rules that are load-bearing rather than stylistic:
    misattributes an answer silently.
 
 `dashboard` is the composed canvas: it allocates rows between regions, owns
-`Tab` as well as `Escape`, and tags its outcome with the `regionId` that
-produced it. Adding a region kind means adding a case to
+`Home`/`End` (region-switching) as well as `Escape`, and tags its outcome
+with the `regionId` that produced it. Region-switching is Home/End rather
+than Tab/Shift+Tab specifically because `form` binds Tab itself for its own
+field navigation, and Ink calls every active `useInput` handler for the
+same keystroke instead of routing it to one -- so the shell owning Tab too
+would fire both at once. Adding a region kind means adding a case to
 `dashboard/validate.ts`'s `validateRegionConfig` and one to
 `dashboard.tsx`'s `renderRegion`.
 

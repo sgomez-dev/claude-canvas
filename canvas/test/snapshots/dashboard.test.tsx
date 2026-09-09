@@ -68,10 +68,16 @@ test("focus starts on the first interactive region, skipping text", async () => 
     columns: 60,
     rows: 26,
   });
-  const frame = await r.settle();
-  // The table region is focused, so its scroll keys are live; the picker's
-  // cursor gutter shows it is not.
-  expect(frame).toContain("Tab: region");
+  const frame = (await r.settle()).replace(/\x1b\[[0-9;]*m/g, "");
+  expect(frame).toContain("Home/End: region");
+  // The table region (the first focusable one -- `text` is skipped) is
+  // focused; the picker's cursor gutter must NOT show a live-looking
+  // cursor on an option it doesn't actually own yet. This used to pass
+  // even when every view ignored `focused` entirely and showed its cursor
+  // regardless -- asserted here with colour stripped, since that gutter is
+  // exactly the state this codebase requires to survive NO_COLOR.
+  expect(frame).not.toContain("> Sixel encoder");
+  expect(frame).toContain("  Sixel encoder");
   r.dispose();
 });
 

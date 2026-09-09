@@ -41,7 +41,7 @@ function isFocusable(region: DashboardRegion): boolean {
  * scrolls, and the alternative (dropping regions) hides content the caller
  * asked for.
  */
-function allocateRows(regions: DashboardRegion[], budget: number): number[] {
+export function allocateRows(regions: DashboardRegion[], budget: number): number[] {
   const fixed = regions.map((r) => r.rows);
   const flexible = fixed.filter((r) => r === undefined).length;
   // Explicit accumulator type: `fixed` is (number | undefined)[], so an
@@ -125,9 +125,42 @@ export function Dashboard({
     }
   }, [error, ipc.isConnected, ipc.sendError]);
 
-  // Escape and Tab are the shell's. Escape for the reason every primitive
-  // has it in its shell; Tab because focus is a property of the composition,
-  // not of any one region.
+  // Escape and region-switching are the shell's. Escape for the reason
+  // every primitive has it in its shell; region-switching because focus is
+  // a property of the composition, not of any one region.
+  //
+  // Region-switching used to be Tab/Shift+Tab, which reads naturally next
+  // to picker/table/tree/diff (none of which give Tab any meaning of their
+  // own, so the shell was the only consumer). It collided with `form`:
+  // FormView ALSO binds Tab, to move between its own fields, and Ink calls
+  // every active `useInput` handler for the same keypress rather than
+  // routing it to one -- this handler has no `isActive` gate at all, so a
+  // single Tab both advanced the focused form's field cursor AND changed
+  // which region the shell considers focused. Reproduced directly: a
+  // dashboard with a 2-field form plus a picker, one Tab moved the form
+  // from field 1 to field 2 AND handed dashboard focus to the picker in
+  // the same keystroke -- with N regions, filling one form field needed N
+  // Tabs, and the two effects were impossible to tell apart from the
+  // user's side.
+  //
+  // Home/End were picked to replace Tab/Shift+Tab here, not a Ctrl/Shift
+  // combination, for two reasons checked against this codebase and Ink's
+  // own key parser (parse-keypress.js) rather than assumed:
+  //   1. Ctrl+Tab has no legacy (non-kitty) terminal representation at all
+  //      -- Tab and Ctrl+I are the same byte (0x09) in plain ASCII, so a
+  //      terminal that isn't speaking the kitty keyboard protocol cannot
+  //      send a Ctrl+Tab distinct from a plain Tab. tmux and Windows
+  //      Terminal, this project's two supported hosts, don't forward it.
+  //   2. Shift+Tab was briefly considered too, and rejected for the reason
+  //      the spec calls out: FormView already binds it (backward field
+  //      navigation), so reusing it here would recreate the exact same
+  //      collision one key over.
+  // Home/End avoid both problems: they have unambiguous legacy CSI
+  // sequences (no kitty protocol needed) and, checked against every
+  // composed view kind (picker, form, table, diff, tree), none of them
+  // binds `key.home` or `key.end` to anything -- unlike arrow keys, which
+  // form's `select` fields and tree's fold/expand both already claim, Home/
+  // End were the one pair left with zero existing meaning to collide with.
   useInput((_input, key) => {
     if (key.escape) {
       if (submittedRef.current) return;
@@ -136,9 +169,9 @@ export function Dashboard({
       exit();
       return;
     }
-    if (key.tab && focusable.length > 1) {
+    if (focusable.length > 1 && (key.home || key.end)) {
       const total = focusable.length;
-      setFocusSlot((s) => (s + (key.shift ? total - 1 : 1) % total) % total);
+      setFocusSlot((s) => (s + (key.home ? total - 1 : 1) % total) % total);
     }
   });
 
@@ -179,7 +212,7 @@ export function Dashboard({
       })}
       <Box marginTop={1}>
         <Text dimColor>
-          {focusable.length > 1 ? "Tab: region  " : ""}
+          {focusable.length > 1 ? "Home/End: region  " : ""}
           Esc: close
         </Text>
       </Box>
@@ -267,10 +300,30 @@ function renderRegion(
     }
     case "text": {
       const text = (region.config as { text: string }).text;
+      // Unlike every other region kind, a `text` region used to render its
+      // full content unconditionally, ignoring the `rows` budget the
+      // dashboard's own allocateRows gave it -- a region allocated 4 rows
+      // with 12 lines of content rendered all 12, overflowing the terminal
+      // and pushing the footer off screen. Windowed here the same way
+      // picker/table/tree page their own content: show as many lines as the
+      // allocated budget has room for, and when there are more, replace the
+      // last visible line with a count of what's hidden rather than
+      // overflowing -- the same "(N more)" convention form.tsx's textarea
+      // truncation and picker/table/tree's "X of Y" footers use elsewhere in
+      // this codebase.
+      const lines = text.split("\n");
+      const chrome = 2 /* border */ + (region.title ? 1 : 0);
+      const available = Math.max(1, rows - chrome);
+      const truncated = lines.length > available;
+      const shown = truncated ? lines.slice(0, Math.max(0, available - 1)) : lines;
+      const hiddenCount = lines.length - shown.length;
       return (
         <Box flexDirection="column" borderStyle="round" paddingX={1}>
           {region.title ? <Text bold>{region.title}</Text> : null}
-          <Text>{text}</Text>
+          {shown.map((line, i) => (
+            <Text key={i}>{line}</Text>
+          ))}
+          {truncated ? <Text dimColor>({hiddenCount} more lines)</Text> : null}
         </Box>
       );
     }

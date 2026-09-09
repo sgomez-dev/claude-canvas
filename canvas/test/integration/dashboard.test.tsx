@@ -58,6 +58,101 @@ async function mount(id: string, config: DashboardConfig, rows = 24) {
 // The composed outcome's whole point: without `regionId` a controller
 // receiving {"selectedIds":["a.ts"]} from a dashboard with two pickers could
 // not tell which question was answered.
+// Fix 1's whole point: none of this file's other tests ever sent a
+// region-switch keystroke to the real `Dashboard` component before this
+// test existed. An independent review proved that gap by hardcoding
+// `isActive: true` in picker/view.tsx (breaking focus isolation outright --
+// every PickerView would then listen for keys regardless of which region
+// the dashboard considered focused) and finding that all of this file's
+// other tests still passed. Only a hand-written stand-in in
+// composition/focus.test.tsx, which reimplements its own separate mock of
+// focus routing rather than mounting the real Dashboard, caught it.
+//
+// The region-switch key is Home/End here, not Tab -- see dashboard.tsx's
+// own comment for why Tab could not stay the shell's key once `form`
+// entered the picture (fix 3 in this same wave). This test sends a real
+// keystroke to the real component either way, which is the property that
+// was missing, not the specific key.
+test("End moves the dashboard's focus, and only the newly-focused region answers a keystroke", async () => {
+  const id = "dash-it-focus-1";
+  const r = await mount(id, TWO_PICKERS);
+  const conn = await openConnection(id);
+
+  // "files" is focused first. End should hand focus to "actions" without
+  // touching "files" at all.
+  //
+  // Two settles after End, not one: `isActive` on the newly-focused
+  // PickerView only takes effect once Ink's passive effect re-registers
+  // its `useInput` handler, which lands one render after the one that
+  // flipped `focusSlot` -- a keystroke sent after only one settle can still
+  // be routed by the PREVIOUS assignment. See composition/focus.test.tsx's
+  // identical comment on this exact race.
+  r.stdin.write("\x1b[F"); // End
+  await r.settle();
+  await r.settle();
+  r.stdin.write("j"); // moves "actions"'s cursor, IF isolation actually held
+  await r.settle();
+  r.stdin.write("\r");
+  await r.settle();
+
+  // If PickerView's isActive gate were broken (every picker always live,
+  // as the reviewer's experiment reproduced), "files" -- mounted first --
+  // would answer here instead, with its own cursor untouched by "j". A
+  // hardcoded isActive:true also makes both pickers' "j" move together,
+  // so asserting the FULL outcome (regionId AND the moved-to option) is
+  // what actually distinguishes real per-region isolation from none.
+  expect(await nextOutcome(conn, 2000)).toEqual({
+    type: "selected",
+    data: { regionId: "actions", result: { selectedIds: ["build"] } },
+  });
+  conn.close();
+  r.dispose();
+});
+
+// The mirror of the above: BEFORE any region switch, keys must affect only
+// the first-focused region, and never leak to the second one just because
+// it is also mounted and rendering.
+test("before any region switch, keys affect only the first-focused region", async () => {
+  const id = "dash-it-focus-2";
+  const r = await mount(id, TWO_PICKERS);
+  const conn = await openConnection(id);
+
+  r.stdin.write("j");
+  await r.settle();
+  r.stdin.write("\r");
+  await r.settle();
+
+  expect(await nextOutcome(conn, 2000)).toEqual({
+    type: "selected",
+    data: { regionId: "files", result: { selectedIds: ["b.ts"] } },
+  });
+  conn.close();
+  r.dispose();
+});
+
+// Harder variant than a single End: Home and End must both move focus (not
+// just whichever direction happens to be exercised above), and cycling all
+// the way around a 2-region dashboard with two Ends must land back on the
+// region that started focused.
+test("Home moves focus backward, and End wraps around a 2-region dashboard", async () => {
+  const id = "dash-it-focus-3";
+  const r = await mount(id, TWO_PICKERS);
+  const conn = await openConnection(id);
+
+  // Home from "files" (index 0) wraps backward to "actions" (index 1).
+  r.stdin.write("\x1b[H"); // Home
+  await r.settle();
+  await r.settle(); // see the identical comment above on this race
+  r.stdin.write("\r"); // submits "actions" unmoved: "run tests"
+  await r.settle();
+  expect(await nextOutcome(conn, 2000)).toEqual({
+    type: "selected",
+    data: { regionId: "actions", result: { selectedIds: ["test"] } },
+  });
+  conn.close();
+  r.dispose();
+});
+
 test("an outcome says which region produced it", async () => {
   const id = "dash-it-1";
   const r = await mount(id, TWO_PICKERS);
@@ -143,6 +238,49 @@ test("a pushed config refreshes the regions in place", async () => {
   const frame = await settleUntil(r, (f) => f.includes("new status"));
   expect(frame).toContain("new status");
   expect(frame).not.toContain("old status");
+  r.dispose();
+});
+
+// A `text` region used to ignore its allocated `rows` budget entirely --
+// unlike every other region kind, it rendered all of its content
+// unconditionally, overflowing the terminal and pushing whatever came after
+// it (here, the picker and the footer) off screen.
+test("a text region windows its content to its allocated rows, not the terminal height", async () => {
+  const id = "dash-it-text";
+  const r = await mount(
+    id,
+    {
+      regions: [
+        {
+          id: "log",
+          kind: "text",
+          rows: 4,
+          config: { text: Array.from({ length: 12 }, (_, i) => `line ${i + 1}`).join("\n") },
+        },
+        {
+          id: "next",
+          kind: "picker",
+          rows: 6,
+          config: { mode: "single", options: [{ id: "a", label: "A" }] },
+        },
+      ],
+    },
+    14
+  );
+  const frame = await r.settle();
+  const plain = frame.replace(/\x1b\[[0-9;]*m/g, "");
+  const renderedLines = plain.split("\n").filter((l) => l.length > 0).length;
+  // The whole pane (title, both regions, the footer) must fit the 14-row
+  // terminal -- before the fix this alone overflowed to 23+ lines from the
+  // text region's 12 lines rendering unconditionally.
+  expect(renderedLines).toBeLessThanOrEqual(14);
+  expect(plain).toContain("line 1");
+  expect(plain).not.toContain("line 12");
+  expect(plain).toContain("more lines)");
+  // The footer and the second region must still be visible -- the original
+  // bug pushed exactly this off screen.
+  expect(plain).toContain("Esc: close");
+  expect(plain).toContain("Choose");
   r.dispose();
 });
 

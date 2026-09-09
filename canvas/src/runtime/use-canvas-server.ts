@@ -3,7 +3,14 @@ import { useApp } from "ink";
 import { appendFile, mkdir } from "node:fs/promises";
 import { dirname } from "node:path";
 import { startCanvasServer, type CanvasServer } from "./server";
-import { deleteRecord, readRecord, writeRecord, writeRecordSync, type CanvasRecord } from "./registry";
+import {
+  deleteRecord,
+  deleteRecordSync,
+  readRecordSync,
+  writeRecord,
+  writeRecordSync,
+  type CanvasRecord,
+} from "./registry";
 import { logPath } from "./paths";
 import { detectHost, baseCapabilities, type TerminalCapabilities } from "../host";
 import type { CanvasMessage, OutcomeMessage } from "./protocol";
@@ -186,10 +193,18 @@ export function useCanvasServer(o: UseCanvasServerOptions): CanvasServerHandle {
       // nobody has read it yet, it must survive this unmount unchanged --
       // that durability is the whole point of persisting it in the first
       // place.
-      void (async () => {
-        const current = await readRecord(id).catch(() => null);
-        if (!current || current.outcomeConsumed) await deleteRecord(id);
-      })();
+      //
+      // This MUST be synchronous, not a fire-and-forget async IIFE (the
+      // previous shape here). Ink's effect cleanups run synchronously during
+      // unmount, but an async function's body only runs up to its first
+      // `await` before control returns -- and the CLI's `show`/`spawn` flow
+      // calls `process.exit(0)` immediately after `waitUntilExit()`
+      // resolves, with nothing awaiting this cleanup in between. Reproduced
+      // empirically: 5/5 runs, the record was never actually deleted with
+      // the async version. readRecordSync/deleteRecordSync (real synchronous
+      // syscalls, see their doc comments in registry.ts) close that gap.
+      const current = readRecordSync(id);
+      if (!current || current.outcomeConsumed) deleteRecordSync(id);
     };
   }, [enabled, id, kind, scenario, exit]);
 

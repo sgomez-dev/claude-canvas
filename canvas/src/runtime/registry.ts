@@ -1,5 +1,5 @@
 import { mkdir, unlink, rename, readdir, stat, writeFile } from "node:fs/promises";
-import { mkdirSync, writeFileSync, renameSync } from "node:fs";
+import { mkdirSync, writeFileSync, renameSync, readFileSync, unlinkSync } from "node:fs";
 import { join } from "node:path";
 import { canvasesDir, recordPath } from "./paths";
 import { assertIdent } from "./validate";
@@ -108,22 +108,47 @@ function tmpPath(path: string): string {
  * request; the lock is held only for the instant of that one read, so a
  * short retry loop resolves it reliably without materially slowing down a
  * normal write.
+ *
+ * This budget (~190 ms total) is deliberately kept small for the ASYNC path:
+ * every caller here is a live process that is not mid-exit, so a long block
+ * is a real cost to it. See SYNC_RETRY_DELAYS_MS below for why the SYNC path
+ * (writeRecordSync) needs a much larger one.
  */
 const RETRY_DELAYS_MS = [5, 10, 20, 30, 40, 40];
+
+/**
+ * writeRecordSync's retry budget -- deliberately much larger than the async
+ * path's. This budget exists to survive real Windows contention (antivirus
+ * real-time scanning, a backup/indexing agent) briefly holding the
+ * destination file open, which routinely lasts 250-800 ms -- well past the
+ * async path's ~190 ms total, at which point the retry used to be exhausted
+ * and the rename failed, silently losing the outcome writeRecordSync exists
+ * to persist (see the try/catch around it in use-canvas-server.ts's
+ * emitOutcome, which surfaces that failure to stderr when it happens).
+ *
+ * The caller here (a canvas persisting its terminal outcome) is always a
+ * process already in the middle of exiting, so a large budget costs
+ * essentially nothing real: it only delays process exit a bit longer in the
+ * rare contention case, which is strictly better than silently dropping a
+ * user's choice. Ramps up to a 300 ms cap (so it never hammers the
+ * filesystem with back-to-back attempts) and totals a bit over 3 s across 16
+ * retries -- comfortably past the measured 250-800 ms contention window.
+ */
+const SYNC_RETRY_DELAYS_MS = [5, 10, 20, 40, 80, 150, 200, 250, 300, 300, 300, 300, 300, 300, 300, 300];
 
 function isTransientRenameError(e: unknown): boolean {
   const code = (e as NodeJS.ErrnoException)?.code;
   return code === "EPERM" || code === "EBUSY";
 }
 
-async function renameWithRetry(tmp: string, dest: string): Promise<void> {
+async function renameWithRetry(tmp: string, dest: string, delaysMs: number[] = RETRY_DELAYS_MS): Promise<void> {
   for (let attempt = 0; ; attempt++) {
     try {
       await rename(tmp, dest);
       return;
     } catch (e) {
-      if (!isTransientRenameError(e) || attempt >= RETRY_DELAYS_MS.length) throw e;
-      await new Promise((res) => setTimeout(res, RETRY_DELAYS_MS[attempt]));
+      if (!isTransientRenameError(e) || attempt >= delaysMs.length) throw e;
+      await new Promise((res) => setTimeout(res, delaysMs[attempt]));
     }
   }
 }
@@ -132,7 +157,7 @@ async function renameWithRetry(tmp: string, dest: string): Promise<void> {
 // stay synchronous (see its own doc comment), so the backoff is a blocking
 // sleep via Atomics.wait rather than a Promise/setTimeout. Confirmed to
 // actually block the calling thread (not just schedule a microtask) on this
-// runtime; the retry budget below totals under 200 ms.
+// runtime.
 //
 // Known limitation, confirmed by direct measurement: this can only ever
 // resolve a lock held by a DIFFERENT OS process (the real production shape
@@ -142,22 +167,22 @@ async function renameWithRetry(tmp: string, dest: string): Promise<void> {
 // which simulates "a separate reader" with an ordinary async call in the
 // same event loop), Atomics.wait blocking this thread also blocks that
 // reader's own promise from ever settling -- so the lock it holds can never
-// be released no matter how long or how many times this retries. Measured
-// directly: a 10-attempt, ~1.7 s budget did not resolve that specific
-// same-thread case, while an ordinary two-OS-process race (this function's
-// real target) resolves within the very first one or two retries.
+// be released no matter how long or how many times this retries, regardless
+// of how large the budget is. An ordinary two-OS-process race (this
+// function's real target) resolves within the very first one or two
+// retries.
 function sleepSyncMs(ms: number): void {
   Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
 }
 
-function renameWithRetrySync(tmp: string, dest: string): void {
+function renameWithRetrySync(tmp: string, dest: string, delaysMs: number[] = SYNC_RETRY_DELAYS_MS): void {
   for (let attempt = 0; ; attempt++) {
     try {
       renameSync(tmp, dest);
       return;
     } catch (e) {
-      if (!isTransientRenameError(e) || attempt >= RETRY_DELAYS_MS.length) throw e;
-      sleepSyncMs(RETRY_DELAYS_MS[attempt]!);
+      if (!isTransientRenameError(e) || attempt >= delaysMs.length) throw e;
+      sleepSyncMs(delaysMs[attempt]!);
     }
   }
 }
@@ -334,6 +359,57 @@ export async function deleteRecord(id: string): Promise<void> {
   assertIdent("id", id);
   try {
     await unlink(recordPath(id));
+  } catch {
+    // already gone
+  }
+}
+
+/**
+ * Synchronous sibling of readRecord, for the one caller that needs the read
+ * itself to complete before the process can exit: a canvas's own unmount
+ * cleanup (useCanvasServer.ts), checking whether its just-produced outcome
+ * has already been consumed by a controller.
+ *
+ * That cleanup used to be a fire-and-forget async IIFE (`void (async () =>
+ * {...})()`) inside a React effect cleanup. Effect cleanups in Ink's
+ * (synchronous-mode) reconciler run synchronously during unmount, but an
+ * async function's *body* does not -- it only runs up to its first `await`
+ * before control returns to the caller, and the CLI calls `process.exit(0)`
+ * immediately after `waitUntilExit()` resolves. Reproduced empirically: 5/5
+ * runs, the record was never actually deleted, because the process exited
+ * mid-read. There is no way to await a floating promise across that exit
+ * boundary, so the read (and the delete below) have to not need awaiting at
+ * all -- hence a real synchronous syscall here rather than Bun.file's
+ * async-only API.
+ *
+ * Deliberately does NOT replicate readRecord's `lastError`/`outcome`/
+ * `isAlive` side effects: its one caller only ever calls this after already
+ * producing an outcome (see the `!outcomeRef.current` early return in
+ * useCanvasServer.ts's cleanup), so this is just the plain parse-and-return
+ * that readRecord itself falls through to in that case.
+ */
+export function readRecordSync(id: string): CanvasRecord | null {
+  assertIdent("id", id);
+  let raw: string;
+  try {
+    raw = readFileSync(recordPath(id), "utf8");
+  } catch {
+    return null;
+  }
+  try {
+    return JSON.parse(raw) as CanvasRecord;
+  } catch {
+    // Same reasoning as readRecord: an unparseable read is not the place to
+    // destroy state.
+    return null;
+  }
+}
+
+/** Synchronous sibling of deleteRecord -- see readRecordSync's doc comment. */
+export function deleteRecordSync(id: string): void {
+  assertIdent("id", id);
+  try {
+    unlinkSync(recordPath(id));
   } catch {
     // already gone
   }

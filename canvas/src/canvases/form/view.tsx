@@ -1,6 +1,6 @@
 import React, { useReducer, useRef, useState } from "react";
 import { Box, Text, useInput } from "ink";
-import { wrappedLineCount } from "../width";
+import { displayWidth, truncateToWidthFromEnd, wrappedLineCount } from "../width";
 import type { FormField, FormResult } from "./types";
 
 export interface FormViewProps {
@@ -400,36 +400,71 @@ export function FormView({
                   const raw = (value as string) ?? "";
                   const placeholder =
                     "placeholder" in f && f.placeholder ? f.placeholder : undefined;
-                  const body = raw.length > 0 ? raw : (placeholder ?? "");
+                  // The multi-line marker and the width-based truncation
+                  // below must only ever describe what the user actually
+                  // typed. A placeholder is fallback copy the user never
+                  // entered -- if it happened to contain a newline, counting
+                  // it toward `lines` would show a "(N lines, showing last)"
+                  // marker for text nobody typed. Falling back to
+                  // `placeholder`'s first line only (dropping the rest
+                  // outright, not truncating with a marker) is a strict
+                  // improvement here anyway: this codebase's own field
+                  // definitions never give a placeholder embedded newlines
+                  // in practice, so this only ever changes behaviour for a
+                  // placeholder that would otherwise have been misrepresented
+                  // as user-entered multi-line content.
+                  const typed = raw.length > 0;
+                  const body = typed ? raw : ((placeholder ?? "").split("\n")[0] ?? "");
                   const filler = body.length === 0 && !isFocused ? "—" : "";
                   // `text` and `number` never contain a newline (nothing in
                   // the input handler above ever inserts one for them), so
-                  // this is always a single line for those types. A
+                  // `lines` is always a single entry for those types. A
                   // `textarea`, though, can hold arbitrarily many lines --
-                  // Enter inserts one instead of submitting -- and rendering
-                  // all of them unconditionally used to blow straight
-                  // through the field's own one-value-row budget (the same
-                  // "value row" every other field type is windowed to,
-                  // per ROWS_PER_FIELD), pushing the Submit button and the
-                  // footer off the bottom of the pane exactly like the
-                  // un-windowed hunk/option/field lists every other
-                  // primitive already had to fix.
-                  //
-                  // Windowed to that same single row rather than given a
-                  // bigger allowance: this component only supports typing
-                  // that appends and Backspace that removes from the end (no
-                  // interior cursor movement), so the cursor is always on
-                  // the LAST line -- showing the tail keeps it visible by
-                  // construction, with a small "(n of N)" marker so a
-                  // truncated textarea doesn't look like it silently lost
-                  // its earlier lines.
-                  const lines = body.length > 0 ? body.split("\n") : [""];
+                  // Enter inserts one instead of submitting.
+                  const lines = typed && body.includes("\n") ? body.split("\n") : [body];
                   const lastLine = lines[lines.length - 1] ?? "";
                   const truncated = lines.length > 1;
+                  const marker = truncated ? `(${lines.length} lines, showing last) ` : "";
+                  // Rendering the full last line unconditionally used to blow
+                  // straight through the field's own one-value-row budget
+                  // (the same "value row" every other field type is windowed
+                  // to, per ROWS_PER_FIELD): counting only embedded `\n`
+                  // characters completely missed a single line with none at
+                  // all (a long line word-wraps across many terminal rows
+                  // regardless of whether it ever contained a newline), and
+                  // even the multi-line case could still overflow once the
+                  // marker text and a genuinely long last line were measured
+                  // together -- the marker consumes width too, and nothing
+                  // accounted for that either.
+                  //
+                  // The fix measures real display width, not newline count:
+                  // marker + shown content + the trailing cursor/filler must
+                  // together fit within one row's available width, so this
+                  // box can never wrap onto a second terminal row no matter
+                  // how long the input or how wide the marker. This
+                  // component only supports typing that appends and
+                  // Backspace that removes from the end (no interior cursor
+                  // movement), so the cursor is always on the tail of the
+                  // last line -- showing THAT tail (not the head) keeps it
+                  // visible by construction once truncation is needed.
+                  const availableWidth = Math.max(
+                    0,
+                    columns - HORIZONTAL_CHROME - 2 /* marginLeft */
+                  );
+                  const trailingWidth = truncated ? 0 : displayWidth(filler);
+                  const cursorWidth = isFocused ? 1 : 0;
+                  const contentBudget = Math.max(
+                    0,
+                    availableWidth - displayWidth(marker) - trailingWidth - cursorWidth
+                  );
+                  const shownLastLine =
+                    displayWidth(lastLine) > contentBudget
+                      ? truncateToWidthFromEnd(lastLine, contentBudget)
+                      : lastLine;
                   return (
                     <Text dimColor={raw.length === 0}>
-                      {truncated ? `(${lines.length} lines, showing last) ` : ""}
-                      {lastLine}
+                      {marker}
+                      {shownLastLine}
                       {truncated ? "" : filler}
                       {isFocused ? "▏" : ""}
                     </Text>

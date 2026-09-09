@@ -1,5 +1,11 @@
 import { test, expect } from "bun:test";
-import { displayWidth, truncateToWidth, padToWidth, wrappedLineCount } from "./width";
+import {
+  displayWidth,
+  truncateToWidth,
+  truncateToWidthFromEnd,
+  padToWidth,
+  wrappedLineCount,
+} from "./width";
 
 // Fixtures are built from code points rather than written as literals. Half
 // of these characters are invisible, zero-width, or indistinguishable from
@@ -92,6 +98,35 @@ test("truncateToWidth handles degenerate widths", () => {
   expect(truncateToWidth("abc", 0)).toBe("");
   expect(truncateToWidth("abc", -1)).toBe("");
   expect(truncateToWidth(cp(0x65e5), 1)).toBe("");
+});
+
+// Used by form/view.tsx's textarea, which always shows the tail of what was
+// typed (the cursor only ever appends), so it needs the opposite end kept
+// compared to truncateToWidth.
+test("truncateToWidthFromEnd keeps the tail, not the head", () => {
+  expect(truncateToWidthFromEnd("abcdef", 3)).toBe("def");
+  expect(truncateToWidthFromEnd("abcdef", 6)).toBe("abcdef");
+  expect(truncateToWidthFromEnd("abcdef", 100)).toBe("abcdef");
+});
+
+test("truncateToWidthFromEnd never splits a double-width character", () => {
+  // Cutting at 5 columns from a 6-column, 3-ideograph string must yield the
+  // LAST two ideographs (4 columns), not half of the first-kept one.
+  const CJK_LAST_TWO = cp(0x672c, 0x8a9e);
+  expect(truncateToWidthFromEnd(CJK, 5)).toBe(CJK_LAST_TWO);
+  expect(displayWidth(truncateToWidthFromEnd(CJK, 5))).toBe(4);
+  expect(truncateToWidthFromEnd(CJK, 6)).toBe(CJK);
+});
+
+test("truncateToWidthFromEnd never splits a grapheme cluster", () => {
+  expect(truncateToWidthFromEnd(FAMILY + "a", 2)).toBe("a");
+  expect(truncateToWidthFromEnd(FAMILY + "a", 3)).toBe(FAMILY + "a");
+});
+
+test("truncateToWidthFromEnd handles degenerate widths", () => {
+  expect(truncateToWidthFromEnd("abc", 0)).toBe("");
+  expect(truncateToWidthFromEnd("abc", -1)).toBe("");
+  expect(truncateToWidthFromEnd(cp(0x65e5), 1)).toBe("");
 });
 
 // Regression tests for Fix 6: the width table had no entry for the

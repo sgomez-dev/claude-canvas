@@ -182,6 +182,29 @@ export function padToWidth(text: string, columns: number): string {
 }
 
 /**
+ * Truncates to at most `columns` display columns, keeping the TAIL of the
+ * string rather than truncateToWidth's head -- for the case where the
+ * "interesting" content is at the end, such as a cursor that only ever
+ * appends (form/view.tsx's textarea, which always shows the end of what
+ * was typed rather than the beginning). Never splits a grapheme cluster or
+ * leaves half of a double-width character.
+ */
+export function truncateToWidthFromEnd(text: string, columns: number): string {
+  if (columns <= 0) return "";
+  const clusters = Array.from(segmenter.segment(text), ({ segment }) => segment);
+  let out = "";
+  let used = 0;
+  for (let i = clusters.length - 1; i >= 0; i--) {
+    const cluster = clusters[i]!;
+    const w = clusterWidth(cluster);
+    if (used + w > columns) break;
+    out = cluster + out;
+    used += w;
+  }
+  return out;
+}
+
+/**
  * Estimates how many terminal rows a fixed piece of hint/footer text wraps
  * to inside a box `innerWidth` display columns wide.
  *

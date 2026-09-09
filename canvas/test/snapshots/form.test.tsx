@@ -144,6 +144,40 @@ test("an empty field with no placeholder still renders a visible input line", as
   r.dispose();
 });
 
+// Regression test for Fix 6: the multi-line marker used to be computed from
+// `body`, which falls back to the placeholder when nothing was typed yet --
+// so a placeholder containing a newline would show "(N lines, showing
+// last)" for text the user never entered. The marker (and the width-based
+// truncation it triggers) must only ever describe actually-typed content.
+test("a placeholder containing a newline never triggers the multi-line marker", async () => {
+  const r = renderCanvas(
+    <Form
+      id="form-13"
+      config={{
+        title: "Placeholder with newline",
+        fields: [
+          {
+            id: "notes",
+            type: "textarea",
+            label: "Notes",
+            placeholder: "line one\nline two\nline three",
+          },
+        ],
+      }}
+      enabled={false}
+    />,
+    { columns: 60, rows: 14 }
+  );
+  const frame = await r.settle();
+  expect(frame).not.toContain("lines, showing last");
+  // Only the placeholder's first line is shown -- the rest is dropped
+  // outright rather than counted toward a marker that would misattribute
+  // it as user-typed content.
+  expect(frame).toContain("line one");
+  expect(frame).not.toContain("line two");
+  r.dispose();
+});
+
 // A form with more fields than the pane has rows used to render all of them.
 // The overflow pushed the Submit button itself out of view, so the form
 // could be filled in and not submitted -- worse than picker's or table's
@@ -218,6 +252,56 @@ test("a textarea with enough newlines to exceed its row allocation does not over
   // windowing the textarea's content is that it doesn't push Submit (or the
   // footer) off screen the way an un-windowed field list did before that
   // was fixed.
+  expect(frame).toContain("[ Submit ]");
+  r.dispose();
+});
+
+// Regression test for Fix 4: the pre-fix windowing counted only embedded
+// `\n` characters, so a single line with NONE at all completely bypassed
+// it -- 400 characters with zero newlines rendered as 18 rows in a 14-row
+// terminal, because the text word-wrapped across many visual rows that the
+// newline-counting logic never accounted for. No Tab is needed here either,
+// for the same reason as the test above: the textarea is the form's only
+// field and already has focus.
+test("a textarea with one very long line and NO newlines does not overflow the pane's row budget", async () => {
+  const rows = 14;
+  const r = renderCanvas(<Form id="form-11" config={TEXTAREA_CONFIG} enabled={false} />, {
+    columns: 60,
+    rows,
+  });
+  await r.settle();
+
+  for (let i = 0; i < 400; i++) {
+    r.stdin.write("x");
+  }
+  const frame = await r.settle();
+
+  expect(frame.split("\n").length).toBeLessThanOrEqual(rows);
+  expect(frame).toContain("[ Submit ]");
+  r.dispose();
+});
+
+// Regression test for Fix 4's second half: even WITH embedded newlines, the
+// "(N lines, showing last)" marker's own width was never subtracted from
+// the row budget, and a genuinely long last line could still wrap on its
+// own -- so the newline-counting path could still overflow once the marker
+// and a long last line were measured together. A handful of newlines
+// followed by one very long line (no trailing newline, so it IS the last
+// line shown) reproduces exactly that.
+test("a textarea with newlines AND a long last line does not overflow the pane's row budget", async () => {
+  const rows = 14;
+  const r = renderCanvas(<Form id="form-12" config={TEXTAREA_CONFIG} enabled={false} />, {
+    columns: 60,
+    rows,
+  });
+  await r.settle();
+
+  for (let i = 0; i < 5; i++) r.stdin.write("\r"); // 5 newlines
+  for (let i = 0; i < 300; i++) r.stdin.write("y"); // then a long last line
+  const frame = await r.settle();
+
+  expect(frame).toContain("lines, showing last");
+  expect(frame.split("\n").length).toBeLessThanOrEqual(rows);
   expect(frame).toContain("[ Submit ]");
   r.dispose();
 });

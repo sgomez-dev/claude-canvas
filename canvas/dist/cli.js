@@ -26600,10 +26600,55 @@ function padToWidth(text, columns) {
   const w = displayWidth(text);
   return w >= columns ? text : text + " ".repeat(columns - w);
 }
+function truncateToWidthFromEnd(text, columns) {
+  if (columns <= 0)
+    return "";
+  const clusters = Array.from(segmenter4.segment(text), ({ segment }) => segment);
+  let out = "";
+  let used = 0;
+  for (let i = clusters.length - 1;i >= 0; i--) {
+    const cluster = clusters[i];
+    const w = clusterWidth(cluster);
+    if (used + w > columns)
+      break;
+    out = cluster + out;
+    used += w;
+  }
+  return out;
+}
 function wrappedLineCount(text, innerWidth) {
   if (innerWidth <= 0)
     return 1;
-  return Math.max(1, Math.ceil(displayWidth(text) / innerWidth));
+  const tokens = text.match(/\S+|\s+/g) ?? [];
+  if (tokens.length === 0)
+    return 1;
+  let lines = 1;
+  let col = 0;
+  let pendingGap = 0;
+  for (const token of tokens) {
+    if (/^\s+$/.test(token)) {
+      pendingGap += displayWidth(token);
+      continue;
+    }
+    const wordWidth = displayWidth(token);
+    const needed = col + pendingGap + wordWidth;
+    if (needed <= innerWidth) {
+      col = needed;
+    } else if (wordWidth <= innerWidth) {
+      if (col > 0)
+        lines += 1;
+      col = wordWidth;
+    } else {
+      if (col > 0)
+        lines += 1;
+      const extraLines = Math.ceil(wordWidth / innerWidth);
+      lines += extraLines - 1;
+      const remainder = wordWidth % innerWidth;
+      col = remainder === 0 ? innerWidth : remainder;
+    }
+    pendingGap = 0;
+  }
+  return lines;
 }
 var segmenter4, ZERO_WIDTH, WIDE;
 var init_width = __esm(() => {
@@ -26628,9 +26673,14 @@ var init_width = __esm(() => {
   WIDE = [
     [4352, 4447],
     [8986, 8987],
+    [9193, 9196],
+    [9200, 9200],
+    [9203, 9203],
+    [9725, 9726],
     [9745, 9745],
     [9748, 9749],
     [9800, 9811],
+    [9855, 9855],
     [9875, 9875],
     [9889, 9889],
     [9898, 9899],
@@ -26704,6 +26754,13 @@ function DiffView({
   cursorRef.current = cursor;
   const [lineOffset, setLineOffset] = import_react35.useState(0);
   const maxLineOffsetRef = import_react35.useRef(0);
+  const hunkRowsRef = import_react35.useRef(1);
+  function maxLineOffsetForHunk(flatIndex) {
+    const ref = flatHunks[flatIndex];
+    const hunk = ref ? files[ref.fileIndex]?.hunks[ref.hunkIndex] : undefined;
+    const lineCount = hunk?.lines.length ?? 0;
+    return Math.max(0, lineCount - hunkRowsRef.current);
+  }
   const [decisions, setDecisions] = import_react35.useState(new Map);
   const decisionsRef = import_react35.useRef(decisions);
   decisionsRef.current = decisions;
@@ -26734,11 +26791,13 @@ function DiffView({
       cursorRef.current = next;
       setCursor(next);
       setLineOffset(0);
+      maxLineOffsetRef.current = maxLineOffsetForHunk(next);
     } else if (key.downArrow || input === "j") {
       const next = Math.min(flatHunks.length - 1, cursorRef.current + 1);
       cursorRef.current = next;
       setCursor(next);
       setLineOffset(0);
+      maxLineOffsetRef.current = maxLineOffsetForHunk(next);
     } else if (input === "a") {
       const ref = flatHunks[cursorRef.current];
       if (ref) {
@@ -26775,6 +26834,7 @@ function DiffView({
   const budget = Math.max(2, totalBudget - CHROME_ROWS - footerOverflow);
   const fileRows = Math.max(1, Math.min(MAX_FILE_ROWS, files.length, budget - 1));
   const hunkRows = Math.max(1, budget - fileRows);
+  hunkRowsRef.current = hunkRows;
   const fileWindowStart = files.length <= fileRows ? 0 : Math.floor((currentRef?.fileIndex ?? 0) / fileRows) * fileRows;
   const visibleFiles = files.slice(fileWindowStart, fileWindowStart + fileRows);
   const hunkLines = currentHunk?.lines ?? [];
@@ -27170,6 +27230,13 @@ function firstEnabledIndex(options) {
   const idx = options.findIndex((o) => !o.disabled);
   return idx === -1 ? 0 : idx;
 }
+function positionPrefix(total, cursor, visibleCount) {
+  if (total <= visibleCount)
+    return "";
+  const start = Math.floor(cursor / visibleCount) * visibleCount;
+  const visibleLen = Math.min(visibleCount, total - start);
+  return `${start + 1}-${start + visibleLen} of ${total}  `;
+}
 function PickerView({
   options,
   mode,
@@ -27225,9 +27292,14 @@ function PickerView({
     }
   }, { isActive: focused });
   const footerHint = mode === "multi" ? MULTI_FOOTER_HINT : SINGLE_FOOTER_HINT;
-  const footerRows = wrappedLineCount(footerHint, Math.max(1, columns - HORIZONTAL_CHROME2));
-  const footerOverflow = Math.max(0, footerRows - 1);
-  const visibleCount = Math.max(1, rows - CHROME_ROWS2 - footerOverflow - (prompt ? 1 : 0));
+  const innerWidth = Math.max(1, columns - HORIZONTAL_CHROME2);
+  let footerRows = wrappedLineCount(footerHint, innerWidth);
+  let footerOverflow = Math.max(0, footerRows - 1);
+  let visibleCount = Math.max(1, rows - CHROME_ROWS2 - footerOverflow - (prompt ? 1 : 0));
+  const actualFooter = positionPrefix(options.length, cursor, visibleCount) + footerHint;
+  footerRows = wrappedLineCount(actualFooter, innerWidth);
+  footerOverflow = Math.max(0, footerRows - 1);
+  visibleCount = Math.max(1, rows - CHROME_ROWS2 - footerOverflow - (prompt ? 1 : 0));
   const windowStart = options.length <= visibleCount ? 0 : Math.floor(cursor / visibleCount) * visibleCount;
   const visibleOptions = options.slice(windowStart, windowStart + visibleCount);
   return /* @__PURE__ */ jsx_dev_runtime16.jsxDEV(Box_default, {
@@ -27439,6 +27511,18 @@ function isMissing(field, value) {
   }
   return false;
 }
+function windowStartFor(total, focusIndex, visibleFields) {
+  if (total <= visibleFields)
+    return 0;
+  return Math.min(Math.floor(Math.min(focusIndex, total - 1) / visibleFields) * visibleFields, total - visibleFields);
+}
+function positionPrefix2(total, focusIndex, visibleFields) {
+  if (total <= visibleFields)
+    return "";
+  const start = windowStartFor(total, focusIndex, visibleFields);
+  const visibleLen = Math.min(visibleFields, total - start);
+  return `${start + 1}-${start + visibleLen} of ${total}  `;
+}
 function clampNumber(raw, min, max) {
   if (raw.trim().length === 0)
     return raw;
@@ -27459,14 +27543,17 @@ function FormView({
   focused,
   onSubmit
 }) {
-  const [values, setValues] = import_react39.useState(() => {
+  const valuesRef = import_react39.useRef((() => {
     const init = {};
     for (const f of fields)
       init[f.id] = initialValue(f);
     return init;
-  });
-  const valuesRef = import_react39.useRef(values);
-  valuesRef.current = values;
+  })());
+  const [, forceRender] = import_react39.useReducer((n) => n + 1, 0);
+  function setValue(id, value) {
+    valuesRef.current = { ...valuesRef.current, [id]: value };
+    forceRender();
+  }
   const [focusIndex, setFocusIndex] = import_react39.useState(0);
   const focusIndexRef = import_react39.useRef(focusIndex);
   focusIndexRef.current = focusIndex;
@@ -27474,10 +27561,7 @@ function FormView({
   function moveFocus(delta) {
     const currentField = fields[focusIndexRef.current];
     if (currentField?.type === "number") {
-      setValues((prev) => ({
-        ...prev,
-        [currentField.id]: clampNumber(prev[currentField.id] ?? "", currentField.min, currentField.max)
-      }));
+      setValue(currentField.id, clampNumber(valuesRef.current[currentField.id] ?? "", currentField.min, currentField.max));
     }
     const total = fields.length + 1;
     const next = (focusIndexRef.current + delta + total) % total;
@@ -27536,7 +27620,7 @@ function FormView({
       return;
     if (field.type === "checkbox") {
       if (input === " ")
-        setValues((prev) => ({ ...prev, [field.id]: !prev[field.id] }));
+        setValue(field.id, !valuesRef.current[field.id]);
       return;
     }
     if (field.type === "select") {
@@ -27544,65 +27628,53 @@ function FormView({
       if (opts.length === 0)
         return;
       if (key.leftArrow) {
-        setValues((prev) => {
-          const current = prev[field.id];
-          const currentIndex = Math.max(0, opts.findIndex((o) => o.value === current));
-          const next = opts[(currentIndex - 1 + opts.length) % opts.length];
-          return { ...prev, [field.id]: next.value };
-        });
+        const current = valuesRef.current[field.id];
+        const currentIndex = Math.max(0, opts.findIndex((o) => o.value === current));
+        const nextOpt = opts[(currentIndex - 1 + opts.length) % opts.length];
+        setValue(field.id, nextOpt.value);
       } else if (key.rightArrow) {
-        setValues((prev) => {
-          const current = prev[field.id];
-          const currentIndex = Math.max(0, opts.findIndex((o) => o.value === current));
-          const next = opts[(currentIndex + 1) % opts.length];
-          return { ...prev, [field.id]: next.value };
-        });
+        const current = valuesRef.current[field.id];
+        const currentIndex = Math.max(0, opts.findIndex((o) => o.value === current));
+        const nextOpt = opts[(currentIndex + 1) % opts.length];
+        setValue(field.id, nextOpt.value);
       }
       return;
     }
     if (field.type === "number") {
       if (key.backspace || key.delete) {
-        setValues((prev) => {
-          const raw = prev[field.id] ?? "";
-          return { ...prev, [field.id]: raw.slice(0, -1) };
-        });
+        const raw = valuesRef.current[field.id] ?? "";
+        setValue(field.id, raw.slice(0, -1));
       } else if (/^[0-9]$/.test(input)) {
-        setValues((prev) => {
-          const raw = prev[field.id] ?? "";
-          return { ...prev, [field.id]: raw + input };
-        });
+        const raw = valuesRef.current[field.id] ?? "";
+        setValue(field.id, raw + input);
       } else if (input === "-" && (field.min ?? -1) < 0) {
-        setValues((prev) => {
-          const raw = prev[field.id] ?? "";
-          if (raw.length !== 0)
-            return prev;
-          return { ...prev, [field.id]: raw + input };
-        });
+        const raw = valuesRef.current[field.id] ?? "";
+        if (raw.length === 0)
+          setValue(field.id, raw + input);
       }
       return;
     }
     if (key.backspace || key.delete) {
-      setValues((prev) => {
-        const text = prev[field.id] ?? "";
-        return { ...prev, [field.id]: text.slice(0, -1) };
-      });
+      const text = valuesRef.current[field.id] ?? "";
+      setValue(field.id, text.slice(0, -1));
     } else if (field.type === "textarea" && key.return) {
-      setValues((prev) => {
-        const text = prev[field.id] ?? "";
-        return { ...prev, [field.id]: text + `
-` };
-      });
+      const text = valuesRef.current[field.id] ?? "";
+      setValue(field.id, text + `
+`);
     } else if (input && !key.return) {
-      setValues((prev) => {
-        const text = prev[field.id] ?? "";
-        return { ...prev, [field.id]: text + input };
-      });
+      const text = valuesRef.current[field.id] ?? "";
+      setValue(field.id, text + input);
     }
   }, { isActive: focused });
-  const footerRows = wrappedLineCount(FOOTER_HINT2, Math.max(1, columns - HORIZONTAL_CHROME3));
-  const footerOverflow = Math.max(0, footerRows - 1);
-  const visibleFields = Math.max(1, Math.floor((budget - CHROME_ROWS3 - footerOverflow) / ROWS_PER_FIELD));
-  const windowStart = fields.length <= visibleFields ? 0 : Math.min(Math.floor(Math.min(focusIndex, fields.length - 1) / visibleFields) * visibleFields, fields.length - visibleFields);
+  const innerWidth = Math.max(1, columns - HORIZONTAL_CHROME3);
+  let footerRows = wrappedLineCount(FOOTER_HINT2, innerWidth);
+  let footerOverflow = Math.max(0, footerRows - 1);
+  let visibleFields = Math.max(1, Math.floor((budget - CHROME_ROWS3 - footerOverflow) / ROWS_PER_FIELD));
+  const actualFooter = positionPrefix2(fields.length, focusIndex, visibleFields) + FOOTER_HINT2;
+  footerRows = wrappedLineCount(actualFooter, innerWidth);
+  footerOverflow = Math.max(0, footerRows - 1);
+  visibleFields = Math.max(1, Math.floor((budget - CHROME_ROWS3 - footerOverflow) / ROWS_PER_FIELD));
+  const windowStart = windowStartFor(fields.length, focusIndex, visibleFields);
   const windowFields = fields.slice(windowStart, windowStart + visibleFields);
   return /* @__PURE__ */ jsx_dev_runtime18.jsxDEV(Box_default, {
     flexDirection: "column",
@@ -27617,7 +27689,7 @@ function FormView({
       windowFields.map((f, visibleIndex) => {
         const i = windowStart + visibleIndex;
         const isFocused = i === focusIndex;
-        const value = values[f.id] ?? initialValue(f);
+        const value = valuesRef.current[f.id] ?? initialValue(f);
         const hasError = errors.has(f.id) && isMissing(f, value);
         const labelColor = hasError ? "red" : isFocused ? "cyan" : undefined;
         const requiredMark = "required" in f && f.required ? " *" : "";
@@ -27646,17 +27718,26 @@ function FormView({
               }, undefined, true, undefined, this) : (() => {
                 const raw = value ?? "";
                 const placeholder = "placeholder" in f && f.placeholder ? f.placeholder : undefined;
-                const body = raw.length > 0 ? raw : placeholder ?? "";
+                const typed = raw.length > 0;
+                const body = typed ? raw : (placeholder ?? "").split(`
+`)[0] ?? "";
                 const filler = body.length === 0 && !isFocused ? "\u2014" : "";
-                const lines = body.length > 0 ? body.split(`
-`) : [""];
+                const lines = typed && body.includes(`
+`) ? body.split(`
+`) : [body];
                 const lastLine = lines[lines.length - 1] ?? "";
                 const truncated = lines.length > 1;
+                const marker = truncated ? `(${lines.length} lines, showing last) ` : "";
+                const availableWidth = Math.max(0, columns - HORIZONTAL_CHROME3 - 2);
+                const trailingWidth = truncated ? 0 : displayWidth(filler);
+                const cursorWidth = isFocused ? 1 : 0;
+                const contentBudget = Math.max(0, availableWidth - displayWidth(marker) - trailingWidth - cursorWidth);
+                const shownLastLine = displayWidth(lastLine) > contentBudget ? truncateToWidthFromEnd(lastLine, contentBudget) : lastLine;
                 return /* @__PURE__ */ jsx_dev_runtime18.jsxDEV(Text, {
                   dimColor: raw.length === 0,
                   children: [
-                    truncated ? `(${lines.length} lines, showing last) ` : "",
-                    lastLine,
+                    marker,
+                    shownLastLine,
                     truncated ? "" : filler,
                     isFocused ? "\u258F" : ""
                   ]
@@ -27844,6 +27925,12 @@ var init_form = __esm(async () => {
 });
 
 // canvas/src/canvases/table/view.tsx
+function positionPrefix3(total, scrollOffset, visibleCount) {
+  if (total <= visibleCount)
+    return "";
+  const visibleLen = Math.min(visibleCount, total - scrollOffset);
+  return `rows ${scrollOffset + 1}-${scrollOffset + visibleLen} of ${total}  `;
+}
 function computeWidth(col, rows) {
   if (col.width !== undefined)
     return col.width;
@@ -27872,10 +27959,15 @@ function TableView({
   focused
 }) {
   const widths = import_react41.useMemo(() => columns.map((c) => computeWidth(c, rows)), [columns, rows]);
-  const footerRows = wrappedLineCount(FOOTER_HINT3, Math.max(1, terminalWidth - HORIZONTAL_CHROME4));
-  const footerOverflow = Math.max(0, footerRows - 1);
-  const visibleCount = Math.max(1, budget - HEADER_OVERHEAD_ROWS - footerOverflow);
   const [scrollOffset, setScrollOffset] = import_react41.useState(0);
+  const innerWidth = Math.max(1, terminalWidth - HORIZONTAL_CHROME4);
+  let footerRows = wrappedLineCount(FOOTER_HINT3, innerWidth);
+  let footerOverflow = Math.max(0, footerRows - 1);
+  let visibleCount = Math.max(1, budget - HEADER_OVERHEAD_ROWS - footerOverflow);
+  const actualFooter = positionPrefix3(rows.length, scrollOffset, visibleCount) + FOOTER_HINT3;
+  footerRows = wrappedLineCount(actualFooter, innerWidth);
+  footerOverflow = Math.max(0, footerRows - 1);
+  visibleCount = Math.max(1, budget - HEADER_OVERHEAD_ROWS - footerOverflow);
   const maxOffset = Math.max(0, rows.length - visibleCount);
   use_input_default((input, key) => {
     if (key.downArrow || input === "j") {

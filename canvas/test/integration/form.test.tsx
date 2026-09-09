@@ -41,6 +41,12 @@ const DELTA_ONLY: FormConfig = {
   fields: [{ id: "delta", type: "number", label: "Delta", required: true }],
 };
 
+// Optional (no `required`), with a `min` an untouched blank field must never
+// silently violate.
+const OPTIONAL_MIN_FIVE: FormConfig = {
+  fields: [{ id: "n", type: "number", label: "N", min: 5, max: 10 }],
+};
+
 async function mount(id: string, config: FormConfig) {
   ids.push(id);
   const r = renderCanvas(<Form id={id} config={config} enabled={true} />, {
@@ -130,6 +136,61 @@ test("a required number holding only a minus sign never submits as null", async 
 
   expect(await nextOutcome(conn, 300)).toBeNull();
   expect(await r.settle()).toContain("<- required");
+  conn.close();
+  r.dispose();
+});
+
+// CRITICAL regression test for the deeper stale-ref bug: the ref-mirror
+// pattern (`focusIndexRef.current = focusIndex` written in the render body)
+// is only updated when a render actually commits. Two keystrokes with TRULY
+// ZERO delay between them -- back-to-back synchronous write() calls, no
+// settle(), no await, not even a microtask -- can both reach useInput's
+// handler before React has committed the render the mirror depends on, so
+// the ref stays stale for the SECOND keystroke too: Tab (move onto Submit)
+// immediately followed by Enter used to have the `onSubmitButton` check
+// read the ref's stale pre-move value and silently swallow the submit --
+// the form just looked hung, reporting "pending" forever. Every
+// pre-existing test in this file separates keystrokes with a settle() tick
+// (a `setTimeout(0)` macrotask), which is NOT a tight enough proof: that is
+// exactly what the ref-mirror-in-render-body pattern already survives. This
+// only proves the direct-write-in-the-handler fix.
+test("tabbing onto Submit then pressing Enter with truly zero delay between keystrokes still submits", async () => {
+  const r = await mount("form-it-zero-delay-1", COUNT_ONLY);
+  const conn = await openConnection("form-it-zero-delay-1");
+
+  await type(r, ["5"]); // type a value, settled
+  // No settle(), no await, nothing at all between these two writes: Tab
+  // onto the Submit button, then Enter.
+  r.stdin.write(TAB);
+  r.stdin.write(ENTER);
+  await r.settle();
+
+  const msg = await nextOutcome(conn, 2000);
+  expect(msg).toEqual({ type: "selected", data: { values: { count: 5 } } });
+  conn.close();
+  r.dispose();
+});
+
+// Regression test for Fix 4: `Number("")` evaluates to 0 in JavaScript, so
+// an optional number field with a declared `min` left completely untouched
+// used to silently submit 0 on the wire -- violating the field's own
+// constraint (min: 5 must never produce {"n": 0}). Tab straight past the
+// field to Submit without ever touching it, so `values.n` stays at its
+// never-typed initial "".
+test("an optional number field with min:5 left untouched does not submit a value that violates its own min", async () => {
+  const r = await mount("form-it-optional-min", OPTIONAL_MIN_FIVE);
+  const conn = await openConnection("form-it-optional-min");
+
+  await type(r, [TAB, ENTER]); // straight to Submit, field never touched
+
+  const msg = await nextOutcome(conn, 2000);
+  expect(msg?.type).toBe("selected");
+  const values =
+    msg && msg.type === "selected" ? (msg.data as { values: Record<string, unknown> }).values : {};
+  // Must not be the violating 0. The field is optional, so omitting it
+  // entirely is an equally acceptable outcome to submitting nothing that
+  // violates `min` -- either way, `n` must never be 0.
+  expect(values.n).not.toBe(0);
   conn.close();
   r.dispose();
 });

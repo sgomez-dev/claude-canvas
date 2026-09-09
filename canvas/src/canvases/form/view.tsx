@@ -1,5 +1,6 @@
 import React, { useRef, useState } from "react";
 import { Box, Text, useInput } from "ink";
+import { wrappedLineCount } from "../width";
 import type { FormField, FormResult } from "./types";
 
 export interface FormViewProps {
@@ -7,6 +8,13 @@ export interface FormViewProps {
   title?: string;
   /** Total rows this view may paint into; it subtracts its own chrome. */
   budget: number;
+  /**
+   * Terminal width, for estimating whether the footer hint wraps at a
+   * narrow width. Optional and defaults to 80 (Ink's own stdout default) so
+   * a composing canvas without a meaningful per-region width doesn't have
+   * to pass one.
+   */
+  columns?: number;
   focused: boolean;
   onSubmit(result: FormResult): void;
 }
@@ -17,6 +25,10 @@ export interface FormViewProps {
 const CHROME_ROWS = 7;
 // Every field paints a label row and a value row.
 const ROWS_PER_FIELD = 2;
+// Horizontal chrome the outer box spends: one column of border on each side
+// plus one column of paddingX on each side.
+const HORIZONTAL_CHROME = 4;
+const FOOTER_HINT = "Tab/Shift+Tab: move  Enter: submit (on the button)  Esc: cancel";
 
 type FieldState = string | boolean; // number fields store their raw digit string here too
 
@@ -72,6 +84,7 @@ export function FormView({
   fields,
   title,
   budget,
+  columns = 80,
   focused,
   onSubmit,
 }: FormViewProps): React.JSX.Element {
@@ -117,7 +130,18 @@ export function FormView({
       }));
     }
     const total = fields.length + 1; // + Submit
-    setFocusIndex((i) => (i + delta + total) % total);
+    // Written directly into the ref here, not left to the render-body
+    // mirror alone: two keystrokes with truly zero delay between them (real
+    // burst input, not just a fast setTimeout) can both reach this handler
+    // before React has committed the render that would otherwise update
+    // focusIndexRef.current. Without this direct write, a Tab (move to
+    // Submit) immediately followed by Enter would have the onSubmitButton
+    // check in the useInput callback below read the ref's stale pre-move
+    // value and silently swallow the submit. See the class comment on
+    // focusIndexRef above.
+    const next = (focusIndexRef.current + delta + total) % total;
+    focusIndexRef.current = next;
+    setFocusIndex(next);
   }
 
   function attemptSubmit() {
@@ -128,7 +152,12 @@ export function FormView({
     if (missing.size > 0) {
       setErrors(missing);
       const firstMissingIndex = fields.findIndex((f) => missing.has(f.id));
-      if (firstMissingIndex !== -1) setFocusIndex(firstMissingIndex);
+      if (firstMissingIndex !== -1) {
+        // Direct ref write, same reasoning as moveFocus above: attemptSubmit
+        // is itself deciding a new focusIndex here.
+        focusIndexRef.current = firstMissingIndex;
+        setFocusIndex(firstMissingIndex);
+      }
       return;
     }
     const outValues: Record<string, string | number | boolean> = {};
@@ -138,13 +167,26 @@ export function FormView({
         outValues[f.id] = Boolean(v);
       } else if (f.type === "number") {
         const raw = v as string;
-        const n = Number(clampNumber(raw, f.min, f.max));
-        // Defensive: clampNumber already clears anything unparseable and
-        // isMissing already rejects it for a required field, so a
-        // non-finite value can only reach here from an optional field left
-        // in a partial state. 0 matches the existing empty-field behavior;
-        // what must never happen is NaN, which serializes to null on the
-        // wire and silently becomes a null in Claude's hands.
+        const clamped = clampNumber(raw, f.min, f.max);
+        if (clamped.trim().length === 0) {
+          // An optional (non-required -- isMissing already blocked
+          // submission above if this field were required) number field
+          // left blank, or holding only unparseable input like a lone "-",
+          // has no value to submit. `Number("")` evaluates to 0 in
+          // JavaScript, which used to reach the wire regardless of the
+          // field's own declared `min` -- a field with {min: 5} left
+          // untouched used to silently submit {"n": 0}, violating its own
+          // constraint. Omitting the key is honest about "never answered"
+          // in a way a synthesized 0 was not, and matches how an optional
+          // select/text field's "untouched" state is represented by its
+          // own initial value rather than a value the field's rules forbid.
+          continue;
+        }
+        const n = Number(clamped);
+        // Defensive: clampNumber only returns a non-empty string, and the
+        // blank/unparseable case is handled above, so a non-finite value
+        // should be unreachable here. What must never happen is NaN
+        // reaching the wire, which JSON.stringify serializes to null.
         outValues[f.id] = Number.isFinite(n) ? n : 0;
       } else {
         outValues[f.id] = v as string;
@@ -242,7 +284,16 @@ export function FormView({
   // reason as every other view: the list moves only when focus crosses a
   // boundary instead of shifting under the user on every Tab. The Submit
   // position (focusIndex === fields.length) belongs to the last page.
-  const visibleFields = Math.max(1, Math.floor((budget - CHROME_ROWS) / ROWS_PER_FIELD));
+  // At a narrow terminal width the footer hint itself wraps onto a second
+  // line, which CHROME_ROWS's flat "one line of hint text" assumption
+  // doesn't account for -- so reserve however many extra rows the footer's
+  // actual wrapped height needs, on top of the fixed chrome.
+  const footerRows = wrappedLineCount(FOOTER_HINT, Math.max(1, columns - HORIZONTAL_CHROME));
+  const footerOverflow = Math.max(0, footerRows - 1);
+  const visibleFields = Math.max(
+    1,
+    Math.floor((budget - CHROME_ROWS - footerOverflow) / ROWS_PER_FIELD)
+  );
   const windowStart =
     fields.length <= visibleFields
       ? 0
@@ -258,8 +309,15 @@ export function FormView({
       {windowFields.map((f, visibleIndex) => {
         const i = windowStart + visibleIndex;
         const isFocused = i === focusIndex;
-        const hasError = errors.has(f.id);
         const value = values[f.id] ?? initialValue(f);
+        // `errors` only ever GROWS a field into it, at submit-attempt time
+        // -- it never removes one, because removing it eagerly on every
+        // keystroke would need its own effect. Gating the marker on
+        // `isMissing` as well, recomputed live from the current `value`
+        // every render, means a field that was flagged and then corrected
+        // stops showing "<- required" the moment it stops actually being
+        // missing, without needing to mutate `errors` itself.
+        const hasError = errors.has(f.id) && isMissing(f, value);
         const labelColor = hasError ? "red" : isFocused ? "cyan" : undefined;
         const requiredMark = "required" in f && f.required ? " *" : "";
         return (
@@ -306,10 +364,35 @@ export function FormView({
                     "placeholder" in f && f.placeholder ? f.placeholder : undefined;
                   const body = raw.length > 0 ? raw : (placeholder ?? "");
                   const filler = body.length === 0 && !isFocused ? "—" : "";
+                  // `text` and `number` never contain a newline (nothing in
+                  // the input handler above ever inserts one for them), so
+                  // this is always a single line for those types. A
+                  // `textarea`, though, can hold arbitrarily many lines --
+                  // Enter inserts one instead of submitting -- and rendering
+                  // all of them unconditionally used to blow straight
+                  // through the field's own one-value-row budget (the same
+                  // "value row" every other field type is windowed to,
+                  // per ROWS_PER_FIELD), pushing the Submit button and the
+                  // footer off the bottom of the pane exactly like the
+                  // un-windowed hunk/option/field lists every other
+                  // primitive already had to fix.
+                  //
+                  // Windowed to that same single row rather than given a
+                  // bigger allowance: this component only supports typing
+                  // that appends and Backspace that removes from the end (no
+                  // interior cursor movement), so the cursor is always on
+                  // the LAST line -- showing the tail keeps it visible by
+                  // construction, with a small "(n of N)" marker so a
+                  // truncated textarea doesn't look like it silently lost
+                  // its earlier lines.
+                  const lines = body.length > 0 ? body.split("\n") : [""];
+                  const lastLine = lines[lines.length - 1] ?? "";
+                  const truncated = lines.length > 1;
                   return (
                     <Text dimColor={raw.length === 0}>
-                      {body}
-                      {filler}
+                      {truncated ? `(${lines.length} lines, showing last) ` : ""}
+                      {lastLine}
+                      {truncated ? "" : filler}
                       {isFocused ? "▏" : ""}
                     </Text>
                   );

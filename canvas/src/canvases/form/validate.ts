@@ -19,6 +19,14 @@ interface ValidatedForm {
 // Lifted out of form.tsx unchanged so the canvas shell and any canvas
 // embedding the form view treat a bad config identically.
 export function validateForm(config: FormConfig | undefined): ValidatedForm {
+  // A non-string `title` used to either render garbage (a number or array
+  // coerced into the text by React) or crash (an object reaching <Text> as
+  // a child) instead of being caught here like every other shape mismatch
+  // in this file.
+  const rawTitle: unknown = config?.title;
+  if (rawTitle !== undefined && typeof rawTitle !== "string") {
+    return { fields: [], error: "form config: 'title' must be a string" };
+  }
   const raw: unknown = config?.fields;
   if (!Array.isArray(raw)) {
     return { fields: [], error: "form config: 'fields' must be an array" };

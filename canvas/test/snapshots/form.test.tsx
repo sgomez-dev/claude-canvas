@@ -85,6 +85,21 @@ test("form renders a config error state for a select with no options", async () 
   r.dispose();
 });
 
+// Regression test for Fix 3's footer-wrap half: at a narrow terminal width
+// the footer hint text (63 columns) wraps onto a second line inside a
+// narrower box, which the row-budget math's flat "one line of hint text"
+// assumption didn't account for.
+test("at a narrow terminal width, the frame never exceeds the terminal's row count", async () => {
+  const rows = 12;
+  const r = renderCanvas(<Form id="form-10" config={FULL_CONFIG} enabled={false} />, {
+    columns: 45,
+    rows,
+  });
+  const frame = await r.settle();
+  expect(frame.split("\n").length).toBeLessThanOrEqual(rows);
+  r.dispose();
+});
+
 test("form is deterministic across renders", async () => {
   const a = renderCanvas(<Form id="form-5" config={FULL_CONFIG} enabled={false} />, {
     columns: 60,
@@ -152,6 +167,44 @@ test("form windows a field list longer than the pane, keeping Submit visible", a
   expect(frame).toContain("[ Submit ]");
   expect(frame).not.toContain("Field 12");
   expect(await r.settle()).toMatchSnapshot();
+  r.dispose();
+});
+
+// Regression test for Fix 5: a `textarea` field can hold arbitrarily many
+// typed lines (Enter inserts a newline instead of submitting), and nothing
+// used to window/scroll that content to fit the field's allocated row
+// budget -- so enough newlines blew straight through the pane's total row
+// budget, pushing the Submit button and the footer off screen exactly like
+// the un-windowed hunk/option/field lists every other primitive already had
+// to fix.
+const TEXTAREA_CONFIG: FormConfig = {
+  title: "Notes",
+  fields: [{ id: "notes", type: "textarea", label: "Notes" }],
+};
+
+test("a textarea with enough newlines to exceed its row allocation does not overflow the pane's row budget", async () => {
+  const rows = 14;
+  const r = renderCanvas(<Form id="form-9" config={TEXTAREA_CONFIG} enabled={false} />, {
+    columns: 60,
+    rows,
+  });
+  await r.settle();
+  r.stdin.write("\t"); // focus the textarea
+  await r.settle();
+  // 30 Enters -- 30 newlines, far more than any reasonable per-field
+  // allocation -- typed as fast as the harness can deliver them.
+  for (let i = 0; i < 30; i++) {
+    r.stdin.write("\r");
+  }
+  const frame = await r.settle();
+
+  const lineCount = frame.split("\n").length;
+  expect(lineCount).toBeLessThanOrEqual(rows);
+  // The Submit button must still be reachable -- the whole point of
+  // windowing the textarea's content is that it doesn't push Submit (or the
+  // footer) off screen the way an un-windowed field list did before that
+  // was fixed.
+  expect(frame).toContain("[ Submit ]");
   r.dispose();
 });
 

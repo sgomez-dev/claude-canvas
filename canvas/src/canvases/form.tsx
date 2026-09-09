@@ -99,6 +99,7 @@ export function Form({
       fields={fields}
       title={config?.title}
       budget={stdout?.rows ?? 24}
+      columns={stdout?.columns ?? 80}
       focused
       onSubmit={handleSubmit}
     />

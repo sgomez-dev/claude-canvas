@@ -36,7 +36,7 @@ verified by the controlling session before being trusted (CI status
 via `gh run list`/`gh run view`, commit authorship and absence of
 attribution trailers via `git log`/`grep`, and for the highest-stakes
 fixes, the actual diff read directly) — never accepted on the
-implementer agent's own report alone. This project's `canvas/CLAUDE.md`
+implementer agent's own report alone. This project's root `CLAUDE.md`
 now has a "Verifying a fix" section codifying the discipline that made
 this review effective: reproduce the bug broken, fix it, reproduce it
 fixed, try a harder variant, and never accept "looks right" or
@@ -172,7 +172,7 @@ headline claims were verified by sabotage rather than by reading:
 - **The focus gate reached every composable view.** All five of picker,
   table, form, diff and tree gate on `focused`, plus the inline `text`
   region. This was the highest-risk candidate, being the exact
-  "structurally right, incompletely applied" shape `canvas/CLAUDE.md` warns
+  "structurally right, incompletely applied" shape the root `CLAUDE.md` warns
   about.
 - **`check:standalone` can actually fail.** Rebuilt the bundle with
   `--external react-devtools-core` (the original defect) and the check

@@ -168,7 +168,17 @@ add as `anthropics/claude-plugins-community` and install from as
   their discretion. There is no application process and the submission form
   does not add anything to it.
 
-**Two things to fix before submitting**, both found while checking this:
+**Both blockers are now closed** (2026-09-09): `canvas/.claude-plugin/plugin.json`
+exists, carrying `author`, `license`, `repository` and `homepage`, and
+agreeing with the marketplace entry on name and version; the `canvas`/`canvas`
+name collision was resolved by renaming the legacy command's frontmatter.
+Adding the manifest surfaced one more warning, also fixed: a `CLAUDE.md` at a
+plugin root is not loaded as project context, so that developer
+documentation moved to the repository root where it is. **Both manifests now
+pass `claude plugin validate --strict`**, which is what the review pipeline
+runs.
+
+What was found and fixed, for the record:
 
 1. **There is no `canvas/.claude-plugin/plugin.json`.** Validation passes
    without one, because the components are all in default locations and the

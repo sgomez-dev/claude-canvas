@@ -5,7 +5,7 @@ import {
   type ControllerMessage,
   type OutcomeMessage,
 } from "./protocol";
-import { deleteRecord, readRecord } from "./registry";
+import { deleteRecord, isAlive, readRecord, writeRecord } from "./registry";
 import { createQueuedWriter, type QueuedWriter } from "./socket-writer";
 
 export const DEFAULT_WAIT_MS = 55_000;
@@ -220,12 +220,25 @@ function toWaitResult(msg: OutcomeMessage): WaitResult {
 }
 
 /**
- * Reads and removes a persisted outcome, if the canvas left one.
+ * Reads a persisted outcome, if the canvas left one, and marks it consumed
+ * so a later call never reports the same choice twice.
  *
- * Removing it is what keeps `wait` from reporting the same choice twice,
- * and it is the only thing that deletes these records in the normal case --
- * the canvas deliberately does not delete its own record when it exits with
- * an unread outcome.
+ * Deleting the record unconditionally here (the previous shape) was a real
+ * bug: some canvases (the calendar meeting-picker, deliberately) stay open
+ * for a few seconds after producing an outcome to show a confirmation
+ * before actually exiting. A controller's `wait` reading that outcome live
+ * over the socket during that window used to delete the registry record on
+ * the spot, even though the canvas process was still very much alive --
+ * after which `close <id>` answered "no canvas <id>" for a pane that was
+ * still visibly open, exactly the unclosable/untrackable-pane failure class
+ * this project's whole lifecycle design exists to prevent.
+ *
+ * The fix distinguishes "consumed" from "gone": while the canvas process is
+ * still alive (the same `isAlive` pid check used elsewhere in the registry
+ * for reaping dead canvases), the record survives with `outcomeConsumed:
+ * true` -- still there for `list`/`close`, but marked so a second `wait`
+ * treats it as nothing new. Once the process has actually exited, there is
+ * nothing left for the record to do, and it is deleted as before.
  */
 async function consumeOutcome(id: string): Promise<OutcomeMessage | null> {
   let record;
@@ -234,8 +247,12 @@ async function consumeOutcome(id: string): Promise<OutcomeMessage | null> {
   } catch {
     return null;
   }
-  if (!record?.outcome) return null;
-  await deleteRecord(id);
+  if (!record?.outcome || record.outcomeConsumed) return null;
+  if (isAlive(record.pid)) {
+    await writeRecord({ ...record, outcomeConsumed: true }).catch(() => {});
+  } else {
+    await deleteRecord(id);
+  }
   return record.outcome;
 }
 

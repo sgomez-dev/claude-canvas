@@ -87,11 +87,24 @@ test("reading an outcome consumes it, so it is never reported twice", async () =
   await sleep(60);
 
   expect((await waitForOutcome(id, 2000)).status).toBe("selected");
-  // The record is gone, so a second wait finds nothing rather than
-  // re-reporting a choice the controller has already acted on.
+  // Fix 4: consuming an outcome no longer deletes the record just because a
+  // controller read it -- only once the canvas process has actually
+  // exited (the pid-alive check in consumeOutcome/registry.ts). This test's
+  // "canvas" is an in-process Ink render sharing this test's own pid, which
+  // is definitionally still "alive" by that check even after r.dispose(),
+  // so the record now survives, marked `outcomeConsumed: true` rather than
+  // deleted -- exactly the state a REAL canvas that stays open a few
+  // seconds after answering (the calendar meeting-picker) would leave
+  // behind while genuinely still running.
+  const record = await readRecord(id);
+  expect(record).not.toBeNull();
+  expect(record?.outcomeConsumed).toBe(true);
+  // The important invariant is unchanged: a second wait finds nothing NEW
+  // to report rather than re-reporting a choice already acted on. (This
+  // test's server has already stopped -- r.dispose() ran useCanvasServer's
+  // cleanup -- so the second wait cannot reach it live either.)
   const second = await waitForOutcome(id, 300);
   expect(second.status).toBe("error");
-  expect(await readRecord(id)).toBeNull();
 });
 
 test("cancelled survives the same way selected does", async () => {

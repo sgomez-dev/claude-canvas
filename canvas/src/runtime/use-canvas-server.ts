@@ -3,7 +3,7 @@ import { useApp } from "ink";
 import { appendFile, mkdir } from "node:fs/promises";
 import { dirname } from "node:path";
 import { startCanvasServer, type CanvasServer } from "./server";
-import { deleteRecord, writeRecord, writeRecordSync, type CanvasRecord } from "./registry";
+import { deleteRecord, readRecord, writeRecord, writeRecordSync, type CanvasRecord } from "./registry";
 import { logPath } from "./paths";
 import { detectHost, baseCapabilities, type TerminalCapabilities } from "../host";
 import type { CanvasMessage, OutcomeMessage } from "./protocol";
@@ -174,7 +174,22 @@ export function useCanvasServer(o: UseCanvasServerOptions): CanvasServerHandle {
       // deleting it here is exactly how a user's choice used to become
       // unrecoverable. Whoever reads the outcome deletes it; listRecords
       // prunes one that is never read.
-      if (!outcomeRef.current) void deleteRecord(id);
+      if (!outcomeRef.current) {
+        void deleteRecord(id);
+        return;
+      }
+      // An outcome was produced. If a controller already consumed it live
+      // over the socket while this canvas was still running (Fix 4 -- see
+      // consumeOutcome in client.ts), the record was rewritten with
+      // `outcomeConsumed: true` and its job is done: clean it up now rather
+      // than leaving it to the hour-long TTL sweep in listRecords. If
+      // nobody has read it yet, it must survive this unmount unchanged --
+      // that durability is the whole point of persisting it in the first
+      // place.
+      void (async () => {
+        const current = await readRecord(id).catch(() => null);
+        if (!current || current.outcomeConsumed) await deleteRecord(id);
+      })();
     };
   }, [enabled, id, kind, scenario, exit]);
 
@@ -194,11 +209,17 @@ export function useCanvasServer(o: UseCanvasServerOptions): CanvasServerHandle {
     (msg: OutcomeMessage) => {
       if (outcomeRef.current) return;
       outcomeRef.current = msg;
+      // Recorded separately from startedAt: listRecords' TTL pruning
+      // measures an outcome's age from THIS field, not from when the canvas
+      // started. Conflating the two used to mean a canvas open longer than
+      // the TTL (an hour) had its brand-new outcome pruned by the very next
+      // `listRecords()` call, before any `wait` could read it.
+      const outcomeAt = new Date().toISOString();
       try {
         const base = recordRef.current;
         writeRecordSync(
           base
-            ? { ...base, outcome: msg }
+            ? { ...base, outcome: msg, outcomeAt }
             : {
                 // No record yet means the server never finished starting.
                 // The outcome is still worth persisting -- a config error
@@ -210,13 +231,25 @@ export function useCanvasServer(o: UseCanvasServerOptions): CanvasServerHandle {
                 port: 0,
                 token: "",
                 pid: process.pid,
-                startedAt: new Date().toISOString(),
+                startedAt: outcomeAt,
                 host: "none",
                 outcome: msg,
+                outcomeAt,
               }
         );
       } catch (e) {
-        void logToFile(id, `failed to persist outcome: ${(e as Error).message}`);
+        // The retry-with-backoff in writeRecordSync's rename step (Fix 1)
+        // resolves the common transient case; if every retry is still
+        // exhausted, the outcome never reached disk at all -- and a
+        // controller's `wait` after this process exits would then answer
+        // "no canvas <id>" for a user who already made a choice. A canvas
+        // must still exit 0, so this cannot throw out of an event handler,
+        // but silently logging to a file nobody reads is exactly how this
+        // failure went unnoticed before: it is now also written to stderr,
+        // a channel a human or a wrapping process can actually see.
+        const message = `failed to persist outcome: ${(e as Error).message}`;
+        process.stderr.write(`${message}\n`);
+        void logToFile(id, message);
       }
       send(msg);
     },

@@ -1,7 +1,8 @@
 import { test, expect, afterEach } from "bun:test";
 import { startCanvasServer } from "./server";
-import { writeRecord, deleteRecord, newToken } from "./registry";
+import { writeRecord, deleteRecord, newToken, readRecord } from "./registry";
 import { getValue, waitForOutcome, requestClose } from "./client";
+import { waitUntil } from "../../test/harness/ipc";
 
 const ids: string[] = [];
 afterEach(async () => { for (const id of ids.splice(0)) await deleteRecord(id); });
@@ -98,13 +99,60 @@ test("errors when the registry token is wrong", async () => {
   }
 });
 
+// Fix 4 (Important). Some canvases (the calendar meeting-picker,
+// deliberately) stay open for a few seconds after producing an outcome, to
+// show a confirmation, before actually exiting. A real canvas's
+// `writeRecordSync` (use-canvas-server.ts's emitOutcome) persists the
+// outcome to the registry record BEFORE broadcasting it live, so both
+// arrive together. Deleting the registry record the instant a controller
+// reads that outcome -- the previous behaviour -- made `close <id>`/a
+// second lookup answer "no canvas <id>" for a pane that was still visibly
+// open: exactly the unclosable/untrackable-pane failure class this
+// project's whole lifecycle design exists to prevent.
+test("consuming an outcome does not delete the still-running canvas's record", async () => {
+  const s = await startCanvasServer({
+    onMessage(msg, reply) {
+      if (msg.type === "get") reply({ type: "value", key: msg.key, data: "still-here" });
+    },
+  });
+  const id = "c-live-outcome";
+  ids.push(id);
+  try {
+    // Mirrors what a real canvas's emitOutcome does: persist the outcome to
+    // the record (pid: process.pid, i.e. genuinely alive for this test),
+    // then it would broadcast the same message live.
+    await writeRecord({
+      id, kind: "document", scenario: "display", port: s.port, token: s.token,
+      pid: process.pid, startedAt: new Date().toISOString(), host: "test",
+      outcome: { type: "selected", data: { picked: 1 } }, outcomeAt: new Date().toISOString(),
+    });
+
+    expect(await waitForOutcome(id, 2000)).toEqual({ status: "selected", data: { picked: 1 } });
+
+    // The record must survive: this test's own process (standing in for the
+    // still-alive canvas) is what `isAlive` checks, and it is definitionally
+    // alive here.
+    const record = await readRecord(id);
+    expect(record).not.toBeNull();
+    expect(record?.outcomeConsumed).toBe(true);
+
+    // Genuinely still reachable, not just "a file exists on disk": the
+    // record's port/token are still good, because the record (and the
+    // server behind it) were never torn down just because the outcome was
+    // read.
+    expect(await getValue(id, "anything")).toBe("still-here");
+  } finally {
+    s.stop();
+  }
+});
+
 test("requestClose sends the close message", async () => {
   let closed = false;
   const s = await startCanvasServer({ onMessage(msg) { if (msg.type === "close") closed = true; } });
   try {
     await publish("c-close", s);
     await requestClose("c-close");
-    await new Promise((r) => setTimeout(r, 60));
+    await waitUntil(() => closed);
     expect(closed).toBe(true);
   } finally {
     s.stop();

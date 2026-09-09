@@ -2,7 +2,7 @@ import { test, expect } from "bun:test";
 import React from "react";
 import { Form } from "../../src/canvases/form";
 import type { FormConfig } from "../../src/canvases/form/types";
-import { renderCanvas } from "../harness/render";
+import { renderCanvas, settleUntil } from "../harness/render";
 
 // One form carrying all five approved field types, per the spec's testing
 // section: "a render snapshot covering all five field types in one form,
@@ -51,7 +51,14 @@ test("form renders a cycled select and a checked checkbox", async () => {
   r.stdin.write("\t"); // -> regression checkbox
   await r.settle();
   r.stdin.write(" "); // check it
-  expect(await r.settle()).toMatchSnapshot();
+  // Polled, not settled a fixed number of times. `useInput`'s handler is
+  // re-registered in a passive effect that lands a render after the state
+  // change, so a keystroke can be applied later than the next settle() --
+  // and a snapshot captures the WHOLE frame, so one late keystroke changes
+  // it. This test passed for two days and then failed on macos-latest only.
+  expect(
+    await settleUntil(r, (f) => f.includes("< High >") && f.includes("[x]"))
+  ).toMatchSnapshot();
   r.dispose();
 });
 
@@ -68,7 +75,8 @@ test("form renders required fields flagged after a failed submit", async () => {
     await r.settle();
   }
   r.stdin.write("\r");
-  expect(await r.settle()).toMatchSnapshot();
+  // Same reason as above: wait for the state the snapshot is of.
+  expect(await settleUntil(r, (f) => f.includes("<- required"))).toMatchSnapshot();
   r.dispose();
 });
 

@@ -1,7 +1,7 @@
 import { test, expect } from "bun:test";
 import React from "react";
 import { Diff } from "../../src/canvases/diff";
-import { renderCanvas } from "../harness/render";
+import { renderCanvas, settleUntil } from "../harness/render";
 
 const SAMPLE_DIFF = `diff --git a/a.txt b/a.txt
 index 1111111..2222222 100644
@@ -78,7 +78,9 @@ test("diff canvas renders after navigating and approving a hunk", async () => {
   r.stdin.write("j"); // move from a.txt's hunk to b.txt's hunk
   await r.settle();
   r.stdin.write("a"); // approve it
-  expect(await r.settle()).toMatchSnapshot();
+  // Polled rather than settled once: a keystroke can be applied a render
+  // later than the next settle(), and a snapshot captures the whole frame.
+  expect(await settleUntil(r, (f) => f.includes("[approved]"))).toMatchSnapshot();
   r.dispose();
 });
 

@@ -3,6 +3,7 @@ import { Box, Text, useInput, useApp, useStdout } from "ink";
 import { MeetingPickerView } from "./calendar/scenarios/meeting-picker-view";
 import { isMeetingPickerConfig, type MeetingPickerConfig } from "../scenarios/types";
 import { useCanvasServer } from "../runtime/use-canvas-server";
+import { formatTime } from "./format";
 // Re-exported because this module's public surface has always included it;
 // the definition now lives in one place instead of being copied here
 // byte-for-byte.
@@ -22,8 +23,8 @@ export interface CalendarConfig {
   // Meeting picker config (when scenario is "meeting-picker")
   calendars?: MeetingPickerConfig["calendars"];
   slotGranularity?: MeetingPickerConfig["slotGranularity"];
-  minDuration?: number;
-  maxDuration?: number;
+  startHour?: number;
+  endHour?: number;
 }
 
 function isAllDayEvent(event: CalendarEvent): boolean {
@@ -161,13 +162,29 @@ function getDemoEvents(): CalendarEvent[] {
 interface DayColumnProps {
   date: Date;
   events: CalendarEvent[];
-  isToday: boolean;
   columnWidth: number;
+  // Indexed by VISIBLE position (0..visibleSlotCount-1), not absolute slot
+  // index -- only the window is on screen, matching the meeting picker's
+  // own convention (see meeting-picker-view.tsx).
   slotHeights: number[];
   currentTime: Date;
+  startHour: number;
+  endHour: number;
+  windowStart: number;
+  visibleSlotCount: number;
 }
 
-function DayColumn({ date, events, isToday, columnWidth, slotHeights, currentTime }: DayColumnProps) {
+function DayColumn({
+  date,
+  events,
+  columnWidth,
+  slotHeights,
+  currentTime,
+  startHour,
+  endHour,
+  windowStart,
+  visibleSlotCount,
+}: DayColumnProps) {
   // Filter to only timed events (not all-day) for this day
   const dayEvents = events.filter((e) => isSameDay(e.startTime, date) && !isAllDayEvent(e));
 
@@ -175,75 +192,75 @@ function DayColumn({ date, events, isToday, columnWidth, slotHeights, currentTim
   const currentHour = currentTime.getHours();
   const currentMinute = currentTime.getMinutes();
   const currentTimeDecimal = currentHour + currentMinute / 60;
-  const showNowLine = currentHour >= START_HOUR && currentHour < END_HOUR;
+  const showNowLine = currentHour >= startHour && currentHour < endHour;
 
-  // Build half-hour slots (2 rows per hour)
+  // Build half-hour slots (2 rows per hour), only for the VISIBLE window --
+  // this used to build every slot in the day unconditionally, which is what
+  // let 32 slots get rendered into an 11-row budget (see the windowing
+  // comment in CalendarDisplay below).
   const slots: React.JSX.Element[] = [];
-  let slotIndex = 0;
-  let cumulativeHeight = 0;
 
-  for (let hour = START_HOUR; hour < END_HOUR; hour++) {
-    for (let half = 0; half < 2; half++) {
-      const slotMinute = half * 30;
-      const slotTime = hour + slotMinute / 60;
-      const slotEndTime = slotTime + 0.5;
-      const thisSlotHeight = slotHeights[slotIndex] || 1;
+  for (let visibleIndex = 0; visibleIndex < visibleSlotCount; visibleIndex++) {
+    const slotIndex = windowStart + visibleIndex;
+    const hour = startHour + Math.floor(slotIndex / 2);
+    const half = slotIndex % 2;
+    const slotMinute = half * 30;
+    const slotTime = hour + slotMinute / 60;
+    const slotEndTime = slotTime + 0.5;
+    const thisSlotHeight = slotHeights[visibleIndex] || 1;
 
-      const slotEvent = dayEvents.find(e => {
-        const eventStartTime = e.startTime.getHours() + e.startTime.getMinutes() / 60;
-        const eventEndTime = e.endTime.getHours() + e.endTime.getMinutes() / 60;
-        return slotTime >= eventStartTime && slotTime < eventEndTime;
-      });
+    const slotEvent = dayEvents.find(e => {
+      const eventStartTime = e.startTime.getHours() + e.startTime.getMinutes() / 60;
+      const eventEndTime = e.endTime.getHours() + e.endTime.getMinutes() / 60;
+      return slotTime >= eventStartTime && slotTime < eventEndTime;
+    });
 
-      const isEventStart = slotEvent &&
-        slotEvent.startTime.getHours() === hour &&
-        Math.floor(slotEvent.startTime.getMinutes() / 30) === half;
-      const eventTitle = slotEvent?.title.slice(0, columnWidth - 2) || "";
+    const isEventStart = slotEvent &&
+      slotEvent.startTime.getHours() === hour &&
+      Math.floor(slotEvent.startTime.getMinutes() / 30) === half;
+    const eventTitle = slotEvent?.title.slice(0, columnWidth - 2) || "";
 
-      // Check if the "now" line should appear in this slot
-      const nowInThisSlot = showNowLine && currentTimeDecimal >= slotTime && currentTimeDecimal < slotEndTime;
-      // Calculate which line within the slot the now line should appear on
-      const nowLinePosition = nowInThisSlot
-        ? Math.floor(((currentTimeDecimal - slotTime) / 0.5) * thisSlotHeight)
-        : -1;
+    // Check if the "now" line should appear in this slot
+    const nowInThisSlot = showNowLine && currentTimeDecimal >= slotTime && currentTimeDecimal < slotEndTime;
+    // Calculate which line within the slot the now line should appear on
+    const nowLinePosition = nowInThisSlot
+      ? Math.floor(((currentTimeDecimal - slotTime) / 0.5) * thisSlotHeight)
+      : -1;
 
-      // Build content for multiple lines if thisSlotHeight > 1
-      const lines: React.JSX.Element[] = [];
-      for (let line = 0; line < thisSlotHeight; line++) {
-        const isNowLine = line === nowLinePosition;
+    // Build content for multiple lines if thisSlotHeight > 1
+    const lines: React.JSX.Element[] = [];
+    for (let line = 0; line < thisSlotHeight; line++) {
+      const isNowLine = line === nowLinePosition;
 
-        if (isNowLine && !slotEvent) {
-          // Draw red "now" line
-          lines.push(
-            <Text key={line} color="red">{"━".repeat(columnWidth - 1)}</Text>
-          );
-        } else if (slotEvent) {
-          // Use contrasting text color based on background
-          const textColor = isNowLine ? "red" : (TEXT_COLORS[slotEvent.color || "blue"] || "white");
-          lines.push(
-            <Text key={line} backgroundColor={slotEvent.color} color={textColor} bold>
-              {line === 0 && isEventStart
-                ? ` ${eventTitle}`.padEnd(columnWidth - 1)
-                : " ".repeat(columnWidth - 1)}
-            </Text>
-          );
-        } else {
-          lines.push(
-            <Text key={line} color="gray" dimColor>
-              {line === 0 ? (half === 0 ? "─".repeat(columnWidth - 1) : "┄".repeat(columnWidth - 1)) : " ".repeat(columnWidth - 1)}
-            </Text>
-          );
-        }
+      if (isNowLine && !slotEvent) {
+        // Draw red "now" line
+        lines.push(
+          <Text key={line} color="red">{"━".repeat(columnWidth - 1)}</Text>
+        );
+      } else if (slotEvent) {
+        // Use contrasting text color based on background
+        const textColor = isNowLine ? "red" : (TEXT_COLORS[slotEvent.color || "blue"] || "white");
+        lines.push(
+          <Text key={line} backgroundColor={slotEvent.color} color={textColor} bold>
+            {line === 0 && isEventStart
+              ? ` ${eventTitle}`.padEnd(columnWidth - 1)
+              : " ".repeat(columnWidth - 1)}
+          </Text>
+        );
+      } else {
+        lines.push(
+          <Text key={line} color="gray" dimColor>
+            {line === 0 ? (half === 0 ? "─".repeat(columnWidth - 1) : "┄".repeat(columnWidth - 1)) : " ".repeat(columnWidth - 1)}
+          </Text>
+        );
       }
-
-      slots.push(
-        <Box key={`${hour}-${half}`} flexDirection="column" height={thisSlotHeight}>
-          {lines}
-        </Box>
-      );
-      slotIndex++;
-      cumulativeHeight += thisSlotHeight;
     }
+
+    slots.push(
+      <Box key={slotIndex} flexDirection="column" height={thisSlotHeight}>
+        {lines}
+      </Box>
+    );
   }
 
   return (
@@ -356,25 +373,30 @@ export function Calendar({ id, config, enabled = false, scenario = "display" }: 
     // 55 s later. This is the type guard that check should always have
     // been, and a bad config is now reported like every other primitive's.
     if (!config || !isMeetingPickerConfig(config)) {
+      // Report the SPECIFIC thing that's wrong -- isMeetingPickerConfig only
+      // returns a boolean, and a bad slotGranularity produces a very
+      // different actionable message than a missing/empty calendars array.
+      const hasCalendars =
+        !!config && "calendars" in config && Array.isArray(config.calendars);
+      const message =
+        !hasCalendars || (config as { calendars?: unknown[] }).calendars?.length === 0
+          ? "calendar config: scenario 'meeting-picker' needs a non-empty 'calendars' array"
+          : "calendar config: scenario 'meeting-picker' needs 'slotGranularity' to be 15, 30, or 60";
       return (
         <CalendarConfigError
           id={id}
           scenario={scenario}
           enabled={enabled}
-          message={
-            "calendar config: scenario 'meeting-picker' needs a non-empty 'calendars' array"
-          }
+          message={message}
         />
       );
     }
     const pickerConfig: MeetingPickerConfig = {
       calendars: config.calendars,
       slotGranularity: config.slotGranularity || 30,
-      minDuration: config.minDuration || 30,
-      maxDuration: config.maxDuration || 120,
       title: config.title,
-      startHour: 6,
-      endHour: 22,
+      startHour: config.startHour ?? START_HOUR,
+      endHour: config.endHour ?? END_HOUR,
     };
     return <MeetingPickerView id={id} config={pickerConfig} enabled={enabled} />;
   }
@@ -428,7 +450,6 @@ function CalendarDisplay({ id, config, enabled, scenario }: CalendarDisplayProps
     onClose: () => {},
     onGet: (key) => (key === "config" ? (config ?? null) : null),
   });
-  void ipc;
   const { exit } = useApp();
   const { stdout } = useStdout();
   const [currentDate, setCurrentDate] = useState(new Date());
@@ -437,6 +458,14 @@ function CalendarDisplay({ id, config, enabled, scenario }: CalendarDisplayProps
     width: stdout?.columns || 120,
     height: stdout?.rows || 40,
   });
+  // Topmost visible slot index. Kept as plain state and clamped against
+  // `maxTimeScroll` on every render below (not sticky like the meeting
+  // picker's windowStart) -- there is no cursor or mouse here, so nothing
+  // ever sets this except the up/down handlers themselves, and clamping on
+  // read is sufficient: a resize that shrinks the window just pulls the
+  // clamp in, and widening it back out lets the original scroll position
+  // reappear.
+  const [timeScroll, setTimeScroll] = useState(0);
 
   // Update current time every minute
   useEffect(() => {
@@ -469,15 +498,37 @@ function CalendarDisplay({ id, config, enabled, scenario }: CalendarDisplayProps
   const availableWidth = termWidth - timeColumnWidth - 4;
   const columnWidth = Math.max(12, Math.floor(availableWidth / 7));
 
-  // Calculate slot heights to fill vertical space exactly
+  // Read the config's declared hours, falling back to the historical
+  // defaults -- these used to be hardcoded module constants regardless of
+  // what a caller's config actually said.
+  const startHour = config?.startHour ?? START_HOUR;
+  const endHour = config?.endHour ?? END_HOUR;
+
+  // Vertical budget, and the window of slots that actually fits in it.
+  //
+  // This used to render EVERY slot unconditionally at a height of
+  // `Math.max(1, floor(availableHeight / totalSlots))`. That floor is the
+  // same defect the meeting picker's own windowing fix already closed: at
+  // 70x18 the budget is 11 rows while a 6:00-22:00 day at 30-minute
+  // granularity is 32 slots, so `max(1, floor(11/32))` forced 32 rows into
+  // 11 and Ink drew them on top of each other -- overwriting the help bar
+  // and dropping hour labels.
+  //
+  // Now the grid shows as many slots as fit and pages (via the up/down
+  // arrow keys -- keyboard-only, this scenario has no mouse) when
+  // navigation crosses a boundary, exactly as the meeting picker does.
   const headerHeight = 5; // Title (1) + marginBottom (1) + day name (1) + day number (1) + marginBottom (1)
   const footerHeight = 1; // Help bar
   const availableHeight = Math.max(1, termHeight - headerHeight - footerHeight);
-  const totalSlots = (END_HOUR - START_HOUR) * 2; // 2 slots per hour
-  const baseSlotHeight = Math.max(1, Math.floor(availableHeight / totalSlots));
-  const extraRows = availableHeight - (baseSlotHeight * totalSlots);
-  // Create array of slot heights - first `extraRows` slots get +1 height
-  const slotHeights = Array.from({ length: totalSlots }, (_, i) =>
+  const totalSlots = (endHour - startHour) * 2; // 2 slots per hour
+  const visibleSlotCount = Math.max(1, Math.min(totalSlots, availableHeight));
+  const maxTimeScroll = Math.max(0, totalSlots - visibleSlotCount);
+  const windowStart = Math.min(Math.max(0, timeScroll), maxTimeScroll);
+  const baseSlotHeight = Math.max(1, Math.floor(availableHeight / visibleSlotCount));
+  const extraRows = availableHeight - (baseSlotHeight * visibleSlotCount);
+  // Create array of slot heights - first `extraRows` slots get +1 height.
+  // Indexed by VISIBLE position, not absolute slot index.
+  const slotHeights = Array.from({ length: visibleSlotCount }, (_, i) =>
     baseSlotHeight + (i < extraRows ? 1 : 0)
   );
 
@@ -494,6 +545,13 @@ function CalendarDisplay({ id, config, enabled, scenario }: CalendarDisplayProps
 
   useInput((input, key) => {
     if (input === "q" || key.escape) {
+      // View-only by design: there is no "selected" outcome, so a normal
+      // quit always reports cancelled -- same pattern table/picker/form/
+      // diff/document all use. Without this, the registry record was
+      // deleted with no outcome recorded, and a `wait` issued after a
+      // normal `q` quit got "no canvas <id>" (an error) instead of the
+      // "cancelled" a view-only scenario's own docs promise.
+      ipc.sendCancelled("User quit");
       exit();
     } else if (input === "n" || key.rightArrow) {
       setCurrentDate((d) => {
@@ -509,94 +567,82 @@ function CalendarDisplay({ id, config, enabled, scenario }: CalendarDisplayProps
       });
     } else if (input === "t") {
       setCurrentDate(new Date());
+    } else if (key.upArrow) {
+      // Scroll the time window earlier. Clamped against the CURRENT
+      // maxTimeScroll (not just >= 0) so a scroll queued right before a
+      // resize can't leave timeScroll above the new, smaller maximum.
+      setTimeScroll((s) => Math.max(0, Math.min(s, maxTimeScroll) - 1));
+    } else if (key.downArrow) {
+      // Scroll the time window later.
+      setTimeScroll((s) => Math.min(maxTimeScroll, Math.max(0, s) + 1));
     }
   });
 
-  // Build time column (2 rows per hour, matching slot heights)
+  // Build time column (2 rows per hour, matching slot heights), only for
+  // the VISIBLE window -- see the windowing comment above.
   const currentHour = currentTime.getHours();
   const currentMinute = currentTime.getMinutes();
   const currentTimeDecimal = currentHour + currentMinute / 60;
-  const showNowIndicator = currentHour >= START_HOUR && currentHour < END_HOUR;
+  const showNowIndicator = currentHour >= startHour && currentHour < endHour;
 
   const timeSlots: React.JSX.Element[] = [];
-  let timeSlotIndex = 0;
-  for (let hour = START_HOUR; hour < END_HOUR; hour++) {
-    // Hour label on first half
-    const slotTime = hour;
-    const slotEndTime = hour + 0.5;
-    const firstHalfHeight = slotHeights[timeSlotIndex] || 1;
+  for (let visibleIndex = 0; visibleIndex < visibleSlotCount; visibleIndex++) {
+    const slotIndex = windowStart + visibleIndex;
+    const hour = startHour + Math.floor(slotIndex / 2);
+    const half = slotIndex % 2;
+    const slotTime = hour + (half * 30) / 60;
+    const slotEndTime = slotTime + 0.5;
+    const height = slotHeights[visibleIndex] || 1;
 
-    // Check if current time is in this slot
-    const nowInFirstHalf = showNowIndicator && currentTimeDecimal >= slotTime && currentTimeDecimal < slotEndTime;
-    const nowLineInFirstHalf = nowInFirstHalf
-      ? Math.floor(((currentTimeDecimal - slotTime) / 0.5) * firstHalfHeight)
+    const nowInSlot = showNowIndicator && currentTimeDecimal >= slotTime && currentTimeDecimal < slotEndTime;
+    const nowLinePosition = nowInSlot
+      ? Math.floor(((currentTimeDecimal - slotTime) / 0.5) * height)
       : -1;
 
-    const firstHalfLines: React.JSX.Element[] = [];
-    for (let line = 0; line < firstHalfHeight; line++) {
-      const isNowLine = line === nowLineInFirstHalf;
+    const lines: React.JSX.Element[] = [];
+    for (let line = 0; line < height; line++) {
+      const isNowLine = line === nowLinePosition;
       if (isNowLine) {
         // Show current time in red (12-hour format)
         const hour12 = currentHour === 0 ? 12 : currentHour > 12 ? currentHour - 12 : currentHour;
         const ampm = currentHour < 12 ? "a" : "p";
         const timeStr = `${hour12}:${currentMinute.toString().padStart(2, "0")}${ampm}`;
-        firstHalfLines.push(
+        lines.push(
           <Text key={line} color="red" bold>
             {timeStr.padStart(timeColumnWidth - 1)}
           </Text>
         );
-      } else {
-        firstHalfLines.push(
+      } else if (half === 0 && line === 0) {
+        // Hour label only on the first half-hour of an hour, matching the
+        // original per-hour rendering.
+        lines.push(
           <Text key={line} color="gray">
-            {line === 0 ? `${formatHour(hour)}${getAmPm(hour)}`.padStart(timeColumnWidth - 1) : " ".repeat(timeColumnWidth - 1)}
-          </Text>
-        );
-      }
-    }
-    timeSlots.push(
-      <Box key={`${hour}-0`} flexDirection="column" height={firstHalfHeight} width={timeColumnWidth}>
-        {firstHalfLines}
-      </Box>
-    );
-    timeSlotIndex++;
-
-    // Second half
-    const secondSlotTime = hour + 0.5;
-    const secondSlotEndTime = hour + 1;
-    const secondHalfHeight = slotHeights[timeSlotIndex] || 1;
-
-    const nowInSecondHalf = showNowIndicator && currentTimeDecimal >= secondSlotTime && currentTimeDecimal < secondSlotEndTime;
-    const nowLineInSecondHalf = nowInSecondHalf
-      ? Math.floor(((currentTimeDecimal - secondSlotTime) / 0.5) * secondHalfHeight)
-      : -1;
-
-    const secondHalfLines: React.JSX.Element[] = [];
-    for (let line = 0; line < secondHalfHeight; line++) {
-      const isNowLine = line === nowLineInSecondHalf;
-      if (isNowLine) {
-        // Show current time in red (12-hour format)
-        const hour12 = currentHour === 0 ? 12 : currentHour > 12 ? currentHour - 12 : currentHour;
-        const ampm = currentHour < 12 ? "a" : "p";
-        const timeStr = `${hour12}:${currentMinute.toString().padStart(2, "0")}${ampm}`;
-        secondHalfLines.push(
-          <Text key={line} color="red" bold>
-            {timeStr.padStart(timeColumnWidth - 1)}
+            {`${formatHour(hour)}${getAmPm(hour)}`.padStart(timeColumnWidth - 1)}
           </Text>
         );
       } else {
-        secondHalfLines.push(<Text key={line}>{" "}</Text>);
+        lines.push(<Text key={line}>{" "}</Text>);
       }
     }
     timeSlots.push(
-      <Box key={`${hour}-1`} flexDirection="column" height={secondHalfHeight} width={timeColumnWidth}>
-        {secondHalfLines}
+      <Box key={slotIndex} flexDirection="column" height={height} width={timeColumnWidth}>
+        {lines}
       </Box>
     );
-    timeSlotIndex++;
   }
 
   // Check if there are any all-day events
   const hasAllDayEvents = events.some(isAllDayEvent);
+
+  // Wall-clock time for an absolute slot index, for the window-range label
+  // in the footer -- mirrors the meeting picker's own `slotTime` helper.
+  const slotIndexToTime = (slotIndex: number): Date => {
+    const d = new Date(weekDays[0]!);
+    const hour = startHour + Math.floor(slotIndex / 2);
+    const minute = (slotIndex % 2) * 30;
+    d.setHours(hour, minute, 0, 0);
+    return d;
+  };
 
   return (
     <Box flexDirection="column" width={termWidth} height={termHeight} paddingX={1}>
@@ -637,17 +683,27 @@ function CalendarDisplay({ id, config, enabled, scenario }: CalendarDisplayProps
             key={i}
             date={day}
             events={events}
-            isToday={isSameDay(day, today)}
             columnWidth={columnWidth}
             slotHeights={slotHeights}
             currentTime={currentTime}
+            startHour={startHour}
+            endHour={endHour}
+            windowStart={windowStart}
+            visibleSlotCount={visibleSlotCount}
           />
         ))}
       </Box>
 
       {/* Help bar */}
       <Box>
-        <Text color="gray">{"←/→ week  •  t today  •  q quit"}</Text>
+        <Text color="gray">
+          {totalSlots > visibleSlotCount
+            ? `${formatTime(slotIndexToTime(windowStart))}-${formatTime(
+                slotIndexToTime(windowStart + visibleSlotCount)
+              )}  `
+            : ""}
+          {"↑↓ scroll  •  ←/→ week  •  t today  •  q quit"}
+        </Text>
       </Box>
     </Box>
   );

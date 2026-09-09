@@ -150,7 +150,8 @@ test("a second escape does not send a second outcome", async () => {
 
 // Documents the current shape rather than asserting an aspiration: `table`
 // implements no onGet, so `get <id> <key>` answers null for every key, the
-// same as flight and calendar. Only `document` answers keys today.
+// same as flight. `document` and calendar's own `display` scenario each
+// implement onGet for their own particular keys -- table does not.
 test("get answers null for any key, since table exposes no readable state", async () => {
   const id = "table-it-3";
   const r = mount(id, true);

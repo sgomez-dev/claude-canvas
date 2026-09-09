@@ -179,6 +179,80 @@ test("moving the cursor then approving with only a single settle() tick approves
   r.dispose();
 });
 
+// CRITICAL regression test for the deeper stale-ref bug: the ref-mirror
+// pattern above (`cursorRef.current = cursor` written in the render body)
+// is only updated when a render actually commits. Two keystrokes with
+// TRULY ZERO delay between them -- back-to-back synchronous write() calls,
+// no settle(), no await, not even a microtask -- can both reach useInput's
+// handler before React has committed the render that the mirror depends
+// on, so the ref stays stale for the SECOND keystroke too. A `setTimeout(0)`
+// between keystrokes (as in the test above, and in every pre-existing test
+// in this file) is NOT a tight enough proof of this fix: that macrotask is
+// exactly what the ref-mirror-in-render-body pattern already survives. This
+// only proves the direct-write-in-the-handler fix (cursorRef.current
+// written synchronously at the same moment setCursor is called).
+test("moving the cursor then approving with truly zero delay between keystrokes approves the NEW hunk, not the old one", async () => {
+  const id = "diff-it-zero-delay-1";
+  ids.push(id);
+  const r = renderCanvas(
+    <Diff id={id} config={{ diffText: TWO_HUNK_TWO_FILE_DIFF }} scenario="review" enabled={true} />,
+    { columns: 80, rows: 24 }
+  );
+  await r.settle();
+  await new Promise((res) => setTimeout(res, 50));
+
+  const conn = await openConnection(id);
+
+  // No settle(), no await, nothing at all between these two writes.
+  r.stdin.write("j");
+  r.stdin.write("a");
+  await r.settle();
+  r.stdin.write("\r");
+  await r.settle();
+
+  const msg = await nextOutcome(conn, 2000);
+  expect(msg).toEqual({
+    type: "selected",
+    data: {
+      decisions: [
+        { hunkId: "a.txt#0", decision: "rejected" },
+        { hunkId: "b.txt#0", decision: "approved" },
+      ],
+    },
+  });
+
+  conn.close();
+  r.dispose();
+});
+
+// Same zero-delay proof, for decisionsRef: approve immediately followed by
+// submit, with nothing between the two writes at all.
+test("approving and submitting with truly zero delay between keystrokes still reports approved", async () => {
+  const id = "diff-it-zero-delay-2";
+  ids.push(id);
+  const r = renderCanvas(
+    <Diff id={id} config={{ diffText: ONE_HUNK_DIFF }} scenario="review" enabled={true} />,
+    { columns: 80, rows: 24 }
+  );
+  await r.settle();
+  await new Promise((res) => setTimeout(res, 50));
+
+  const conn = await openConnection(id);
+
+  r.stdin.write("a");
+  r.stdin.write("\r");
+  await r.settle();
+
+  const msg = await nextOutcome(conn, 2000);
+  expect(msg).toEqual({
+    type: "selected",
+    data: { decisions: [{ hunkId: "a.txt#0", decision: "approved" }] },
+  });
+
+  conn.close();
+  r.dispose();
+});
+
 const THREE_HUNK_TWO_FILE_DIFF = `diff --git a/a.txt b/a.txt
 --- a/a.txt
 +++ b/a.txt

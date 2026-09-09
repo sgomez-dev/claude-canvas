@@ -1,5 +1,6 @@
 import React, { useMemo, useRef, useState } from "react";
 import { Box, Text, useInput } from "ink";
+import { wrappedLineCount } from "../width";
 import type { DiffFile, DiffReviewResult, HunkDecision } from "./types";
 
 export interface DiffViewProps {
@@ -7,6 +8,14 @@ export interface DiffViewProps {
   title?: string;
   /** Total rows this view may paint into; it subtracts its own chrome. */
   budget: number;
+  /**
+   * Terminal width, for estimating whether the footer hint wraps at a
+   * narrow width. Optional and defaults to 80 (Ink's own stdout default)
+   * so a composing canvas that doesn't have a meaningful per-region width
+   * (dashboard.tsx stacks regions at full terminal width) doesn't have to
+   * pass one.
+   */
+  columns?: number;
   focused: boolean;
   onSubmit(result: DiffReviewResult): void;
 }
@@ -17,12 +26,27 @@ interface FlatHunkRef {
 }
 
 // Rows this component spends on chrome rather than content: the file-list
-// box's two borders and title, the hunk box's two borders plus its header
-// and decision lines, and the footer's blank line plus hint.
-const CHROME_ROWS = 9;
+// box's two borders and title (3), the blank margin row between the
+// file-list box and the hunk box (1), the hunk box's two borders plus its
+// header and decision lines (4), and the footer's blank margin row plus one
+// line of hint text (2). 3+1+4+2 = 10. This used to be 9, missing the
+// margin row between the two boxes -- which meant the rendered frame was
+// always exactly one row taller than the terminal, and because Ink switches
+// to a full clear-and-redraw once the frame reaches the terminal's row
+// count, that off-by-one permanently scrolled the top line of the frame
+// away on every single render.
+const CHROME_ROWS = 10;
 // The file list never takes more than this, so a 40-file diff cannot starve
 // the hunk body it exists to help you read.
 const MAX_FILE_ROWS = 5;
+// Horizontal chrome the footer's own row spends. Unlike picker/form/table,
+// diff's footer sits in the outermost, UNBORDERED, unpadded column Box --
+// the border and paddingX belong only to the file-list and hunk boxes
+// nested inside it -- so the footer's available width is the full terminal
+// width, not `columns` minus a border-and-padding allowance.
+const HORIZONTAL_CHROME = 0;
+const FOOTER_HINT =
+  "a/r: approve/reject  ↑/↓: hunk  PgUp/PgDn: scroll  Enter: submit  Esc: cancel";
 
 /**
  * The diff review's rendering and per-hunk decisions, knowing nothing about
@@ -37,6 +61,7 @@ export function DiffView({
   files,
   title,
   budget: totalBudget,
+  columns = 80,
   focused,
   onSubmit,
 }: DiffViewProps): React.JSX.Element {
@@ -67,6 +92,15 @@ export function DiffView({
   // and would land one render after the hunk it belongs to had already been
   // drawn at the old offset.
   const [lineOffset, setLineOffset] = useState(0);
+  // The valid maximum for `lineOffset`, mirrored into a ref every render
+  // (same pattern as cursorRef) so the PageUp/PageDown handlers below can
+  // clamp INSIDE the setter rather than only at render time. Without this,
+  // repeatedly pressing PageDown past the end of the content let the stored
+  // offset keep growing past the valid maximum -- the render clamped what
+  // was DISPLAYED, but the internal value kept climbing, so the first
+  // several PageUp presses afterward appeared to do nothing while the value
+  // came back down through the overshot range.
+  const maxLineOffsetRef = useRef(0);
 
   const [decisions, setDecisions] = useState<Map<string, HunkDecision>>(new Map());
   // Same stale-closure hazard as cursorRef above, for the submit branch's
@@ -92,7 +126,7 @@ export function DiffView({
     }
     if (flatHunks.length === 0) return;
     if (key.pageDown) {
-      setLineOffset((o) => o + 1);
+      setLineOffset((o) => Math.min(maxLineOffsetRef.current, o + 1));
       return;
     }
     if (key.pageUp) {
@@ -100,22 +134,42 @@ export function DiffView({
       return;
     }
     if (key.upArrow || input === "k") {
-      setCursor((c) => Math.max(0, c - 1));
+      // Written directly into the ref here, not left to the render-body
+      // mirror alone: two keystrokes with truly zero delay between them
+      // (real burst input, not just a fast setTimeout) can both reach this
+      // handler before React has committed the render that would otherwise
+      // update cursorRef.current. Without this direct write, a second
+      // keystroke in the same burst (e.g. "a" right after this "j") would
+      // read the ref's stale pre-move value. See the class comment on
+      // cursorRef above.
+      const next = Math.max(0, cursorRef.current - 1);
+      cursorRef.current = next;
+      setCursor(next);
       setLineOffset(0);
     } else if (key.downArrow || input === "j") {
-      setCursor((c) => Math.min(flatHunks.length - 1, c + 1));
+      const next = Math.min(flatHunks.length - 1, cursorRef.current + 1);
+      cursorRef.current = next;
+      setCursor(next);
       setLineOffset(0);
     } else if (input === "a") {
       const ref = flatHunks[cursorRef.current];
       if (ref) {
         const hunk = files[ref.fileIndex]!.hunks[ref.hunkIndex]!;
-        setDecisions((prev) => new Map(prev).set(hunk.id, "approved"));
+        // Same direct-write treatment as cursorRef above: a zero-delay "a"
+        // immediately followed by Enter must have Enter's read of
+        // decisionsRef.current see THIS decision, not a stale pre-approval
+        // map from a render that hasn't committed yet.
+        const nextDecisions = new Map(decisionsRef.current).set(hunk.id, "approved");
+        decisionsRef.current = nextDecisions;
+        setDecisions(nextDecisions);
       }
     } else if (input === "r") {
       const ref = flatHunks[cursorRef.current];
       if (ref) {
         const hunk = files[ref.fileIndex]!.hunks[ref.hunkIndex]!;
-        setDecisions((prev) => new Map(prev).set(hunk.id, "rejected"));
+        const nextDecisions = new Map(decisionsRef.current).set(hunk.id, "rejected");
+        decisionsRef.current = nextDecisions;
+        setDecisions(nextDecisions);
       }
     }
   }, { isActive: focused });
@@ -140,7 +194,14 @@ export function DiffView({
   // fixed-height pane: the overflow pushed the footer hint and the decision
   // marker out of view, which for a diff reviewer means losing the one line
   // that tells you what state the hunk is in.
-  const budget = Math.max(2, totalBudget - CHROME_ROWS);
+  //
+  // At a narrow terminal width the footer hint itself wraps onto a second
+  // (or third) line, which CHROME_ROWS's flat "one line of hint text"
+  // assumption doesn't account for -- so on top of the fixed chrome, reserve
+  // however many extra rows the footer's actual wrapped height needs.
+  const footerRows = wrappedLineCount(FOOTER_HINT, Math.max(1, columns - HORIZONTAL_CHROME));
+  const footerOverflow = Math.max(0, footerRows - 1);
+  const budget = Math.max(2, totalBudget - CHROME_ROWS - footerOverflow);
   const fileRows = Math.max(1, Math.min(MAX_FILE_ROWS, files.length, budget - 1));
   const hunkRows = Math.max(1, budget - fileRows);
 
@@ -155,6 +216,9 @@ export function DiffView({
 
   const hunkLines = currentHunk?.lines ?? [];
   const maxLineOffset = Math.max(0, hunkLines.length - hunkRows);
+  // Mirrors the render's own `maxLineOffset` into the ref the PageDown
+  // handler clamps against, same pattern as cursorRef.
+  maxLineOffsetRef.current = maxLineOffset;
   const clampedLineOffset = Math.min(lineOffset, maxLineOffset);
   const visibleLines = hunkLines.slice(clampedLineOffset, clampedLineOffset + hunkRows);
 

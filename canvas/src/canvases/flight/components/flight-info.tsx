@@ -2,7 +2,14 @@
 
 import React from "react";
 import { Box, Text } from "ink";
-import { type Flight, CYBER_COLORS, formatDuration, formatTime, formatPrice } from "../types";
+import {
+  type Flight,
+  CYBER_COLORS,
+  formatDuration,
+  formatTime,
+  formatTimezoneAbbreviation,
+  formatPrice,
+} from "../types";
 
 interface Props {
   flight: Flight;
@@ -34,12 +41,14 @@ export function FlightInfo({ flight }: Props) {
       <Box marginBottom={1}>
         <Box width={20}>
           <Text color={CYBER_COLORS.neonCyan} bold>
-            {formatTime(flight.departureTime)} {flight.origin.timezone}
+            {formatTime(flight.departureTime, flight.origin.timezone)}{" "}
+            {formatTimezoneAbbreviation(flight.origin.timezone, flight.departureTime)}
           </Text>
         </Box>
         <Box width={20}>
           <Text color={CYBER_COLORS.neonCyan} bold>
-            {formatTime(flight.arrivalTime)} {flight.destination.timezone}
+            {formatTime(flight.arrivalTime, flight.destination.timezone)}{" "}
+            {formatTimezoneAbbreviation(flight.destination.timezone, flight.arrivalTime)}
           </Text>
         </Box>
         <Box>

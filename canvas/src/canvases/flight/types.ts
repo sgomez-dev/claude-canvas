@@ -1,4 +1,4 @@
-import { formatTime as formatDisplayTime } from "../format";
+import { formatTime as formatDisplayTime, displayLocale } from "../format";
 
 // Flight Booking Canvas - Type Definitions
 
@@ -6,7 +6,14 @@ export interface Airport {
   code: string;        // 3-letter code, e.g., "SFO"
   name: string;        // Full name, e.g., "San Francisco International"
   city: string;        // City name, e.g., "San Francisco"
-  timezone: string;    // Timezone abbreviation, e.g., "PST"
+  // IANA timezone identifier, e.g. "America/Los_Angeles" -- NOT an
+  // abbreviation. `formatTime` below passes this straight to
+  // `Intl.DateTimeFormat`'s `timeZone` option, which only accepts IANA
+  // names; a fixed abbreviation like "PST" can't express DST and isn't a
+  // legal value there. `formatTimezoneAbbreviation` derives the short label
+  // (e.g. "PST"/"PDT") to actually show next to a time, correct for
+  // whichever side of DST the given instant falls on.
+  timezone: string;
 }
 
 export interface Seatmap {
@@ -84,12 +91,40 @@ export function formatDuration(minutes: number): string {
   return `${hours}h ${mins}m`;
 }
 
-// Helper to format time from ISO string. Delegates to the shared formatter
-// so every canvas shows the same 24-hour local clock; this used to hardcode
-// en-US 12-hour, which was both a different format from the calendar and a
-// locale forced on the reader.
+const FLIGHT_TIME_OPTIONS: Intl.DateTimeFormatOptions = {
+  hour: "2-digit",
+  minute: "2-digit",
+  hourCycle: "h23",
+};
+
+// Helper to format time from ISO string, in the reader's own local
+// timezone when no `timezone` is given (delegating to the shared formatter
+// so every canvas shows the same 24-hour local clock -- this used to
+// hardcode en-US 12-hour, which was both a different format from the
+// calendar and a locale forced on the reader), or in the GIVEN IANA
+// timezone when one is passed.
+//
+// `timezone` used to be accepted and silently ignored: every time was
+// rendered in the VIEWER's local timezone regardless, while flight-info.tsx
+// printed the airport's timezone abbreviation right next to it -- a
+// confidently mislabeled time whenever the viewer wasn't in that timezone.
 export function formatTime(isoString: string, timezone?: string): string {
-  return formatDisplayTime(new Date(isoString));
+  const date = new Date(isoString);
+  if (!timezone) return formatDisplayTime(date);
+  return date.toLocaleTimeString(displayLocale(), { ...FLIGHT_TIME_OPTIONS, timeZone: timezone });
+}
+
+// The short zone label to show next to a `formatTime` result (e.g. "PST",
+// "PDT", "GMT+2") for a given IANA timezone, evaluated AT the instant in
+// question so it reflects whichever side of DST that instant actually
+// falls on -- unlike a fixed abbreviation stored in config, which can't.
+export function formatTimezoneAbbreviation(timezone: string, isoString: string): string {
+  const date = new Date(isoString);
+  const parts = new Intl.DateTimeFormat(displayLocale(), {
+    timeZone: timezone,
+    timeZoneName: "short",
+  }).formatToParts(date);
+  return parts.find((p) => p.type === "timeZoneName")?.value ?? timezone;
 }
 
 // Helper to parse seat string into row and letter

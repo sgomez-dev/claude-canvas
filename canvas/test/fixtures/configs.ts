@@ -41,8 +41,6 @@ export const meetingPickerConfig = {
     },
   ],
   slotGranularity: 30 as const,
-  minDuration: 30,
-  maxDuration: 60,
 };
 
 // The brief's flight fixture omitted several fields the real `Flight`/`Airport`

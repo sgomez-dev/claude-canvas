@@ -342,11 +342,19 @@ export function FormView({
   const windowFields = fields.slice(windowStart, windowStart + visibleFields);
 
   return (
-    <Box flexDirection="column" borderStyle="round" borderColor="cyan" paddingX={1}>
+    <Box flexDirection="column" borderStyle="round" borderColor={focused ? "cyan" : "gray"} paddingX={1}>
       <Text bold>{title ?? "Fill in the form"}</Text>
       {windowFields.map((f, visibleIndex) => {
         const i = windowStart + visibleIndex;
-        const isFocused = i === focusIndex;
+        // Gated on the dashboard-level `focused` prop as well as the
+        // internal per-field `focusIndex`: a composed dashboard can mount
+        // this view while another region holds the dashboard's focus, and
+        // this view's own field cursor/highlight must not keep showing as
+        // live in that state -- previously it ignored `focused` entirely,
+        // so an unfocused form region still showed a highlighted field and
+        // a blinking-looking trailing cursor. Standalone usage always
+        // passes `focused`, so this is a no-op there.
+        const isFocused = i === focusIndex && focused;
         const value = valuesRef.current[f.id] ?? initialValue(f);
         // `errors` only ever GROWS a field into it, at submit-attempt time
         // -- it never removes one, because removing it eagerly on every
@@ -476,9 +484,14 @@ export function FormView({
         );
       })}
       <Box marginTop={1}>
-        <Text color={focusIndex === fields.length ? "cyan" : undefined} bold={focusIndex === fields.length}>
-          {focusIndex === fields.length ? "> " : "  "}[ Submit ]
-        </Text>
+        {(() => {
+          const submitFocused = focusIndex === fields.length && focused;
+          return (
+            <Text color={submitFocused ? "cyan" : undefined} bold={submitFocused}>
+              {submitFocused ? "> " : "  "}[ Submit ]
+            </Text>
+          );
+        })()}
       </Box>
       <Box marginTop={1}>
         <Text dimColor>

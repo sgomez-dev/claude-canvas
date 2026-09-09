@@ -260,7 +260,7 @@ export function DiffView({
 
   return (
     <Box flexDirection="column">
-      <Box flexDirection="column" borderStyle="round" borderColor="cyan" paddingX={1}>
+      <Box flexDirection="column" borderStyle="round" borderColor={focused ? "cyan" : "gray"} paddingX={1}>
         <Text bold>
           {title ?? "Review Changes"}
           {files.length > fileRows
@@ -272,7 +272,11 @@ export function DiffView({
           const total = f.hunks.length;
           const decided = f.hunks.filter((h) => decisions.has(h.id)).length;
           const marker = f.binary ? "[binary]" : `${decided}/${total} decided`;
-          const isCurrentFile = currentRef?.fileIndex === fileIndex;
+          // Gated on `focused` as well as cursor position, same reasoning
+          // as picker/view.tsx's isCursor: a composed dashboard can mount
+          // this view unfocused, and the file cursor must not keep showing
+          // as live in that state.
+          const isCurrentFile = currentRef?.fileIndex === fileIndex && focused;
           return (
             <Text key={f.newPath} color={isCurrentFile ? "cyan" : undefined}>
               {isCurrentFile ? "> " : "  "}

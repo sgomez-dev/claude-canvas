@@ -156,12 +156,16 @@ export function TreeView({
   const windowRows = rows.slice(windowStart, windowStart + visibleCount);
 
   return (
-    <Box flexDirection="column" borderStyle="round" borderColor="cyan" paddingX={1}>
+    <Box flexDirection="column" borderStyle="round" borderColor={focused ? "cyan" : "gray"} paddingX={1}>
       <Text bold>{title ?? "Tree"}</Text>
       {prompt ? <Text dimColor>{prompt}</Text> : null}
       {windowRows.map((row, visibleIndex) => {
         const i = windowStart + visibleIndex;
-        const isCursor = i === clamped;
+        // Gated on `focused` as well as cursor position, same reasoning as
+        // picker/view.tsx's isCursor: a composed dashboard can mount this
+        // view unfocused, and the row cursor must not keep showing as live
+        // in that state.
+        const isCursor = i === clamped && focused;
         // The marker carries the state without colour, so a no-color
         // terminal still shows what is collapsed -- the lesson picker's
         // cursor gutter and form's required marker both had to learn.

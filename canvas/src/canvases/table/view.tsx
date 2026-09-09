@@ -169,8 +169,22 @@ export function TableView({
   const visibleRows = rows.slice(scrollOffset, scrollOffset + visibleCount);
 
   return (
-    <Box flexDirection="column" borderStyle="round" borderColor="cyan" paddingX={1}>
-      <Text bold>{title ?? "Table"}</Text>
+    <Box flexDirection="column" borderStyle="round" borderColor={focused ? "cyan" : "gray"} paddingX={1}>
+      {/* Unlike picker/form/diff/tree, a table has no cursor row of its
+          own -- it only scrolls -- so there is no existing per-row marker
+          to gate on `focused`. Without some textual signal here, two
+          tables composed in one dashboard would be indistinguishable after
+          Tab moved focus between them once colour is stripped (NO_COLOR, a
+          screen reader, piped output). Rather than add a permanent prefix
+          to every table's title (which would change the standalone `table`
+          canvas's own rendering, since it always passes `focused`), this
+          only adds text in the state that previously had NO visual
+          signal at all: not focused. Focused keeps the title exactly as
+          before. */}
+      <Text bold>
+        {title ?? "Table"}
+        {focused ? "" : "  (not focused)"}
+      </Text>
       {/* The header sits outside the scrolled slice, so it stays put while
           the body moves. */}
       <Box>

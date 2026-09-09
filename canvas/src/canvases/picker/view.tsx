@@ -202,12 +202,20 @@ export function PickerView({
   const visibleOptions = options.slice(windowStart, windowStart + visibleCount);
 
   return (
-    <Box flexDirection="column" borderStyle="round" borderColor="cyan" paddingX={1}>
+    <Box flexDirection="column" borderStyle="round" borderColor={focused ? "cyan" : "gray"} paddingX={1}>
       <Text bold>{title ?? "Choose"}</Text>
       {prompt ? <Text dimColor>{prompt}</Text> : null}
       {visibleOptions.map((opt, visibleIndex) => {
         const i = windowStart + visibleIndex;
-        const isCursor = i === cursor;
+        // The cursor gutter and its colour are gated on `focused`, not just
+        // on cursor position: a composed dashboard can mount this view
+        // unfocused (another region has the dashboard's focus), and an
+        // unfocused view showing a live-looking cursor is indistinguishable
+        // from a focused one -- with two pickers in a dashboard, both used
+        // to show a highlighted `>` regardless of which one Tab had
+        // actually routed keys to. Standalone usage always passes
+        // `focused`, so this is a no-op there.
+        const isCursor = i === cursor && focused;
         const isChecked = mode === "multi" && checked.has(opt.id);
         // Multi-mode gives the cursor its own gutter (`> `/`  `) ahead of
         // the checkbox so cursor position is visible even with color

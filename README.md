@@ -152,8 +152,15 @@ visible from the outside, and all of it is fixed with a regression test
 apiece.
 
 The receipts, if you want them: **293 tests**, CI green on Linux, macOS and
-Windows, and `canvas/scripts/smoke.sh` driving all eight canvas kinds
-through a real tmux pane. Every decision, every ruling and every known gap
+Windows, and `canvas/scripts/smoke.sh` driving seven of the eight canvas
+kinds (every one but `document`) through a real tmux pane. `document` is
+the one exception because its interaction model doesn't fit the script's
+existing pattern: every other kind reports its outcome through `wait`
+after keyboard-only input, while `document`'s selection is mouse-drag-based
+and read back with `get <id> selection` instead — driving that would need
+either simulated mouse events (which `tmux send-keys` cannot produce) or
+real per-kind design work, not just another case following the existing
+six. Every decision, every ruling and every known gap
 is written down in [`docs/roadmap.md`](docs/roadmap.md) and the ledgers
 under [`docs/superpowers/`](docs/superpowers/) — including the things that
 are still wrong.

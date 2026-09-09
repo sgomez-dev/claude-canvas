@@ -146,6 +146,17 @@ run_case diff sm-diff review \
   '{"status":"selected","data":{"decisions":[{"hunkId":"x.txt#0","decision":"approved"}]}}' \
   a Enter
 
+# No seatmap: focus starts and stays on "flights" (Tab only switches focus
+# when a seatmap exists), so a single Enter goes straight to handleConfirm
+# rather than needing a seat picked first. handleConfirm sends the outcome
+# immediately and only THEN starts its ~3s confirmation countdown before
+# exiting -- the same shape as the meeting-picker case above, which is why
+# this needs no extra wait beyond run_case's own trailing sleep.
+run_case flight sm-flight booking \
+  '{"title":"Smoke flight","flights":[{"id":"f1","airline":"Air Test","flightNumber":"AT1","origin":{"code":"SFO","name":"San Francisco Intl","city":"San Francisco","timezone":"America/Los_Angeles"},"destination":{"code":"JFK","name":"JFK Intl","city":"New York","timezone":"America/New_York"},"departureTime":"2026-01-01T10:00:00Z","arrivalTime":"2026-01-01T18:00:00Z","duration":480,"price":29900,"currency":"USD","cabinClass":"economy","stops":0}]}' \
+  '"selectedFlight":{"id":"f1"' \
+  Enter
+
 run_case calendar sm-mp meeting-picker \
   '{"title":"Smoke week","calendars":[{"name":"Ana","color":"blue","events":[]}],"slotGranularity":30}' \
   '"status":"selected"' \

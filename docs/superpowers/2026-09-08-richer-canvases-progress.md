@@ -469,29 +469,31 @@ an off-by-one at a box edge. Zero discrepancies. The decoder feeding it was
 itself verified against a separate Python decoder in step 2, so neither half
 is checking its own work.
 
-### Open, and NOT measurable from this session
+### Settled: Apple Terminal does render 24-bit colour
 
-**Whether Apple Terminal renders `38;2;r;g;b` faithfully is unverified.**
-This is the default terminal on macOS and therefore the single most common
-host for this tier, so it is the one that most deserves an answer. What is
-known: `infocmp xterm-256color` declares `colors#256` and carries no
-`setrgbf`/`setrgbb`, i.e. terminfo does not describe truecolour; yet
-`COLORTERM=truecolor` is present in this environment, which is what
-`supports-color` keys off. Those two disagree.
+Measured 2026-09-09 by a human at a real Terminal.app (version 2.15) --
+`printf '\033[38;2;255;0;0mROJO\033[0m\n'` printed red. So the default
+macOS terminal honours the escapes Ink emits, half-blocks renders at full
+fidelity there, and **no 256-colour fallback is needed**. This was the one
+thing the tier's correctness hinged on and it is now answered, not assumed.
 
-The decisive test is a DECRQSS round trip -- set a 24-bit colour, ask the
-terminal to read its own SGR state back -- and it **cannot be run from the
-agent's shell**: `/dev/tty` fails with `ENXIO`, there being no controlling
-terminal. Attempted on 2026-09-09, not inferred.
+Two things worth keeping for whoever reads this next.
 
-Consequence if Apple Terminal ignores the sequence: images render in the
-default foreground colour, i.e. as a block of solid nothing, and the failure
-is silent. If it approximates to its 256-colour palette, they render fine
-with visible banding. The renderer emits the same bytes either way, so
-nothing here is blocked on the answer -- but a 256-colour fallback would be
-cheap insurance and is the first thing to reach for if an image ever looks
-blank on Terminal.app. Someone at a real terminal can settle it in one
-command: `printf '\033[38;2;255;0;0mRED\033[0m\n'`.
+**The agent's shell cannot run the decisive test.** A DECRQSS round trip
+(set a 24-bit colour, ask the terminal to read its own SGR state back) needs
+a controlling terminal, and `/dev/tty` fails with `ENXIO` here. If this
+question comes up again for another terminal, ask a person to run one
+`printf` rather than building something clever.
+
+**Do not reason from the absence of a terminfo `-direct` entry.** That is
+the path this session started down -- Apple's `nsterm` and `nsterm-256color`
+both declare `colors#256` with no `setrgbf`/`setrgbb`, and there is no
+`nsterm-direct`, which looked like evidence. It is not: the terminfo
+database shipped on this macOS has **no `-direct` entries at all**, not
+`xterm-direct`, not `iterm2-direct`, not `vte-direct`. Absence there says
+something about the age of Apple's ncurses database and nothing whatsoever
+about the terminal. `COLORTERM=truecolor` was the accurate signal, and
+`supports-color` keys off exactly that.
 
 ### Next: the `image` canvas on half-blocks, before any other tier
 

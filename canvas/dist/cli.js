@@ -23723,6 +23723,16 @@ var require_jsx_dev_runtime = __commonJS(function(exports, module) {
 });
 
 // canvas/src/canvases/calendar/scenarios/meeting-picker-view.tsx
+function nextWindowStart(cursorSlot, currentStart, totalSlots, visibleSlotCount) {
+  if (totalSlots <= visibleSlotCount)
+    return 0;
+  const maxStart = totalSlots - visibleSlotCount;
+  const clampedStart = Math.min(Math.max(0, currentStart), maxStart);
+  if (cursorSlot < clampedStart || cursorSlot >= clampedStart + visibleSlotCount) {
+    return Math.min(Math.floor(cursorSlot / visibleSlotCount) * visibleSlotCount, maxStart);
+  }
+  return clampedStart;
+}
 function MeetingPickerView({ id, config, enabled = false }) {
   const { exit } = use_app_default();
   const { stdout } = use_stdout_default();
@@ -23738,6 +23748,11 @@ function MeetingPickerView({ id, config, enabled = false }) {
   const [cursorDay, setCursorDay] = import_react31.useState(0);
   const [cursorSlot, setCursorSlot] = import_react31.useState(0);
   const [usingKeyboard, setUsingKeyboard] = import_react31.useState(true);
+  const [windowStart, setWindowStart] = import_react31.useState(0);
+  const cursorSlotRef = import_react31.useRef(cursorSlot);
+  cursorSlotRef.current = cursorSlot;
+  const windowStartRef = import_react31.useRef(windowStart);
+  windowStartRef.current = windowStart;
   const spinnerChars = ["|", "/", "-", "\\"];
   const {
     calendars = [],
@@ -23802,7 +23817,11 @@ function MeetingPickerView({ id, config, enabled = false }) {
   const footerHeight = 2;
   const availableHeight = Math.max(1, termHeight - headerHeight - footerHeight);
   const visibleSlotCount = Math.max(1, Math.min(totalSlots, availableHeight));
-  const windowStart = totalSlots <= visibleSlotCount ? 0 : Math.min(Math.floor(cursorSlot / visibleSlotCount) * visibleSlotCount, totalSlots - visibleSlotCount);
+  import_react31.useEffect(() => {
+    const next = nextWindowStart(cursorSlotRef.current, windowStartRef.current, totalSlots, visibleSlotCount);
+    windowStartRef.current = next;
+    setWindowStart(next);
+  }, [totalSlots, visibleSlotCount]);
   const baseSlotHeight = Math.max(1, Math.floor(availableHeight / visibleSlotCount));
   const extraRows = availableHeight - baseSlotHeight * visibleSlotCount;
   const slotHeights = Array.from({ length: visibleSlotCount }, (_, i) => baseSlotHeight + (i < extraRows ? 1 : 0));
@@ -23861,7 +23880,7 @@ function MeetingPickerView({ id, config, enabled = false }) {
         visibleIndex = i;
       }
     }
-    const slotIndex = windowStart + visibleIndex;
+    const slotIndex = windowStartRef.current + visibleIndex;
     if (slotIndex >= totalSlots)
       return null;
     const day = weekDays[dayIndex];
@@ -23911,9 +23930,13 @@ function MeetingPickerView({ id, config, enabled = false }) {
     setUsingKeyboard(false);
     if (slot) {
       setCursorDay(slot.dayIndex);
+      cursorSlotRef.current = slot.slotIndex;
       setCursorSlot(slot.slotIndex);
+      const next = nextWindowStart(slot.slotIndex, windowStartRef.current, totalSlots, visibleSlotCount);
+      windowStartRef.current = next;
+      setWindowStart(next);
     }
-  }, [terminalToSlot]);
+  }, [terminalToSlot, totalSlots, visibleSlotCount]);
   useMouse({
     enabled: true,
     onClick: handleMouseClick,
@@ -23966,14 +23989,28 @@ function MeetingPickerView({ id, config, enabled = false }) {
         setSelectedSlot(null);
       }
       setUsingKeyboard(true);
-      setCursorSlot((s) => Math.max(0, s - 1));
+      {
+        const next = Math.max(0, cursorSlotRef.current - 1);
+        cursorSlotRef.current = next;
+        setCursorSlot(next);
+        const nextWindow = nextWindowStart(next, windowStartRef.current, totalSlots, visibleSlotCount);
+        windowStartRef.current = nextWindow;
+        setWindowStart(nextWindow);
+      }
     } else if (key.downArrow) {
       if (countdown !== null) {
         setCountdown(null);
         setSelectedSlot(null);
       }
       setUsingKeyboard(true);
-      setCursorSlot((s) => Math.min(totalSlots - 1, s + 1));
+      {
+        const next = Math.min(totalSlots - 1, cursorSlotRef.current + 1);
+        cursorSlotRef.current = next;
+        setCursorSlot(next);
+        const nextWindow = nextWindowStart(next, windowStartRef.current, totalSlots, visibleSlotCount);
+        windowStartRef.current = nextWindow;
+        setWindowStart(nextWindow);
+      }
     } else if (key.leftArrow) {
       if (countdown !== null) {
         setCountdown(null);
@@ -24249,8 +24286,21 @@ var init_meeting_picker_view = __esm(async () => {
 
 // canvas/src/scenarios/types.ts
 function isMeetingPickerConfig(config) {
-  return "calendars" in config && Array.isArray(config.calendars);
+  if (!("calendars" in config) || !Array.isArray(config.calendars))
+    return false;
+  if (config.calendars.length === 0)
+    return false;
+  if ("slotGranularity" in config && config.slotGranularity !== undefined) {
+    if (!VALID_SLOT_GRANULARITIES.includes(config.slotGranularity)) {
+      return false;
+    }
+  }
+  return true;
 }
+var VALID_SLOT_GRANULARITIES;
+var init_types2 = __esm(() => {
+  VALID_SLOT_GRANULARITIES = [15, 30, 60];
+});
 
 // canvas/src/canvases/calendar.tsx
 function isAllDayEvent(event) {
@@ -24357,62 +24407,69 @@ function getDemoEvents() {
     }
   ];
 }
-function DayColumn({ date, events, isToday, columnWidth, slotHeights, currentTime }) {
+function DayColumn({
+  date,
+  events,
+  columnWidth,
+  slotHeights,
+  currentTime,
+  startHour,
+  endHour,
+  windowStart,
+  visibleSlotCount
+}) {
   const dayEvents = events.filter((e) => isSameDay2(e.startTime, date) && !isAllDayEvent(e));
   const currentHour = currentTime.getHours();
   const currentMinute = currentTime.getMinutes();
   const currentTimeDecimal = currentHour + currentMinute / 60;
-  const showNowLine = currentHour >= START_HOUR && currentHour < END_HOUR;
+  const showNowLine = currentHour >= startHour && currentHour < endHour;
   const slots = [];
-  let slotIndex = 0;
-  let cumulativeHeight = 0;
-  for (let hour = START_HOUR;hour < END_HOUR; hour++) {
-    for (let half = 0;half < 2; half++) {
-      const slotMinute = half * 30;
-      const slotTime = hour + slotMinute / 60;
-      const slotEndTime = slotTime + 0.5;
-      const thisSlotHeight = slotHeights[slotIndex] || 1;
-      const slotEvent = dayEvents.find((e) => {
-        const eventStartTime = e.startTime.getHours() + e.startTime.getMinutes() / 60;
-        const eventEndTime = e.endTime.getHours() + e.endTime.getMinutes() / 60;
-        return slotTime >= eventStartTime && slotTime < eventEndTime;
-      });
-      const isEventStart = slotEvent && slotEvent.startTime.getHours() === hour && Math.floor(slotEvent.startTime.getMinutes() / 30) === half;
-      const eventTitle = slotEvent?.title.slice(0, columnWidth - 2) || "";
-      const nowInThisSlot = showNowLine && currentTimeDecimal >= slotTime && currentTimeDecimal < slotEndTime;
-      const nowLinePosition = nowInThisSlot ? Math.floor((currentTimeDecimal - slotTime) / 0.5 * thisSlotHeight) : -1;
-      const lines = [];
-      for (let line = 0;line < thisSlotHeight; line++) {
-        const isNowLine = line === nowLinePosition;
-        if (isNowLine && !slotEvent) {
-          lines.push(/* @__PURE__ */ jsx_dev_runtime2.jsxDEV(Text, {
-            color: "red",
-            children: "\u2501".repeat(columnWidth - 1)
-          }, line, false, undefined, this));
-        } else if (slotEvent) {
-          const textColor = isNowLine ? "red" : TEXT_COLORS2[slotEvent.color || "blue"] || "white";
-          lines.push(/* @__PURE__ */ jsx_dev_runtime2.jsxDEV(Text, {
-            backgroundColor: slotEvent.color,
-            color: textColor,
-            bold: true,
-            children: line === 0 && isEventStart ? ` ${eventTitle}`.padEnd(columnWidth - 1) : " ".repeat(columnWidth - 1)
-          }, line, false, undefined, this));
-        } else {
-          lines.push(/* @__PURE__ */ jsx_dev_runtime2.jsxDEV(Text, {
-            color: "gray",
-            dimColor: true,
-            children: line === 0 ? half === 0 ? "\u2500".repeat(columnWidth - 1) : "\u2504".repeat(columnWidth - 1) : " ".repeat(columnWidth - 1)
-          }, line, false, undefined, this));
-        }
+  for (let visibleIndex = 0;visibleIndex < visibleSlotCount; visibleIndex++) {
+    const slotIndex = windowStart + visibleIndex;
+    const hour = startHour + Math.floor(slotIndex / 2);
+    const half = slotIndex % 2;
+    const slotMinute = half * 30;
+    const slotTime = hour + slotMinute / 60;
+    const slotEndTime = slotTime + 0.5;
+    const thisSlotHeight = slotHeights[visibleIndex] || 1;
+    const slotEvent = dayEvents.find((e) => {
+      const eventStartTime = e.startTime.getHours() + e.startTime.getMinutes() / 60;
+      const eventEndTime = e.endTime.getHours() + e.endTime.getMinutes() / 60;
+      return slotTime >= eventStartTime && slotTime < eventEndTime;
+    });
+    const isEventStart = slotEvent && slotEvent.startTime.getHours() === hour && Math.floor(slotEvent.startTime.getMinutes() / 30) === half;
+    const eventTitle = slotEvent?.title.slice(0, columnWidth - 2) || "";
+    const nowInThisSlot = showNowLine && currentTimeDecimal >= slotTime && currentTimeDecimal < slotEndTime;
+    const nowLinePosition = nowInThisSlot ? Math.floor((currentTimeDecimal - slotTime) / 0.5 * thisSlotHeight) : -1;
+    const lines = [];
+    for (let line = 0;line < thisSlotHeight; line++) {
+      const isNowLine = line === nowLinePosition;
+      if (isNowLine && !slotEvent) {
+        lines.push(/* @__PURE__ */ jsx_dev_runtime2.jsxDEV(Text, {
+          color: "red",
+          children: "\u2501".repeat(columnWidth - 1)
+        }, line, false, undefined, this));
+      } else if (slotEvent) {
+        const textColor = isNowLine ? "red" : TEXT_COLORS2[slotEvent.color || "blue"] || "white";
+        lines.push(/* @__PURE__ */ jsx_dev_runtime2.jsxDEV(Text, {
+          backgroundColor: slotEvent.color,
+          color: textColor,
+          bold: true,
+          children: line === 0 && isEventStart ? ` ${eventTitle}`.padEnd(columnWidth - 1) : " ".repeat(columnWidth - 1)
+        }, line, false, undefined, this));
+      } else {
+        lines.push(/* @__PURE__ */ jsx_dev_runtime2.jsxDEV(Text, {
+          color: "gray",
+          dimColor: true,
+          children: line === 0 ? half === 0 ? "\u2500".repeat(columnWidth - 1) : "\u2504".repeat(columnWidth - 1) : " ".repeat(columnWidth - 1)
+        }, line, false, undefined, this));
       }
-      slots.push(/* @__PURE__ */ jsx_dev_runtime2.jsxDEV(Box_default, {
-        flexDirection: "column",
-        height: thisSlotHeight,
-        children: lines
-      }, `${hour}-${half}`, false, undefined, this));
-      slotIndex++;
-      cumulativeHeight += thisSlotHeight;
     }
+    slots.push(/* @__PURE__ */ jsx_dev_runtime2.jsxDEV(Box_default, {
+      flexDirection: "column",
+      height: thisSlotHeight,
+      children: lines
+    }, slotIndex, false, undefined, this));
   }
   return /* @__PURE__ */ jsx_dev_runtime2.jsxDEV(Box_default, {
     flexDirection: "column",
@@ -24513,21 +24570,21 @@ function AllDayEventsRow({ weekDays, events, columnWidth, timeColumnWidth }) {
 function Calendar({ id, config, enabled = false, scenario = "display" }) {
   if (scenario === "meeting-picker") {
     if (!config || !isMeetingPickerConfig(config)) {
+      const hasCalendars = !!config && "calendars" in config && Array.isArray(config.calendars);
+      const message = !hasCalendars || config.calendars?.length === 0 ? "calendar config: scenario 'meeting-picker' needs a non-empty 'calendars' array" : "calendar config: scenario 'meeting-picker' needs 'slotGranularity' to be 15, 30, or 60";
       return /* @__PURE__ */ jsx_dev_runtime2.jsxDEV(CalendarConfigError, {
         id,
         scenario,
         enabled,
-        message: "calendar config: scenario 'meeting-picker' needs a non-empty 'calendars' array"
+        message
       }, undefined, false, undefined, this);
     }
     const pickerConfig = {
       calendars: config.calendars,
       slotGranularity: config.slotGranularity || 30,
-      minDuration: config.minDuration || 30,
-      maxDuration: config.maxDuration || 120,
       title: config.title,
-      startHour: 6,
-      endHour: 22
+      startHour: config.startHour ?? START_HOUR,
+      endHour: config.endHour ?? END_HOUR
     };
     return /* @__PURE__ */ jsx_dev_runtime2.jsxDEV(MeetingPickerView, {
       id,
@@ -24579,6 +24636,7 @@ function CalendarDisplay({ id, config, enabled, scenario }) {
     width: stdout?.columns || 120,
     height: stdout?.rows || 40
   });
+  const [timeScroll, setTimeScroll] = import_react32.useState(0);
   import_react32.useEffect(() => {
     const timer = setInterval(() => {
       setCurrentTime(new Date);
@@ -24603,13 +24661,18 @@ function CalendarDisplay({ id, config, enabled, scenario }) {
   const timeColumnWidth = 6;
   const availableWidth = termWidth - timeColumnWidth - 4;
   const columnWidth = Math.max(12, Math.floor(availableWidth / 7));
+  const startHour = config?.startHour ?? START_HOUR;
+  const endHour = config?.endHour ?? END_HOUR;
   const headerHeight = 5;
   const footerHeight = 1;
   const availableHeight = Math.max(1, termHeight - headerHeight - footerHeight);
-  const totalSlots = (END_HOUR - START_HOUR) * 2;
-  const baseSlotHeight = Math.max(1, Math.floor(availableHeight / totalSlots));
-  const extraRows = availableHeight - baseSlotHeight * totalSlots;
-  const slotHeights = Array.from({ length: totalSlots }, (_, i) => baseSlotHeight + (i < extraRows ? 1 : 0));
+  const totalSlots = (endHour - startHour) * 2;
+  const visibleSlotCount = Math.max(1, Math.min(totalSlots, availableHeight));
+  const maxTimeScroll = Math.max(0, totalSlots - visibleSlotCount);
+  const windowStart = Math.min(Math.max(0, timeScroll), maxTimeScroll);
+  const baseSlotHeight = Math.max(1, Math.floor(availableHeight / visibleSlotCount));
+  const extraRows = availableHeight - baseSlotHeight * visibleSlotCount;
+  const slotHeights = Array.from({ length: visibleSlotCount }, (_, i) => baseSlotHeight + (i < extraRows ? 1 : 0));
   const events = config?.events ? config.events.map((e) => ({
     ...e,
     startTime: new Date(e.startTime),
@@ -24619,6 +24682,7 @@ function CalendarDisplay({ id, config, enabled, scenario }) {
   const today = new Date;
   use_input_default((input, key) => {
     if (input === "q" || key.escape) {
+      ipc.sendCancelled("User quit");
       exit();
     } else if (input === "n" || key.rightArrow) {
       setCurrentDate((d) => {
@@ -24634,78 +24698,64 @@ function CalendarDisplay({ id, config, enabled, scenario }) {
       });
     } else if (input === "t") {
       setCurrentDate(new Date);
+    } else if (key.upArrow) {
+      setTimeScroll((s) => Math.max(0, Math.min(s, maxTimeScroll) - 1));
+    } else if (key.downArrow) {
+      setTimeScroll((s) => Math.min(maxTimeScroll, Math.max(0, s) + 1));
     }
   });
   const currentHour = currentTime.getHours();
   const currentMinute = currentTime.getMinutes();
   const currentTimeDecimal = currentHour + currentMinute / 60;
-  const showNowIndicator = currentHour >= START_HOUR && currentHour < END_HOUR;
+  const showNowIndicator = currentHour >= startHour && currentHour < endHour;
   const timeSlots = [];
-  let timeSlotIndex = 0;
-  for (let hour = START_HOUR;hour < END_HOUR; hour++) {
-    const slotTime = hour;
-    const slotEndTime = hour + 0.5;
-    const firstHalfHeight = slotHeights[timeSlotIndex] || 1;
-    const nowInFirstHalf = showNowIndicator && currentTimeDecimal >= slotTime && currentTimeDecimal < slotEndTime;
-    const nowLineInFirstHalf = nowInFirstHalf ? Math.floor((currentTimeDecimal - slotTime) / 0.5 * firstHalfHeight) : -1;
-    const firstHalfLines = [];
-    for (let line = 0;line < firstHalfHeight; line++) {
-      const isNowLine = line === nowLineInFirstHalf;
+  for (let visibleIndex = 0;visibleIndex < visibleSlotCount; visibleIndex++) {
+    const slotIndex = windowStart + visibleIndex;
+    const hour = startHour + Math.floor(slotIndex / 2);
+    const half = slotIndex % 2;
+    const slotTime = hour + half * 30 / 60;
+    const slotEndTime = slotTime + 0.5;
+    const height = slotHeights[visibleIndex] || 1;
+    const nowInSlot = showNowIndicator && currentTimeDecimal >= slotTime && currentTimeDecimal < slotEndTime;
+    const nowLinePosition = nowInSlot ? Math.floor((currentTimeDecimal - slotTime) / 0.5 * height) : -1;
+    const lines = [];
+    for (let line = 0;line < height; line++) {
+      const isNowLine = line === nowLinePosition;
       if (isNowLine) {
         const hour12 = currentHour === 0 ? 12 : currentHour > 12 ? currentHour - 12 : currentHour;
         const ampm = currentHour < 12 ? "a" : "p";
         const timeStr = `${hour12}:${currentMinute.toString().padStart(2, "0")}${ampm}`;
-        firstHalfLines.push(/* @__PURE__ */ jsx_dev_runtime2.jsxDEV(Text, {
+        lines.push(/* @__PURE__ */ jsx_dev_runtime2.jsxDEV(Text, {
           color: "red",
           bold: true,
           children: timeStr.padStart(timeColumnWidth - 1)
         }, line, false, undefined, this));
-      } else {
-        firstHalfLines.push(/* @__PURE__ */ jsx_dev_runtime2.jsxDEV(Text, {
+      } else if (half === 0 && line === 0) {
+        lines.push(/* @__PURE__ */ jsx_dev_runtime2.jsxDEV(Text, {
           color: "gray",
-          children: line === 0 ? `${formatHour2(hour)}${getAmPm2(hour)}`.padStart(timeColumnWidth - 1) : " ".repeat(timeColumnWidth - 1)
-        }, line, false, undefined, this));
-      }
-    }
-    timeSlots.push(/* @__PURE__ */ jsx_dev_runtime2.jsxDEV(Box_default, {
-      flexDirection: "column",
-      height: firstHalfHeight,
-      width: timeColumnWidth,
-      children: firstHalfLines
-    }, `${hour}-0`, false, undefined, this));
-    timeSlotIndex++;
-    const secondSlotTime = hour + 0.5;
-    const secondSlotEndTime = hour + 1;
-    const secondHalfHeight = slotHeights[timeSlotIndex] || 1;
-    const nowInSecondHalf = showNowIndicator && currentTimeDecimal >= secondSlotTime && currentTimeDecimal < secondSlotEndTime;
-    const nowLineInSecondHalf = nowInSecondHalf ? Math.floor((currentTimeDecimal - secondSlotTime) / 0.5 * secondHalfHeight) : -1;
-    const secondHalfLines = [];
-    for (let line = 0;line < secondHalfHeight; line++) {
-      const isNowLine = line === nowLineInSecondHalf;
-      if (isNowLine) {
-        const hour12 = currentHour === 0 ? 12 : currentHour > 12 ? currentHour - 12 : currentHour;
-        const ampm = currentHour < 12 ? "a" : "p";
-        const timeStr = `${hour12}:${currentMinute.toString().padStart(2, "0")}${ampm}`;
-        secondHalfLines.push(/* @__PURE__ */ jsx_dev_runtime2.jsxDEV(Text, {
-          color: "red",
-          bold: true,
-          children: timeStr.padStart(timeColumnWidth - 1)
+          children: `${formatHour2(hour)}${getAmPm2(hour)}`.padStart(timeColumnWidth - 1)
         }, line, false, undefined, this));
       } else {
-        secondHalfLines.push(/* @__PURE__ */ jsx_dev_runtime2.jsxDEV(Text, {
+        lines.push(/* @__PURE__ */ jsx_dev_runtime2.jsxDEV(Text, {
           children: " "
         }, line, false, undefined, this));
       }
     }
     timeSlots.push(/* @__PURE__ */ jsx_dev_runtime2.jsxDEV(Box_default, {
       flexDirection: "column",
-      height: secondHalfHeight,
+      height,
       width: timeColumnWidth,
-      children: secondHalfLines
-    }, `${hour}-1`, false, undefined, this));
-    timeSlotIndex++;
+      children: lines
+    }, slotIndex, false, undefined, this));
   }
   const hasAllDayEvents = events.some(isAllDayEvent);
+  const slotIndexToTime = (slotIndex) => {
+    const d = new Date(weekDays[0]);
+    const hour = startHour + Math.floor(slotIndex / 2);
+    const minute = slotIndex % 2 * 30;
+    d.setHours(hour, minute, 0, 0);
+    return d;
+  };
   return /* @__PURE__ */ jsx_dev_runtime2.jsxDEV(Box_default, {
     flexDirection: "column",
     width: termWidth,
@@ -24743,24 +24793,32 @@ function CalendarDisplay({ id, config, enabled, scenario }) {
           weekDays.map((day, i) => /* @__PURE__ */ jsx_dev_runtime2.jsxDEV(DayColumn, {
             date: day,
             events,
-            isToday: isSameDay2(day, today),
             columnWidth,
             slotHeights,
-            currentTime
+            currentTime,
+            startHour,
+            endHour,
+            windowStart,
+            visibleSlotCount
           }, i, false, undefined, this))
         ]
       }, undefined, true, undefined, this),
       /* @__PURE__ */ jsx_dev_runtime2.jsxDEV(Box_default, {
         children: /* @__PURE__ */ jsx_dev_runtime2.jsxDEV(Text, {
           color: "gray",
-          children: "\u2190/\u2192 week  \u2022  t today  \u2022  q quit"
-        }, undefined, false, undefined, this)
+          children: [
+            totalSlots > visibleSlotCount ? `${formatTime(slotIndexToTime(windowStart))}-${formatTime(slotIndexToTime(windowStart + visibleSlotCount))}  ` : "",
+            "\u2191\u2193 scroll  \u2022  \u2190/\u2192 week  \u2022  t today  \u2022  q quit"
+          ]
+        }, undefined, true, undefined, this)
       }, undefined, false, undefined, this)
     ]
   }, undefined, true, undefined, this);
 }
 var import_react32, jsx_dev_runtime2, START_HOUR = 6, END_HOUR = 22, INK_COLORS, TEXT_COLORS2;
 var init_calendar = __esm(async () => {
+  init_types2();
+  init_format();
   await __promiseAll([
     init_build2(),
     init_meeting_picker_view(),
@@ -25607,13 +25665,24 @@ function formatDuration(minutes) {
   return `${hours}h ${mins}m`;
 }
 function formatTime2(isoString, timezone) {
-  return formatTime(new Date(isoString));
+  const date = new Date(isoString);
+  if (!timezone)
+    return formatTime(date);
+  return date.toLocaleTimeString(displayLocale(), { ...FLIGHT_TIME_OPTIONS, timeZone: timezone });
+}
+function formatTimezoneAbbreviation(timezone, isoString) {
+  const date = new Date(isoString);
+  const parts = new Intl.DateTimeFormat(displayLocale(), {
+    timeZone: timezone,
+    timeZoneName: "short"
+  }).formatToParts(date);
+  return parts.find((p) => p.type === "timeZoneName")?.value ?? timezone;
 }
 function buildSeat(row, letter) {
   return `${row}${letter}`;
 }
-var CYBER_COLORS;
-var init_types2 = __esm(() => {
+var CYBER_COLORS, FLIGHT_TIME_OPTIONS;
+var init_types3 = __esm(() => {
   init_format();
   CYBER_COLORS = {
     neonCyan: "cyan",
@@ -25623,6 +25692,11 @@ var init_types2 = __esm(() => {
     neonRed: "red",
     dim: "gray",
     bg: "black"
+  };
+  FLIGHT_TIME_OPTIONS = {
+    hour: "2-digit",
+    minute: "2-digit",
+    hourCycle: "h23"
   };
 });
 
@@ -25661,7 +25735,7 @@ function CyberpunkHeader({ title, width }) {
 }
 var jsx_dev_runtime6;
 var init_cyberpunk_header = __esm(async () => {
-  init_types2();
+  init_types3();
   init_format();
   await init_build2();
   jsx_dev_runtime6 = __toESM(require_jsx_dev_runtime(), 1);
@@ -25726,7 +25800,7 @@ function FlightCard({ flight, selected, focused }) {
 }
 var jsx_dev_runtime7;
 var init_flight_card = __esm(async () => {
-  init_types2();
+  init_types3();
   await init_build2();
   jsx_dev_runtime7 = __toESM(require_jsx_dev_runtime(), 1);
 });
@@ -25780,7 +25854,7 @@ function FlightList({ flights, selectedIndex, focused, maxHeight }) {
 }
 var jsx_dev_runtime8;
 var init_flight_list = __esm(async () => {
-  init_types2();
+  init_types3();
   await __promiseAll([
     init_build2(),
     init_flight_card()
@@ -25842,7 +25916,7 @@ function RouteDisplay({ origin, destination, width }) {
 }
 var jsx_dev_runtime9;
 var init_route_display = __esm(async () => {
-  init_types2();
+  init_types3();
   await init_build2();
   jsx_dev_runtime9 = __toESM(require_jsx_dev_runtime(), 1);
 });
@@ -25891,9 +25965,9 @@ function FlightInfo({ flight }) {
               color: CYBER_COLORS.neonCyan,
               bold: true,
               children: [
-                formatTime2(flight.departureTime),
+                formatTime2(flight.departureTime, flight.origin.timezone),
                 " ",
-                flight.origin.timezone
+                formatTimezoneAbbreviation(flight.origin.timezone, flight.departureTime)
               ]
             }, undefined, true, undefined, this)
           }, undefined, false, undefined, this),
@@ -25903,9 +25977,9 @@ function FlightInfo({ flight }) {
               color: CYBER_COLORS.neonCyan,
               bold: true,
               children: [
-                formatTime2(flight.arrivalTime),
+                formatTime2(flight.arrivalTime, flight.destination.timezone),
                 " ",
-                flight.destination.timezone
+                formatTimezoneAbbreviation(flight.destination.timezone, flight.arrivalTime)
               ]
             }, undefined, true, undefined, this)
           }, undefined, false, undefined, this),
@@ -25984,7 +26058,7 @@ function FlightInfo({ flight }) {
 }
 var jsx_dev_runtime10;
 var init_flight_info = __esm(async () => {
-  init_types2();
+  init_types3();
   await init_build2();
   jsx_dev_runtime10 = __toESM(require_jsx_dev_runtime(), 1);
 });
@@ -26152,7 +26226,7 @@ function SeatmapPanel({
 }
 var jsx_dev_runtime11;
 var init_seatmap_panel = __esm(async () => {
-  init_types2();
+  init_types3();
   await init_build2();
   jsx_dev_runtime11 = __toESM(require_jsx_dev_runtime(), 1);
 });
@@ -26220,7 +26294,7 @@ function StatusBar({
 }
 var jsx_dev_runtime12;
 var init_status_bar = __esm(async () => {
-  init_types2();
+  init_types3();
   await init_build2();
   jsx_dev_runtime12 = __toESM(require_jsx_dev_runtime(), 1);
 });
@@ -26532,7 +26606,7 @@ function FlightCanvas({
 }
 var import_react34, jsx_dev_runtime13;
 var init_flight = __esm(async () => {
-  init_types2();
+  init_types3();
   await __promiseAll([
     init_build2(),
     init_use_canvas_server(),
@@ -29149,7 +29223,7 @@ var pickerSelectScenario = {
   name: "select",
   description: "Choose one or more options from a list",
   canvasKind: "picker",
-  interactionMode: "selection"
+  interactionMode: "multi-select"
 };
 
 // canvas/src/scenarios/form/fill.ts
@@ -29221,6 +29295,7 @@ function assertKnownKind(kind) {
   return kind;
 }
 function resolveScenario(kind, requested) {
+  assertKnownKind(kind);
   const scenario = assertIdent("scenario", requested ?? KIND_DEFAULT_SCENARIO.get(kind));
   if (!getScenario(kind, scenario)) {
     throw new Error(`Unknown scenario for ${kind}: ${scenario}. ` + `Expected one of: ${listScenarios(kind).map((x) => x.name).join(", ")}.`);

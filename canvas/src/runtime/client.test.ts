@@ -74,12 +74,28 @@ test("waitForOutcome returns pending on timeout while the canvas is alive", asyn
   }
 });
 
+// Fix 7. Used to stop the server on a fixed 40 ms timer, racing
+// openConnection's own handshake (readRecord + connect + auth) -- which can
+// take longer than 40 ms under load, so the server was stopped before the
+// client even finished connecting, and waitForOutcome reported "error"
+// (the connect/handshake failing) instead of "disconnected" (a connection
+// that succeeded and then dropped). onAuthenticated fires at exactly the
+// moment the handshake completes (see the comment on the two tests above),
+// so waiting on that instead of a guessed delay removes the race entirely.
 test("waitForOutcome returns disconnected when the canvas goes away", async () => {
-  const s = await startCanvasServer({ onMessage() {} });
+  let authenticated = false;
+  const s = await startCanvasServer({
+    onMessage() {},
+    onAuthenticated() {
+      authenticated = true;
+    },
+  });
   try {
     await publish("c-gone", s);
-    setTimeout(() => s.stop(), 40);
-    expect((await waitForOutcome("c-gone", 3000)).status).toBe("disconnected");
+    const result = waitForOutcome("c-gone", 3000);
+    await waitUntil(() => authenticated);
+    s.stop();
+    expect((await result).status).toBe("disconnected");
   } finally {
     s.stop();
   }

@@ -161,7 +161,16 @@ test("enabled hook starts a real server, registers it, and round-trips every mes
     expect((ready as unknown as { scenario: string }).scenario).toBe("display");
 
     client.send({ type: "get", key: "content" });
-    await waitUntil(() => getSeen === "content");
+    // Fix 7. This used to poll `getSeen === "content"` -- which only proves
+    // the SERVER received the request -- and then assert on the CLIENT
+    // having the reply, which arrives strictly later (it has to cross the
+    // socket back). Under load the reply had not arrived yet when the
+    // assertion ran. Poll for the condition actually being asserted instead.
+    await waitUntil(() =>
+      client!.messages.some(
+        (m) => (m as { type: string }).type === "value" && (m as { key: string }).key === "content"
+      )
+    );
     expect(getSeen).toBe("content");
     expect(client.messages).toContainEqual({ type: "value", key: "content", data: { echoed: "content" } });
 

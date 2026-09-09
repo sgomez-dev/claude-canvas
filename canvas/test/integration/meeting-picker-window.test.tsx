@@ -110,3 +110,70 @@ test("a click maps to the visible slot, not the same offset from midnight", asyn
   conn.close();
   r.dispose();
 });
+
+// Regression test for the mis-booking bug the windowing fix above
+// introduced on the CAPPED last page specifically.
+//
+// 32 slots, 11 visible: page 0 is slots 0-10, page 1 is slots 11-21, and
+// the LAST page is capped to slots 21-31 (windowStart = 21, not 22 -- 22
+// would be the next multiple of 11, but that would run past slot 31).
+// Slot 21 therefore sits in BOTH page 1's uncapped floor-division range
+// (11-21) and the actual capped last page (21-31) that's on screen once
+// you've paged all the way down -- it's the one absolute slot index the
+// two formulas disagree about.
+//
+// windowStart used to be re-derived from cursorSlot on every render via
+// plain floor-division capped for the last page. A mouse hover sets
+// cursorSlot to whatever's under the pointer, so hovering over slot 21
+// while page 2 (windowStart=21) was on screen fed 21 back through that
+// formula and got windowStart=11 (page 1) instead -- the grid silently
+// re-paged with no mouse movement, and a click at the same pixel then
+// booked whatever was now under it in page 1: 11:30, five hours off from
+// the 16:30 actually on screen. This is the exact repro from the bug
+// report ("booked a time 5 hours different from what was on screen").
+test("hovering a slot on the CAPPED last page does not silently re-page the grid", async () => {
+  const id = "mpw-capped";
+  const r = mount(id, SMALL, true);
+  await r.settle();
+  expect(await awaitRecord(id, 5000)).not.toBeNull();
+
+  // Page all the way down to the last (capped) page: 22 presses lands the
+  // cursor on slot 22, the first slot of the capped last window.
+  for (let i = 0; i < 22; i++) {
+    r.stdin.write("\x1b[B");
+    await r.settle();
+  }
+  const beforeHover = await r.settle();
+  // windowStart = 21 (capped), not 22 (the uncapped multiple of 11) --
+  // 6:00 + 21 * 30min = 16:30, running to 6:00 + 32 * 30min = 22:00.
+  expect(beforeHover).toContain("16:30-22:00");
+
+  const conn = await openConnection(id);
+
+  // Motion event (no button), at the TOP grid row -- gridTop=6, gridLeft=8
+  // (same as the click test above) -- which maps to slot 21, the ambiguous
+  // one: visible on the capped last page, but NOT where plain
+  // floor-division would put it if windowStart were re-derived from it.
+  r.stdin.write("\x1b[<35;10;6M");
+  const afterHover = await r.settle();
+
+  // The window must NOT have changed just because the mouse hovered over a
+  // slot that was already visible on it.
+  expect(afterHover).toContain("16:30-22:00");
+
+  // A click at that same pixel must book what was actually on screen
+  // there (16:30), not whatever the old buggy re-paged window would put
+  // under that pixel (11:30 -- five hours off).
+  r.stdin.write("\x1b[<0;10;6M");
+  await r.settle();
+
+  const msg = await nextOutcome(conn, 2000);
+  expect(msg).not.toBeNull();
+  const { startTime } = (msg as { data: { startTime: string } }).data;
+  const clicked = new Date(startTime);
+  expect(clicked.getHours()).toBe(16);
+  expect(clicked.getMinutes()).toBe(30);
+
+  conn.close();
+  r.dispose();
+});

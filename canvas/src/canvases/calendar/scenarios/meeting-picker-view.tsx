@@ -1,6 +1,6 @@
 // Meeting Picker View - Interactive calendar for selecting meeting times
 
-import React, { useState, useEffect, useCallback } from "react";
+import React, { useState, useEffect, useCallback, useRef } from "react";
 import { Box, Text, useInput, useApp, useStdout } from "ink";
 import { useMouse, type MouseEvent } from "../hooks/use-mouse";
 import { useCanvasServer } from "../../../runtime/use-canvas-server";
@@ -31,6 +31,46 @@ interface SlotInfo {
   endTime: Date;
 }
 
+// Compute the window's start slot for a candidate cursor slot, given the
+// window CURRENTLY on screen.
+//
+// windowStart used to be a value derived fresh from cursorSlot on every
+// render: `min(floor(cursorSlot / visible) * visible, total - visible)`.
+// The `min(...)` cap exists so the LAST page always fills the available
+// rows instead of leaving blank space when `total` isn't a multiple of
+// `visible` -- but that cap means the last page's windowStart is not
+// necessarily itself a multiple of `visible`. So a cursorSlot that is
+// already visible on that capped last page can, when run back through the
+// plain `floor(cursorSlot / visible) * visible` part of the formula,
+// disagree with the capped value actually on screen -- landing one page
+// EARLIER. `handleMouseMove` sets cursorSlot to whatever slot is under the
+// pointer on every mouse-move event, so this mismatch meant hovering over
+// a slot that was genuinely visible on the capped last page could silently
+// re-page the grid with no visible change (the mouse never moved, the
+// window did) -- and a subsequent click at that same pixel then booked
+// whichever slot was now under it in the NEW window.
+//
+// The fix: only change the window when the candidate cursor slot is
+// actually outside the window currently displayed. If it is already
+// inside, the window is left exactly alone, so the cap-vs-floor-division
+// mismatch never gets a chance to fire. The window only ever moves when
+// the cursor genuinely needs a different page: real keyboard navigation
+// crossing a boundary, or a resize that invalidates the current window.
+function nextWindowStart(
+  cursorSlot: number,
+  currentStart: number,
+  totalSlots: number,
+  visibleSlotCount: number
+): number {
+  if (totalSlots <= visibleSlotCount) return 0;
+  const maxStart = totalSlots - visibleSlotCount;
+  const clampedStart = Math.min(Math.max(0, currentStart), maxStart);
+  if (cursorSlot < clampedStart || cursorSlot >= clampedStart + visibleSlotCount) {
+    return Math.min(Math.floor(cursorSlot / visibleSlotCount) * visibleSlotCount, maxStart);
+  }
+  return clampedStart;
+}
+
 export function MeetingPickerView({ id, config, enabled = false }: Props) {
   const { exit } = useApp();
   const { stdout } = useStdout();
@@ -47,6 +87,22 @@ export function MeetingPickerView({ id, config, enabled = false }: Props) {
   const [cursorDay, setCursorDay] = useState(0);
   const [cursorSlot, setCursorSlot] = useState(0);
   const [usingKeyboard, setUsingKeyboard] = useState(true); // Start with keyboard mode
+  // Sticky window start -- NOT re-derived from cursorSlot every render. See
+  // `nextWindowStart` above for why that used to cause a mis-booking bug.
+  const [windowStart, setWindowStart] = useState(0);
+  // Mirrors of cursorSlot/windowStart, kept current via a direct write
+  // inside every handler below BEFORE the corresponding setState call (same
+  // pattern as cursorRef/maxLineOffsetRef in diff/view.tsx). Ink's stdin
+  // handler can fire the next key's event before a prior setState from this
+  // component has committed and re-rendered -- reading `cursorSlot`/
+  // `windowStart` (the state, closed over at last render) in that window
+  // would use a stale value and silently drop the update. Reading/writing
+  // through these refs instead means every keystroke or mouse-move sees the
+  // latest value regardless of whether React has re-rendered yet.
+  const cursorSlotRef = useRef(cursorSlot);
+  cursorSlotRef.current = cursorSlot;
+  const windowStartRef = useRef(windowStart);
+  windowStartRef.current = windowStart;
 
   // Simple ASCII spinner (single-width chars only)
   const spinnerChars = ["|", "/", "-", "\\"];
@@ -145,13 +201,22 @@ export function MeetingPickerView({ id, config, enabled = false }: Props) {
   const footerHeight = 2;
   const availableHeight = Math.max(1, termHeight - headerHeight - footerHeight);
   const visibleSlotCount = Math.max(1, Math.min(totalSlots, availableHeight));
-  const windowStart =
-    totalSlots <= visibleSlotCount
-      ? 0
-      : Math.min(
-          Math.floor(cursorSlot / visibleSlotCount) * visibleSlotCount,
-          totalSlots - visibleSlotCount
-        );
+
+  // Reconcile the sticky window against genuine geometry changes only
+  // (a terminal resize changing visibleSlotCount, or totalSlots changing).
+  // cursorSlot changes are handled synchronously in the keyboard/mouse
+  // handlers below -- this effect exists so a resize that leaves the
+  // current windowStart out of range (or now-invalid) still snaps back to
+  // something valid, without re-deriving on every cursor move.
+  useEffect(() => {
+    const next = nextWindowStart(cursorSlotRef.current, windowStartRef.current, totalSlots, visibleSlotCount);
+    windowStartRef.current = next;
+    setWindowStart(next);
+    // cursorSlot/windowStart read via ref, not as deps: this effect is only
+    // meant to react to totalSlots/visibleSlotCount changing (resize).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [totalSlots, visibleSlotCount]);
+
   const baseSlotHeight = Math.max(1, Math.floor(availableHeight / visibleSlotCount));
   const extraRows = availableHeight - baseSlotHeight * visibleSlotCount;
   // Indexed by VISIBLE position, not absolute slot index.
@@ -240,7 +305,10 @@ export function MeetingPickerView({ id, config, enabled = false }: Props) {
           visibleIndex = i;
         }
       }
-      const slotIndex = windowStart + visibleIndex;
+      // Read through the ref, not the closed-over `windowStart` state, so a
+      // click/hover that fires before a prior update has committed still
+      // maps against the true current window (see the ref comments above).
+      const slotIndex = windowStartRef.current + visibleIndex;
 
       if (slotIndex >= totalSlots) return null;
 
@@ -317,10 +385,23 @@ export function MeetingPickerView({ id, config, enabled = false }: Props) {
       // Sync cursor so keyboard continues from mouse position
       if (slot) {
         setCursorDay(slot.dayIndex);
+        cursorSlotRef.current = slot.slotIndex;
         setCursorSlot(slot.slotIndex);
+        // `slot` was computed from `terminalToSlot`, which maps the pixel
+        // through the CURRENTLY displayed window -- so `slot.slotIndex` is
+        // always already inside that window. `nextWindowStart` below is
+        // therefore guaranteed to leave windowStart unchanged for a hover;
+        // it only ever moves the window for real keyboard navigation. This
+        // is what keeps a hover from silently re-paging the grid. Reading/
+        // writing windowStartRef (not the closed-over `windowStart` state)
+        // keeps this correct even if this fires again before the previous
+        // update has committed.
+        const next = nextWindowStart(slot.slotIndex, windowStartRef.current, totalSlots, visibleSlotCount);
+        windowStartRef.current = next;
+        setWindowStart(next);
       }
     },
-    [terminalToSlot]
+    [terminalToSlot, totalSlots, visibleSlotCount]
   );
 
   useMouse({
@@ -391,7 +472,19 @@ export function MeetingPickerView({ id, config, enabled = false }: Props) {
         setSelectedSlot(null);
       }
       setUsingKeyboard(true);
-      setCursorSlot((s) => Math.max(0, s - 1));
+      {
+        // Read/write through the refs (not the closed-over cursorSlot/
+        // windowStart state) -- Ink can fire the next key's event before
+        // this update has committed and re-rendered, and using the stale
+        // state closure there silently drops every other keypress under
+        // rapid input (reproduced with a scripted key sequence).
+        const next = Math.max(0, cursorSlotRef.current - 1);
+        cursorSlotRef.current = next;
+        setCursorSlot(next);
+        const nextWindow = nextWindowStart(next, windowStartRef.current, totalSlots, visibleSlotCount);
+        windowStartRef.current = nextWindow;
+        setWindowStart(nextWindow);
+      }
     } else if (key.downArrow) {
       // Move cursor down (later time) - cancel countdown if active
       if (countdown !== null) {
@@ -399,7 +492,14 @@ export function MeetingPickerView({ id, config, enabled = false }: Props) {
         setSelectedSlot(null);
       }
       setUsingKeyboard(true);
-      setCursorSlot((s) => Math.min(totalSlots - 1, s + 1));
+      {
+        const next = Math.min(totalSlots - 1, cursorSlotRef.current + 1);
+        cursorSlotRef.current = next;
+        setCursorSlot(next);
+        const nextWindow = nextWindowStart(next, windowStartRef.current, totalSlots, visibleSlotCount);
+        windowStartRef.current = nextWindow;
+        setWindowStart(nextWindow);
+      }
     } else if (key.leftArrow) {
       // Move cursor left (previous day) - cancel countdown if active
       if (countdown !== null) {

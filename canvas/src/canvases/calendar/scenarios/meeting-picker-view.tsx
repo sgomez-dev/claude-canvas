@@ -1,10 +1,11 @@
 // Meeting Picker View - Interactive calendar for selecting meeting times
 
-import React, { useState, useEffect, useCallback, useRef } from "react";
+import React, { useState, useEffect, useCallback, useMemo, useRef, Fragment } from "react";
 import { Box, Text, useInput, useApp, useStdout } from "ink";
 import { useMouse, type MouseEvent } from "../hooks/use-mouse";
 import { useCanvasServer } from "../../../runtime/use-canvas-server";
 import { formatTime, formatWeekday } from "../../format";
+import { wrappedLineCount } from "../../width";
 import type { MeetingPickerConfig, MeetingPickerResult, NamedCalendar } from "../../../scenarios/types";
 import {
   getWeekDays,
@@ -56,6 +57,64 @@ interface SlotInfo {
 // mismatch never gets a chance to fire. The window only ever moves when
 // the cursor genuinely needs a different page: real keyboard navigation
 // crossing a boundary, or a resize that invalidates the current window.
+// The legend row's markup, factored out of renderLegend below so
+// legendLineCount can measure EXACTLY what will be rendered -- and so the
+// real render and the measurement can never drift apart from each other.
+//
+// Deliberately a SINGLE outer <Text> with nested colored <Text> children,
+// NOT a Box per calendar (marginRight-separated) the way this used to be
+// written. That distinction matters: a row of independent Boxes wraps each
+// one's own text independently, based on whatever width Yoga's flex-shrink
+// happens to allocate it -- verified empirically to NOT be a simple linear
+// word-wrap over the concatenated names (6 calendars at 80 columns really
+// wraps to 3 rows that way, most of it Yoga shrinking individual boxes
+// unevenly). A single wrapping Text, by contrast, flows all the nested
+// spans as ONE paragraph -- which IS the greedy word-wrap
+// `wrappedLineCount` (below) already models, so the two are guaranteed to
+// agree on the same text. This is also why legendLineCount can stay a plain
+// arithmetic function instead of needing its own nested Ink render (calling
+// Ink's renderToString from inside another component's render is not
+// supported -- it emits a React "nested updates" warning and was observed
+// to corrupt the OUTER render's own layout, dropping whole rows).
+function LegendRow({ calendars }: { calendars: NamedCalendar[] }) {
+  return (
+    <Text>
+      {calendars.map((calendar, i) => (
+        <Fragment key={i}>
+          <Text backgroundColor={calendar.color} color={TEXT_COLORS[calendar.color] || "white"}>
+            {` ${calendar.name} `}
+          </Text>
+          {i < calendars.length - 1 ? "  " : ""}
+        </Fragment>
+      ))}
+    </Text>
+  );
+}
+
+// The plain-text equivalent of LegendRow's content, for wrappedLineCount to
+// measure. Must stay byte-for-byte in sync with LegendRow's actual
+// characters (the per-name " name " padding and the "  " separator between
+// entries) -- verified against LegendRow's real rendered output for several
+// calendar counts/widths, including the 3-row case above.
+function legendText(calendars: NamedCalendar[]): string {
+  return calendars.map((c) => ` ${c.name} `).join("  ");
+}
+
+// Number of terminal rows the calendar-name legend will actually occupy at
+// the current terminal width.
+//
+// This used to be baked into a hardcoded `headerHeight = 5` that assumed
+// the legend was always exactly 1 row. Once enough calendars are shown, or
+// their names are long enough, Ink wraps the legend onto 2+ rows -- and
+// gridTop/terminalToSlot (the mouse-to-slot mapping) kept assuming the old,
+// smaller header height, so a click on the row visibly showing e.g. "6am"
+// booked the WRONG slot. Reproduced at 70 columns with 5 full calendar-owner
+// names and 80 columns with 6.
+function legendLineCount(calendars: NamedCalendar[], legendWidth: number): number {
+  if (calendars.length === 0) return 1;
+  return wrappedLineCount(legendText(calendars), legendWidth);
+}
+
 function nextWindowStart(
   cursorSlot: number,
   currentStart: number,
@@ -197,7 +256,19 @@ export function MeetingPickerView({ id, config, enabled = false }: Props) {
   // stays reachable by navigation; none is drawn on top of another. When
   // everything fits, the slots share out the spare rows and grow taller,
   // which is the behaviour a roomy terminal had before.
-  const headerHeight = 5;
+  //
+  // headerHeight = title (1 row) + its marginBottom (1 row) + the legend's
+  // ACTUAL rendered row count (see legendLineCount above; verified against
+  // real Ink output to be 1 row when the legend fits on one line, matching
+  // the "5" this constant used to be hardcoded to) + the day-headers row
+  // (2 rows: weekday name + day number). Root Box has paddingX={1}, so the
+  // legend's available width is termWidth minus that 2-column padding.
+  const legendWidth = Math.max(1, termWidth - 2);
+  // Memoized: legendLineCount does a real (if small) Ink render, and this
+  // component re-renders on every keystroke/mouse-move -- memoizing avoids
+  // paying that cost when neither the calendar list nor the width changed.
+  const legendRows = useMemo(() => legendLineCount(calendars, legendWidth), [calendars, legendWidth]);
+  const headerHeight = 4 + legendRows;
   const footerHeight = 2;
   const availableHeight = Math.max(1, termHeight - headerHeight - footerHeight);
   const visibleSlotCount = Math.max(1, Math.min(totalSlots, availableHeight));
@@ -290,7 +361,14 @@ export function MeetingPickerView({ id, config, enabled = false }: Props) {
       // Find the visible slot from cumulative heights, then map it back to
       // an absolute slot index: only the window is on screen, so a click at
       // the top of the grid is windowStart, not slot 0.
-      let visibleIndex = 0;
+      //
+      // visibleIndex starts at -1 (not 0) so a relY at or past the grid's
+      // total rendered height -- a click below the last slot row, e.g. on
+      // the help/footer bar -- leaves it unset and falls through to the
+      // "outside the grid" return below, instead of the previous behaviour
+      // of silently defaulting to the LAST slot on the last loop iteration.
+      // Reproduced: clicking the help bar used to book a real meeting.
+      let visibleIndex = -1;
       let cumHeight = 0;
       for (let i = 0; i < visibleSlotCount; i++) {
         // slotHeights has exactly visibleSlotCount elements (built via
@@ -301,10 +379,8 @@ export function MeetingPickerView({ id, config, enabled = false }: Props) {
           visibleIndex = i;
           break;
         }
-        if (i === visibleSlotCount - 1) {
-          visibleIndex = i;
-        }
       }
+      if (visibleIndex === -1) return null;
       // Read through the ref, not the closed-over `windowStart` state, so a
       // click/hover that fires before a prior update has committed still
       // maps against the true current window (see the ref comments above).
@@ -675,20 +751,10 @@ export function MeetingPickerView({ id, config, enabled = false }: Props) {
     return <Box key={dayIndex} flexDirection="column" width={columnWidth}>{slots}</Box>;
   };
 
-  // Render legend
-  const renderLegend = () => {
-    return (
-      <Box>
-        {calendars.map((calendar, i) => (
-          <Box key={i} marginRight={2}>
-            <Text backgroundColor={calendar.color} color={TEXT_COLORS[calendar.color] || "white"}>
-              {` ${calendar.name} `}
-            </Text>
-          </Box>
-        ))}
-      </Box>
-    );
-  };
+  // Render legend. Shares markup with LegendRow above (used to measure the
+  // legend's real row count for headerHeight) so the two can never drift
+  // apart from each other.
+  const renderLegend = () => <LegendRow calendars={calendars} />;
 
   return (
     <Box flexDirection="column" width={termWidth} height={termHeight} paddingX={1}>

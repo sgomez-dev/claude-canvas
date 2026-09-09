@@ -11,34 +11,40 @@
  * rather than shipping a plugin that renders the previous version.
  */
 import { $ } from "bun";
+import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 const BUNDLE = "canvas/dist/cli.js";
-// os.tmpdir(), not a hardcoded "/tmp": this runs on the Windows CI leg too,
-// where "/tmp" is not a path and `bun build --outfile` fails outright.
-const TMP = join(tmpdir(), "claude-canvas-bundle-check.js");
 
 const committed = Bun.file(BUNDLE);
 if (!(await committed.exists())) {
   console.error(`${BUNDLE} is missing. Run: bun run build`);
   process.exit(1);
 }
-// Read before rebuilding: the build writes over BUNDLE in place.
 const committedText = await committed.text();
 
-// Rebuild through the same script the committed bundle came from, so the
-// comparison cannot drift because the two used different flags.
-await $`bun run scripts/build.ts`.quiet();
-const fresh = await Bun.file(BUNDLE).text();
-await Bun.write(TMP, fresh);
+// Rebuild through the same script the committed bundle came from (so the
+// comparison cannot drift because the two used different flags), but into a
+// throwaway directory rather than BUNDLE itself. Building in place used to
+// mean running this check "fixed" a stale bundle silently as a side effect
+// of just checking it -- so the check's own error message ("Run `bun run
+// build` and commit the result") was misleading: the build had already run
+// by the time anyone read it. os.tmpdir(), not a hardcoded "/tmp": this
+// runs on the Windows CI leg too, where "/tmp" is not a path.
+const outdir = await mkdtemp(join(tmpdir(), "claude-canvas-bundle-check-"));
+try {
+  await $`bun run scripts/build.ts`.env({ ...process.env, CANVAS_BUILD_OUTDIR: outdir }).quiet();
+  const fresh = await Bun.file(join(outdir, "cli.js")).text();
 
-const [a, b] = [committedText, fresh];
-if (a !== b) {
-  console.error(
-    `${BUNDLE} is stale: it does not match a fresh build of canvas/src/cli.ts.\n` +
-      `Run \`bun run build\` and commit the result.`
-  );
-  process.exit(1);
+  if (committedText !== fresh) {
+    console.error(
+      `${BUNDLE} is stale: it does not match a fresh build of canvas/src/cli.ts.\n` +
+        `Run \`bun run build\` and commit the result.`
+    );
+    process.exit(1);
+  }
+  console.log(`${BUNDLE} is up to date (${(fresh.length / 1024 / 1024).toFixed(2)} MB)`);
+} finally {
+  await rm(outdir, { recursive: true, force: true });
 }
-console.log(`${BUNDLE} is up to date (${(a.length / 1024 / 1024).toFixed(2)} MB)`);

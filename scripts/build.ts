@@ -20,10 +20,20 @@ const stubDevtools: BunPlugin = {
   },
 };
 
+// check-bundle.ts needs to build to a location OTHER than the committed
+// canvas/dist/cli.js, to compare a fresh build against the committed one
+// without overwriting the very file it's checking as a side effect of
+// checking it. Rather than duplicate this build config there (which is
+// exactly the drift the single-script setup below exists to prevent), it
+// overrides the output directory through this env var and still goes
+// through this same script for everything else (target, naming, the
+// devtools stub).
+const outdir = process.env.CANVAS_BUILD_OUTDIR ?? "canvas/dist";
+
 const result = await Bun.build({
   entrypoints: ["canvas/src/cli.ts"],
   target: "bun",
-  outdir: "canvas/dist",
+  outdir,
   naming: "cli.js",
   plugins: [stubDevtools],
 });
@@ -33,4 +43,4 @@ if (!result.success) {
   process.exit(1);
 }
 const out = result.outputs[0]!;
-console.log(`canvas/dist/cli.js  ${(out.size / 1024 / 1024).toFixed(2)} MB`);
+console.log(`${outdir}/cli.js  ${(out.size / 1024 / 1024).toFixed(2)} MB`);

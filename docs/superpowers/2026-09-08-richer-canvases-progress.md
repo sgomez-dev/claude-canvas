@@ -406,14 +406,105 @@ hand-built fixtures with correct CRC32s, which is where Average and Paeth
 are exercised: both read the pixel above-left and both must treat
 out-of-bounds as zero.
 
-### Next: step 3, half-blocks
+### Sub-project 3, step 3: half-blocks — DONE
 
-`▀` with a foreground and a background colour paints two vertical pixels per
-cell, so a W×H cell grid represents W×2H pixels, box-averaged down from the
-source. Pure ANSI text, so byte-snapshot-testable with the harness already
-here -- and the tier every user gets, which makes it the tier that must be
-provably right. **Still do not start with Sixel** — see below.
+`canvases/halfblocks.ts` (pure, 143 lines) plus `canvases/halfblock-view.tsx`
+(the Ink component). 18 tests. The tier that works everywhere, and the only
+one made of ordinary styled text -- which is why it is the only one the
+snapshot harness can pin byte for byte.
 
-**Do not start with Sixel.** It is the part that cannot be verified from
-here without installing libsixel, and the two tiers before it carry no
-verification risk at all.
+**Ruling 21: one cell carries two pixels, the upper as the glyph's
+foreground.** `▀` with a foreground and a background colour paints the top
+half in the foreground and leaves the bottom half showing the cell
+background, so a W×H cell grid represents W×2H pixels. Swap the two and
+every image renders vertically mirrored in stripes -- which looks like a
+plausible image, not like a crash, so it is asserted directly rather than
+left to a snapshot to notice. Cost if wrong: every image is subtly upside
+down and nobody can say why.
+
+**Ruling 22: downscaling box-averages, and the test must span more than one
+source row.** A nearest-neighbour downscale of a screenshot drops entire
+rows of text, which is exactly the content this tier exists to keep
+legible. The test that matters here was **missing until sabotage found it**:
+replacing the vertical loop with a single sampled row left all 17 other
+tests green, because each of them happened to map exactly one source row per
+target pixel row -- so the whole file was testing the horizontal average
+only. `downscaling averages DOWN the box, not just across it` closes it, and
+the gradient snapshot now uses a 16×16 source in an 8×4 grid so every target
+pixel is a 2×2 box. Both axes and the empty-span guard are sabotage-checked.
+
+**Ruling 23: adjacent cells sharing a colour pair collapse into one run.** A
+solid 80×24 pane is 1920 cells, and Ink measures and lays out every element;
+runs collapse that to 24. Measured on the repository's own screenshot at
+76×24: 1824 cells become 814 runs, so 45% of the elements. The pure function
+returns runs rather than cells so the component cannot forget to coalesce.
+
+**Ruling 24: alpha is composited over a caller-supplied background,
+defaulting to black.** A terminal cannot report its own background colour,
+so a transparent pixel has to resolve to something and the caller is the
+only one who might know. Not a naive halving: the test pins `#ff7f7f` and
+not `#ff8080` over white, because alpha 128/255 is a hair over one half.
+
+**Ruling 25: the height is halved in exactly one place, `fitToCells`.** A
+terminal cell is about twice as tall as it is wide and a half-block cell
+holds two stacked pixels, so a cell is roughly square in pixel terms. Doing
+that division anywhere else as well would squash every image by two, so the
+renderer takes a cell grid and asks no questions about aspect.
+
+**Measured on 2026-09-09: Ink 6 emits raw 24-bit `38;2;r;g;b` for a hex
+colour at every `FORCE_COLOR` level, including `"1"`.** That matters twice
+over. It means these snapshots pin the exact averaged colour of every pixel
+rather than only the layout, so a one-off in the box average moves them. And
+it means Ink does *not* quantise to the level it detected -- the escape it
+writes to a 256-colour terminal is the same one it writes to a truecolour
+one. The test harness pins `FORCE_COLOR="1"`, which in chalk's own scale
+means 16 colours, and the emitted bytes were truecolour regardless.
+
+**Verified against an independent oracle over real data.** The repository's
+`media/screenshot.png` (3384×2160) rendered to a 76×24 grid, and all 1824
+cells compared against a box-average written separately in Python from the
+description rather than ported line by line from the TypeScript -- which is
+what catches a transposed row/column, an inverted foreground/background or
+an off-by-one at a box edge. Zero discrepancies. The decoder feeding it was
+itself verified against a separate Python decoder in step 2, so neither half
+is checking its own work.
+
+### Open, and NOT measurable from this session
+
+**Whether Apple Terminal renders `38;2;r;g;b` faithfully is unverified.**
+This is the default terminal on macOS and therefore the single most common
+host for this tier, so it is the one that most deserves an answer. What is
+known: `infocmp xterm-256color` declares `colors#256` and carries no
+`setrgbf`/`setrgbb`, i.e. terminfo does not describe truecolour; yet
+`COLORTERM=truecolor` is present in this environment, which is what
+`supports-color` keys off. Those two disagree.
+
+The decisive test is a DECRQSS round trip -- set a 24-bit colour, ask the
+terminal to read its own SGR state back -- and it **cannot be run from the
+agent's shell**: `/dev/tty` fails with `ENXIO`, there being no controlling
+terminal. Attempted on 2026-09-09, not inferred.
+
+Consequence if Apple Terminal ignores the sequence: images render in the
+default foreground colour, i.e. as a block of solid nothing, and the failure
+is silent. If it approximates to its 256-colour palette, they render fine
+with visible banding. The renderer emits the same bytes either way, so
+nothing here is blocked on the answer -- but a 256-colour fallback would be
+cheap insurance and is the first thing to reach for if an image ever looks
+blank on Terminal.app. Someone at a real terminal can settle it in one
+command: `printf '\033[38;2;255;0;0mRED\033[0m\n'`.
+
+### Next: the `image` canvas on half-blocks, before any other tier
+
+Reordered deliberately. The plan had step 4 as Sixel, but nothing
+user-facing reaches the image pipeline yet: the decoder and the renderer are
+both verified and neither is reachable from the CLI, so on the machine this
+was built on there is still no way to look at an image. Wiring the `image`
+canvas to the tier that works everywhere makes the pipeline visible and
+usable on the default macOS terminal first, and turns every later tier into
+a swap behind a working canvas rather than a leap of faith.
+
+Then Kitty (a straightforward base64 payload, and Ghostty reports as kitty),
+then tmux passthrough, and **Sixel last** -- unchanged reasoning: it is the
+one part that cannot be verified from here without `brew install libsixel`
+for `sixel2png` as an independent oracle, and everything before it carries
+no verification risk at all.

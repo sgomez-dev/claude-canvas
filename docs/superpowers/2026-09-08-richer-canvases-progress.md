@@ -286,6 +286,59 @@ byte-snapshot-testable -- and the tier every user gets, so the tier that
 must be provably right), then Sixel against the libsixel oracle, then Kitty,
 then the tmux passthrough that `spawn` has to set up.
 
+### Sub-project 3, step 1: capability detection — DONE
+
+`host/graphics.ts`: a `GraphicsTier` of `kitty | iterm2 | sixel |
+halfblocks | none`, `detectGraphics(env)`, and `resolveGraphics(env, passed)`.
+12 unit tests. `--graphics` threaded from `spawn` to `show`, and `env` now
+reports capabilities whether or not a host is available.
+
+**Ruling 14: the controller detects the tier and passes it down; a canvas
+cannot detect it at all.** This inverted the design, and only measuring
+found it. Inside tmux, `TERM_PROGRAM` becomes `tmux` and `TERM` becomes
+`tmux-256color` — the outer terminal's identity is **erased, not obscured**.
+Since `spawn` always runs a canvas inside a pane, environment detection from
+the canvas can never see past the multiplexer, and every spawned canvas
+would have been stuck on the baseline tier no matter what the terminal could
+do. The controller runs in the user's shell where the real values survive,
+so it detects and hands the answer down as `--graphics`, and `show` writes
+it into its own environment so `baseCapabilities`, `ready`'s capabilities
+and the eventual renderer all resolve the same value with no further
+plumbing. Cost if wrong: one extra argv pair per spawn.
+
+**Ruling 15: no tier is ever inferred from `TERM`.** `TERM=xterm-256color`
+is what Apple Terminal sets, and it supports no image protocol whatsoever;
+xterm's own Sixel support is both patch-dependent and a compile-time option.
+Inferring Sixel from `TERM=xterm*` would emit escapes that render as
+garbage in a large fraction of terminals, which is a far worse failure than
+painting blocks. Detection uses explicit program markers only
+(`TERM_PROGRAM`, `KITTY_WINDOW_ID`, `WT_SESSION`, `WEZTERM_EXECUTABLE`,
+`GHOSTTY_RESOURCES_DIR`, `LC_TERMINAL`), and there is a test asserting
+`TERM=xterm*` alone never implies sixel.
+
+**Ruling 16: Windows Terminal is treated as Sixel-capable, knowingly.**
+`WT_SESSION` is present in every version and there is no version variable,
+so this cannot distinguish 1.22+ (which has Sixel) from older builds. Since
+1.22 shipped in 2024, assuming capable serves current installs and leaves
+stale ones an escape hatch; the reverse would penalise everyone for the
+minority. An old Windows Terminal renders garbage and needs
+`CANVAS_GRAPHICS=halfblocks`, which is documented. Cost if wrong: a stale
+Windows Terminal shows garbage until its user sets one variable.
+
+**Ruling 17: a misspelled override is an error, not a fallback.** Someone
+who sets `CANVAS_GRAPHICS=sixl` meant something by it; silently painting
+blocks would tell them nothing. `env` surfaces the message in a
+`capabilitiesError` field — and `env` reports capabilities even with no host
+available, since they describe the terminal rather than the pane host, and
+`env` is exactly the command someone runs to ask why their images look like
+blocks.
+
+### Next: step 2, the PNG decoder
+
+Pure logic, fully testable, no dependency needed (`Bun.inflateSync` is
+verified working). Then half-blocks, which is ANSI text and therefore
+snapshot-testable. **Still do not start with Sixel** — see below.
+
 **Do not start with Sixel.** It is the part that cannot be verified from
 here without installing libsixel, and the two tiers before it carry no
 verification risk at all.

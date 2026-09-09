@@ -10,6 +10,7 @@ import {
   runSpawn,
   resolveScenario,
   resolveUpdateConfig,
+  buildShowArgv,
   KIND_DEFAULT_SCENARIO,
   type ActionIO,
 } from "./cli";
@@ -269,4 +270,83 @@ test("update parses --config into the object it will push", async () => {
   expect(await resolveUpdateConfig({ config: '{"rows":[{"a":"1"}]}' })).toEqual({
     rows: [{ a: "1" }],
   });
+});
+
+// --- graphics tier propagation -------------------------------------------
+
+// Measured 2026-09-09: inside tmux, TERM_PROGRAM becomes "tmux" and TERM
+// becomes "tmux-256color", so a canvas in a pane cannot see what terminal it
+// is drawing to at all. The controller runs in the user's shell where the
+// real values survive, so it detects the tier and passes it down. Without
+// that, every spawned canvas would be stuck on the baseline tier no matter
+// what the terminal could do.
+test("spawn's argv carries the graphics tier down to the pane", () => {
+  const argv = buildShowArgv("picker", "p1", "select", "kitty");
+  const i = argv.indexOf("--graphics");
+  expect(i).toBeGreaterThan(-1);
+  expect(argv[i + 1]!).toBe("kitty");
+});
+
+// The bundle exposed this one: `${import.meta.dir}/cli.ts` is a hardcoded
+// filename, and the shipped plugin runs dist/cli.js, so the pane opened and
+// the canvas inside it died instantly on a path that did not exist.
+test("spawn's argv runs whichever entry point is executing, not a guessed sibling", async () => {
+  const argv = buildShowArgv("picker", "p1", "select", "halfblocks");
+  const entry = argv[2]!;
+  // Asserting equality with this test file's own `import.meta.path` would
+  // be wrong -- the value comes from cli.ts's module scope, not here. What
+  // matters is that it names a file that actually EXISTS and is the CLI:
+  // the bug was a hardcoded `${import.meta.dir}/cli.ts`, which from the
+  // shipped dist/cli.js bundle pointed at a sibling that does not exist, so
+  // the pane opened and the canvas died instantly.
+  expect(await Bun.file(entry).exists()).toBe(true);
+  expect(await Bun.file(entry).text()).toContain("buildShowArgv");
+});
+
+test("spawn's argv appends the config file only when there is one", () => {
+  expect(buildShowArgv("table", "t1", "display", "sixel")).not.toContain("--config-file");
+  const withCfg = buildShowArgv("table", "t1", "display", "sixel", "/tmp/x.json");
+  const i = withCfg.indexOf("--config-file");
+  expect(i).toBeGreaterThan(-1);
+  expect(withCfg[i + 1]!).toBe("/tmp/x.json");
+});
+
+// The receiving half. `show` writes the tier into its own environment rather
+// than threading it as a prop, so baseCapabilities, the `ready` message's
+// capabilities and the eventual image renderer all resolve the same value
+// with no further plumbing.
+test("show writes the passed tier into its own environment", async () => {
+  const before = process.env.CANVAS_GRAPHICS;
+  const { io } = captureIO();
+  try {
+    delete process.env.CANVAS_GRAPHICS;
+    // A config file that does not exist makes runShow fail AFTER it has set
+    // the environment, which is what this asserts on.
+    await runShow(
+      "picker",
+      { id: "cli-graphics-1", scenario: "select", configFile: "/nonexistent.json", graphics: "kitty" },
+      io
+    );
+    expect(process.env.CANVAS_GRAPHICS!).toBe("kitty");
+  } finally {
+    if (before === undefined) delete process.env.CANVAS_GRAPHICS;
+    else process.env.CANVAS_GRAPHICS = before;
+  }
+});
+
+test("show rejects a misspelled --graphics rather than silently painting blocks", async () => {
+  const before = process.env.CANVAS_GRAPHICS;
+  const { io, lines, exits } = captureIO();
+  try {
+    delete process.env.CANVAS_GRAPHICS;
+    await runShow("picker", { id: "cli-graphics-2", scenario: "select", graphics: "sixl" }, io);
+    // Still exits 0: a non-zero exit from inside a pane leaves an
+    // unremovable one on Windows, which is why runShow's finally clause
+    // exists at all.
+    expect(exits).toEqual([0]);
+    expect(JSON.parse(lines[0]!).message).toMatch(/Invalid --graphics: "sixl"/);
+  } finally {
+    if (before === undefined) delete process.env.CANVAS_GRAPHICS;
+    else process.env.CANVAS_GRAPHICS = before;
+  }
 });

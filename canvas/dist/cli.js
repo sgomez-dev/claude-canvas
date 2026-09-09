@@ -2550,20 +2550,72 @@ var init_socket_writer = __esm(() => {
   DEFAULT_MAX_QUEUED_BYTES = 32 * 1024 * 1024;
 });
 
+// canvas/src/host/graphics.ts
+function isGraphicsTier(value) {
+  return typeof value === "string" && GRAPHICS_TIERS.includes(value);
+}
+function detectGraphics(env) {
+  const program = env.TERM_PROGRAM ?? "";
+  const term = env.TERM ?? "";
+  if (term.length === 0 || term === "dumb")
+    return "none";
+  if (env.KITTY_WINDOW_ID !== undefined || term === "xterm-kitty")
+    return "kitty";
+  if (program === "ghostty" || env.GHOSTTY_RESOURCES_DIR !== undefined)
+    return "kitty";
+  if (program === "iTerm.app" || env.LC_TERMINAL === "iTerm2")
+    return "iterm2";
+  if (program === "WezTerm" || env.WEZTERM_EXECUTABLE !== undefined)
+    return "sixel";
+  if (term === "foot" || term === "foot-extra")
+    return "sixel";
+  if (env.WT_SESSION !== undefined)
+    return "sixel";
+  return "halfblocks";
+}
+function resolveGraphics(env, passed) {
+  const override = env.CANVAS_GRAPHICS;
+  if (override !== undefined && override.length > 0) {
+    if (isGraphicsTier(override))
+      return override;
+    throw new Error(`Invalid CANVAS_GRAPHICS: ${JSON.stringify(override)}. ` + `Expected one of: ${GRAPHICS_TIERS.join(", ")}.`);
+  }
+  if (passed !== undefined && passed.length > 0) {
+    if (isGraphicsTier(passed))
+      return passed;
+    throw new Error(`Invalid --graphics: ${JSON.stringify(passed)}. ` + `Expected one of: ${GRAPHICS_TIERS.join(", ")}.`);
+  }
+  return detectGraphics(env);
+}
+var GRAPHICS_TIERS;
+var init_graphics = __esm(() => {
+  GRAPHICS_TIERS = [
+    "kitty",
+    "iterm2",
+    "sixel",
+    "halfblocks",
+    "none"
+  ];
+});
+
 // canvas/src/host/types.ts
 function baseCapabilities(env) {
   return {
-    graphics: "none",
+    graphics: resolveGraphics(env),
     trueColor: env.COLORTERM === "truecolor" || env.COLORTERM === "24bit",
     mouse: (env.TERM ?? "").length > 0 || process.platform === "win32",
     columns: process.stdout.columns ?? 80,
     rows: process.stdout.rows ?? 24
   };
 }
+var init_types = __esm(() => {
+  init_graphics();
+});
 
 // canvas/src/host/tmux.ts
 var tmuxHost;
 var init_tmux = __esm(() => {
+  init_types();
   tmuxHost = {
     name: "tmux",
     isAvailable(env) {
@@ -2599,6 +2651,7 @@ var init_tmux = __esm(() => {
 // canvas/src/host/windows-terminal.ts
 var windowsTerminalHost;
 var init_windows_terminal = __esm(() => {
+  init_types();
   windowsTerminalHost = {
     name: "windows-terminal",
     isAvailable(env) {
@@ -2646,6 +2699,7 @@ var NoHostError, HOSTS;
 var init_host = __esm(() => {
   init_tmux();
   init_windows_terminal();
+  init_types();
   NoHostError = class NoHostError extends Error {
     constructor() {
       super("No canvas host available. Tried tmux (needs $TMUX \u2014 start a tmux session) " + "and Windows Terminal (needs $WT_SESSION \u2014 run inside Windows Terminal).");
@@ -23674,7 +23728,7 @@ function isSameDay(d1, d2) {
   return d1.getFullYear() === d2.getFullYear() && d1.getMonth() === d2.getMonth() && d1.getDate() === d2.getDate();
 }
 var TEXT_COLORS;
-var init_types = __esm(() => {
+var init_types2 = __esm(() => {
   TEXT_COLORS = {
     yellow: "black",
     cyan: "black",
@@ -24475,7 +24529,7 @@ var import_react31, jsx_dev_runtime;
 var init_meeting_picker_view = __esm(async () => {
   init_format();
   init_width();
-  init_types();
+  init_types2();
   await __promiseAll([
     init_build2(),
     init_use_mouse(),
@@ -24512,7 +24566,7 @@ function isMeetingPickerConfig(config) {
   return meetingPickerConfigError(config) === null;
 }
 var VALID_SLOT_GRANULARITIES, DEFAULT_START_HOUR = 6, DEFAULT_END_HOUR = 22;
-var init_types2 = __esm(() => {
+var init_types3 = __esm(() => {
   VALID_SLOT_GRANULARITIES = [15, 30, 60];
 });
 
@@ -25043,7 +25097,7 @@ function CalendarDisplay({ id, config, enabled, scenario }) {
 }
 var import_react32, jsx_dev_runtime2, START_HOUR = 6, END_HOUR = 22, INK_COLORS, TEXT_COLORS2;
 var init_calendar = __esm(async () => {
-  init_types2();
+  init_types3();
   init_format();
   await __promiseAll([
     init_build2(),
@@ -25918,7 +25972,7 @@ function buildSeat(row, letter) {
   return `${row}${letter}`;
 }
 var CYBER_COLORS, FLIGHT_TIME_OPTIONS;
-var init_types3 = __esm(() => {
+var init_types4 = __esm(() => {
   init_format();
   CYBER_COLORS = {
     neonCyan: "cyan",
@@ -25971,7 +26025,7 @@ function CyberpunkHeader({ title, width }) {
 }
 var jsx_dev_runtime6;
 var init_cyberpunk_header = __esm(async () => {
-  init_types3();
+  init_types4();
   init_format();
   await init_build2();
   jsx_dev_runtime6 = __toESM(require_jsx_dev_runtime(), 1);
@@ -26036,7 +26090,7 @@ function FlightCard({ flight, selected, focused }) {
 }
 var jsx_dev_runtime7;
 var init_flight_card = __esm(async () => {
-  init_types3();
+  init_types4();
   await init_build2();
   jsx_dev_runtime7 = __toESM(require_jsx_dev_runtime(), 1);
 });
@@ -26090,7 +26144,7 @@ function FlightList({ flights, selectedIndex, focused, maxHeight }) {
 }
 var jsx_dev_runtime8;
 var init_flight_list = __esm(async () => {
-  init_types3();
+  init_types4();
   await __promiseAll([
     init_build2(),
     init_flight_card()
@@ -26152,7 +26206,7 @@ function RouteDisplay({ origin, destination, width }) {
 }
 var jsx_dev_runtime9;
 var init_route_display = __esm(async () => {
-  init_types3();
+  init_types4();
   await init_build2();
   jsx_dev_runtime9 = __toESM(require_jsx_dev_runtime(), 1);
 });
@@ -26294,7 +26348,7 @@ function FlightInfo({ flight }) {
 }
 var jsx_dev_runtime10;
 var init_flight_info = __esm(async () => {
-  init_types3();
+  init_types4();
   await init_build2();
   jsx_dev_runtime10 = __toESM(require_jsx_dev_runtime(), 1);
 });
@@ -26462,7 +26516,7 @@ function SeatmapPanel({
 }
 var jsx_dev_runtime11;
 var init_seatmap_panel = __esm(async () => {
-  init_types3();
+  init_types4();
   await init_build2();
   jsx_dev_runtime11 = __toESM(require_jsx_dev_runtime(), 1);
 });
@@ -26530,7 +26584,7 @@ function StatusBar({
 }
 var jsx_dev_runtime12;
 var init_status_bar = __esm(async () => {
-  init_types3();
+  init_types4();
   await init_build2();
   jsx_dev_runtime12 = __toESM(require_jsx_dev_runtime(), 1);
 });
@@ -26842,7 +26896,7 @@ function FlightCanvas({
 }
 var import_react34, jsx_dev_runtime13;
 var init_flight = __esm(async () => {
-  init_types3();
+  init_types4();
   await __promiseAll([
     init_build2(),
     init_use_canvas_server(),
@@ -29349,6 +29403,7 @@ function listScenarios(canvasKind) {
 
 // canvas/src/cli.ts
 init_host();
+init_graphics();
 var KIND_DEFAULT_SCENARIO = new Map([
   ["calendar", "display"],
   ["document", "display"],
@@ -29404,6 +29459,7 @@ async function runShow(kind, opts, io = defaultIO) {
     assertIdent("kind", kind);
     assertKnownKind(kind);
     const scenario = resolveScenario(kind, opts.scenario);
+    process.env.CANVAS_GRAPHICS = resolveGraphics(process.env, opts.graphics);
     const config = opts.configFile ? await Bun.file(opts.configFile).json() : undefined;
     process.stdout.write(`\x1B]0;canvas: ${kind}\x07`);
     await init_canvases();
@@ -29418,6 +29474,24 @@ async function runShow(kind, opts, io = defaultIO) {
   }
 }
 var SPAWN_READY_MS = 1e4;
+function buildShowArgv(kind, id, scenario, graphics, configFile) {
+  const argv = [
+    process.execPath,
+    "run",
+    import.meta.path,
+    "show",
+    kind,
+    "--id",
+    id,
+    "--scenario",
+    scenario,
+    "--graphics",
+    graphics
+  ];
+  if (configFile !== undefined)
+    argv.push("--config-file", configFile);
+  return argv;
+}
 async function runSpawn(kind, opts, io = defaultIO) {
   const spawnStartedAt = Date.now();
   try {
@@ -29425,17 +29499,7 @@ async function runSpawn(kind, opts, io = defaultIO) {
     assertIdent("kind", kind);
     assertKnownKind(kind);
     const scenario = resolveScenario(kind, opts.scenario);
-    const argv = [
-      process.execPath,
-      "run",
-      import.meta.path,
-      "show",
-      kind,
-      "--id",
-      id,
-      "--scenario",
-      scenario
-    ];
+    const argv = buildShowArgv(kind, id, scenario, resolveGraphics(process.env));
     if (opts.config) {
       try {
         JSON.parse(opts.config);
@@ -29464,7 +29528,7 @@ async function runSpawn(kind, opts, io = defaultIO) {
   }
 }
 program.name("claude-canvas").version("1.0.0");
-program.command("show <kind>").option("--id <id>").option("--scenario <name>").option("--config-file <path>").option("--offline", "render without opening a server (used by tests)").action((kind, opts) => runShow(kind, opts));
+program.command("show <kind>").option("--id <id>").option("--scenario <name>").option("--config-file <path>").option("--offline", "render without opening a server (used by tests)").option("--graphics <tier>", "image tier the controller detected for this terminal").action((kind, opts) => runShow(kind, opts));
 program.command("spawn <kind>").option("--id <id>").option("--scenario <name>").option("--config <json>").action((kind, opts) => runSpawn(kind, opts));
 program.command("wait <id>").option("--timeout <seconds>").action(async (id, opts) => {
   try {
@@ -29539,17 +29603,31 @@ program.command("scenarios").argument("[kind]").action((kind) => {
   }
 });
 program.command("env").action(() => {
+  let capabilities;
+  let capabilitiesError;
+  try {
+    capabilities = baseCapabilities(process.env);
+  } catch (e) {
+    capabilitiesError = e.message;
+  }
   try {
     const host = detectHost();
-    emit({ status: "ok", host: host.name, capabilities: host.capabilities(process.env) });
+    emit({ status: "ok", host: host.name, capabilities, capabilitiesError });
   } catch (e) {
-    emit({ status: "ok", host: null, message: e.message });
+    emit({
+      status: "ok",
+      host: null,
+      message: e.message,
+      capabilities,
+      capabilitiesError
+    });
   }
 });
 if (import.meta.main)
   program.parseAsync();
 export {
   KIND_DEFAULT_SCENARIO,
+  buildShowArgv,
   emit,
   listCanvases,
   resolveScenario,

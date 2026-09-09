@@ -11,7 +11,8 @@ import {
 } from "./runtime/client";
 import { awaitRecord, listRecords, type CanvasRecord } from "./runtime/registry";
 import { getScenario, listScenarios } from "./scenarios/registry";
-import { detectHost } from "./host";
+import { baseCapabilities, detectHost } from "./host";
+import { resolveGraphics } from "./host/graphics";
 
 type Writer = (s: string) => boolean;
 
@@ -121,6 +122,7 @@ interface ShowOpts {
   scenario?: string;
   configFile?: string;
   offline?: boolean;
+  graphics?: string;
 }
 
 export async function runShow(kind: string, opts: ShowOpts, io: ActionIO = defaultIO): Promise<void> {
@@ -129,6 +131,13 @@ export async function runShow(kind: string, opts: ShowOpts, io: ActionIO = defau
     assertIdent("kind", kind);
     assertKnownKind(kind);
     const scenario = resolveScenario(kind, opts.scenario);
+    // Written into this process's own environment, not threaded through as a
+    // prop, so that everything downstream -- baseCapabilities, the `ready`
+    // message's capabilities, and eventually the image renderer -- resolves
+    // the same tier with no further plumbing. `spawn` computes it in the
+    // user's shell, where the terminal is still identifiable; a canvas in a
+    // tmux pane sees only `TERM_PROGRAM=tmux` and could not work it out.
+    process.env.CANVAS_GRAPHICS = resolveGraphics(process.env, opts.graphics);
     const config = opts.configFile ? await Bun.file(opts.configFile).json() : undefined;
     process.stdout.write(`\x1b]0;canvas: ${kind}\x07`);
     const { renderCanvas } = await import("./canvases");
@@ -149,6 +158,47 @@ export async function runShow(kind: string, opts: ShowOpts, io: ActionIO = defau
 // this machine, and a cold Bun start on a loaded Windows box is the slow
 // case this has to tolerate without a false negative.
 const SPAWN_READY_MS = 10_000;
+
+/**
+ * Builds the argv for the `show` process a pane will run.
+ *
+ * Exported for the same reason resolveScenario and resolveUpdateConfig are:
+ * the propagation it performs is worth testing without a real terminal
+ * host, and it carries two things that have each broken once already.
+ */
+export function buildShowArgv(
+  kind: string,
+  id: string,
+  scenario: string,
+  graphics: string,
+  configFile?: string
+): string[] {
+  const argv = [
+    process.execPath,
+    "run",
+    // `import.meta.path`, not a hardcoded `cli.ts` next to it. The shipped
+    // plugin runs a bundle at dist/cli.js -- an installed plugin is a git
+    // clone with no node_modules, so nothing that imports ink at runtime
+    // can render -- and the old form built a path to a `cli.ts` that does
+    // not exist there. The pane opened and the canvas inside it died
+    // instantly. `import.meta.path` is whichever entry point is actually
+    // running, source or bundle.
+    import.meta.path,
+    "show",
+    kind,
+    "--id",
+    id,
+    "--scenario",
+    scenario,
+    // The controller runs in the user's shell, where TERM_PROGRAM still
+    // names the real terminal. Inside the pane it becomes `tmux`, so this
+    // is the only way the canvas can know what it is drawing to.
+    "--graphics",
+    graphics,
+  ];
+  if (configFile !== undefined) argv.push("--config-file", configFile);
+  return argv;
+}
 
 interface SpawnOpts {
   id?: string;
@@ -175,24 +225,7 @@ export async function runSpawn(kind: string, opts: SpawnOpts, io: ActionIO = def
     assertIdent("kind", kind);
     assertKnownKind(kind);
     const scenario = resolveScenario(kind, opts.scenario);
-    const argv = [
-      process.execPath,
-      "run",
-      // `import.meta.path`, not a hardcoded `cli.ts` next to it. The shipped
-      // plugin runs a bundle at dist/cli.js -- an installed plugin is a git
-      // clone with no node_modules, so nothing that imports ink at runtime
-      // can render -- and the old form built a path to a `cli.ts` that does
-      // not exist there. The pane opened and the canvas inside it died
-      // instantly. `import.meta.path` is whichever entry point is actually
-      // running, source or bundle.
-      import.meta.path,
-      "show",
-      kind,
-      "--id",
-      id,
-      "--scenario",
-      scenario,
-    ];
+    const argv = buildShowArgv(kind, id, scenario, resolveGraphics(process.env));
     if (opts.config) {
       // Validate before writing: a malformed --config must never reach
       // configPath(id), or spawn would report {"status":"spawned"} while
@@ -246,6 +279,7 @@ program
   .option("--scenario <name>")
   .option("--config-file <path>")
   .option("--offline", "render without opening a server (used by tests)")
+  .option("--graphics <tier>", "image tier the controller detected for this terminal")
   .action((kind: string, opts) => runShow(kind, opts));
 
 program
@@ -361,11 +395,31 @@ program
   });
 
 program.command("env").action(() => {
+  // Capabilities are reported whether or not a host is available. They
+  // describe the TERMINAL, not the pane host, and `env` is the command
+  // someone runs to find out why their images are painting as blocks --
+  // answering "no canvas host available" and nothing else made it useless
+  // for exactly that.
+  let capabilities: unknown;
+  let capabilitiesError: string | undefined;
+  try {
+    capabilities = baseCapabilities(process.env);
+  } catch (e) {
+    // resolveGraphics throws on a misspelled CANVAS_GRAPHICS, which is
+    // precisely the thing this command should surface rather than hide.
+    capabilitiesError = (e as Error).message;
+  }
   try {
     const host = detectHost();
-    emit({ status: "ok", host: host.name, capabilities: host.capabilities(process.env) });
+    emit({ status: "ok", host: host.name, capabilities, capabilitiesError });
   } catch (e) {
-    emit({ status: "ok", host: null, message: (e as Error).message });
+    emit({
+      status: "ok",
+      host: null,
+      message: (e as Error).message,
+      capabilities,
+      capabilitiesError,
+    });
   }
 });
 

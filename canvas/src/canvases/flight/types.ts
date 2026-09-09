@@ -97,20 +97,48 @@ const FLIGHT_TIME_OPTIONS: Intl.DateTimeFormatOptions = {
   hourCycle: "h23",
 };
 
+// Whether `timezone` is a value `Intl.DateTimeFormat` actually accepts for
+// its `timeZone` option -- a real IANA identifier (e.g.
+// "America/Los_Angeles"), or one of the handful of legacy fixed-offset
+// aliases it still recognizes (e.g. "UTC", "GMT", "EST"). Config authors
+// have shipped plain abbreviations like "PST"/"MST" here, which are NOT
+// valid IANA ids: constructing `Intl.DateTimeFormat` with one throws a
+// RangeError synchronously. If that escapes into a render, Ink shows its
+// raw error screen instead of the canvas. Both `formatTime` and
+// `formatTimezoneAbbreviation` below validate with this before ever
+// constructing a formatter with the caller-supplied string, so a bad
+// timezone can never crash the render -- it just falls back to a sane
+// default.
+function isValidTimeZone(timezone: string): boolean {
+  try {
+    // Constructing the formatter is enough to trigger validation; we don't
+    // need to actually format anything with it.
+    new Intl.DateTimeFormat("en-US", { timeZone: timezone });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 // Helper to format time from ISO string, in the reader's own local
 // timezone when no `timezone` is given (delegating to the shared formatter
 // so every canvas shows the same 24-hour local clock -- this used to
 // hardcode en-US 12-hour, which was both a different format from the
 // calendar and a locale forced on the reader), or in the GIVEN IANA
-// timezone when one is passed.
+// timezone when one is passed and valid.
 //
 // `timezone` used to be accepted and silently ignored: every time was
 // rendered in the VIEWER's local timezone regardless, while flight-info.tsx
 // printed the airport's timezone abbreviation right next to it -- a
 // confidently mislabeled time whenever the viewer wasn't in that timezone.
+//
+// An invalid timezone string (e.g. the abbreviation "PST" instead of the
+// IANA id "America/Los_Angeles") falls back to the viewer's own local time
+// rather than throwing -- matching the pre-timezone-fix behavior for that
+// case, just without crashing the render.
 export function formatTime(isoString: string, timezone?: string): string {
   const date = new Date(isoString);
-  if (!timezone) return formatDisplayTime(date);
+  if (!timezone || !isValidTimeZone(timezone)) return formatDisplayTime(date);
   return date.toLocaleTimeString(displayLocale(), { ...FLIGHT_TIME_OPTIONS, timeZone: timezone });
 }
 
@@ -118,7 +146,12 @@ export function formatTime(isoString: string, timezone?: string): string {
 // "PDT", "GMT+2") for a given IANA timezone, evaluated AT the instant in
 // question so it reflects whichever side of DST that instant actually
 // falls on -- unlike a fixed abbreviation stored in config, which can't.
+//
+// When `timezone` isn't a valid IANA id, this returns the raw string
+// unchanged (e.g. "PST" stays "PST") instead of throwing -- it's cosmetic
+// at that point, matching what formatTime already fell back to above.
 export function formatTimezoneAbbreviation(timezone: string, isoString: string): string {
+  if (!isValidTimeZone(timezone)) return timezone;
   const date = new Date(isoString);
   const parts = new Intl.DateTimeFormat(displayLocale(), {
     timeZone: timezone,

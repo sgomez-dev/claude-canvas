@@ -41,13 +41,13 @@ bun run ${CLAUDE_PLUGIN_ROOT}/dist/cli.js spawn flight --scenario booking --conf
         "code": "SFO",
         "name": "San Francisco International",
         "city": "San Francisco",
-        "timezone": "PST"
+        "timezone": "America/Los_Angeles"
       },
       "destination": {
         "code": "DEN",
         "name": "Denver International",
         "city": "Denver",
-        "timezone": "MST"
+        "timezone": "America/Denver"
       },
       "departureTime": "2026-01-08T12:55:00-08:00",
       "arrivalTime": "2026-01-08T16:37:00-07:00",
@@ -101,7 +101,7 @@ interface Airport {
   code: string;             // 3-letter code
   name: string;             // Full airport name
   city: string;
-  timezone: string;
+  timezone: string;         // IANA timezone id, e.g. "America/New_York" -- NOT an abbreviation like "PST"/"EST"
 }
 
 interface Seatmap {
@@ -151,8 +151,8 @@ bun run ${CLAUDE_PLUGIN_ROOT}/dist/cli.js spawn flight --scenario booking \
         "id": "ua123",
         "airline": "United Airlines",
         "flightNumber": "UA 123",
-        "origin": { "code": "SFO", "name": "San Francisco", "city": "SF", "timezone": "PST" },
-        "destination": { "code": "DEN", "name": "Denver", "city": "Denver", "timezone": "MST" },
+        "origin": { "code": "SFO", "name": "San Francisco", "city": "SF", "timezone": "America/Los_Angeles" },
+        "destination": { "code": "DEN", "name": "Denver", "city": "Denver", "timezone": "America/Denver" },
         "departureTime": "2026-01-08T12:55:00-08:00",
         "arrivalTime": "2026-01-08T16:37:00-07:00",
         "duration": 162,

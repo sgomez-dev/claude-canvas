@@ -103,9 +103,11 @@ ending in `{"status":"cancelled"}` is the successful end of its life, not a
 failure. An unknown `--scenario` is now rejected outright, naming the real
 ones, rather than silently rendering a different view.
 
-`get <id> <key>` reads state. Only `document` currently implements `onGet`
-and answers `selection`, `content`, and `config`; `flight` and `calendar`
-return `{"status":"ok","data":null}` for any key today.
+`get <id> <key>` reads state. `document` implements `onGet` and answers
+`selection`, `content`, and `config`; calendar's `display` scenario also
+implements it and answers `config`. Every other canvas kind and scenario
+(including `flight`, and calendar's own `meeting-picker` scenario) returns
+`{"status":"ok","data":null}` for any key today.
 `close <id>` asks the canvas to exit; `list` shows live canvases.
 
 ## Which canvas to reach for

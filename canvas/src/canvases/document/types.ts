@@ -27,12 +27,6 @@ export interface DocumentSelection {
   endColumn: number;         // Column in end line
 }
 
-// Internal: A styled segment within a line
-
-// Styling for segments
-
-// Internal: Rendered line with offset tracking
-
 // Mapping: terminal position to source offset
 export interface PositionMapping {
   terminalRow: number;       // 1-based terminal row
@@ -50,8 +44,3 @@ export interface SelectionState {
   endOffset: number | null;
 }
 
-// Markdown style definitions
-
-// Diff style colors
-
-// Selection style

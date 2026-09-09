@@ -61,9 +61,7 @@ bun run ${CLAUDE_PLUGIN_ROOT}/dist/cli.js spawn calendar --scenario meeting-pick
       ]
     }
   ],
-  "slotGranularity": 30,
-  "minDuration": 30,
-  "maxDuration": 120
+  "slotGranularity": 30
 }'
 ```
 
@@ -74,6 +72,8 @@ bun run ${CLAUDE_PLUGIN_ROOT}/dist/cli.js spawn calendar --scenario meeting-pick
 interface CalendarConfig {
   title?: string;
   events: CalendarEvent[];
+  startHour?: number;  // First hour of the day shown (default: 6)
+  endHour?: number;    // Last hour of the day shown (default: 22)
 }
 
 interface CalendarEvent {
@@ -88,10 +88,10 @@ interface CalendarEvent {
 ### Meeting Picker Config
 ```typescript
 interface MeetingPickerConfig {
-  calendars: Calendar[];
-  slotGranularity?: number;  // 15, 30, or 60 minutes (default: 30)
-  minDuration?: number;      // Minimum meeting duration in minutes
-  maxDuration?: number;      // Maximum meeting duration in minutes
+  calendars: Calendar[];     // Must be non-empty
+  slotGranularity?: number;  // 15, 30, or 60 minutes (default: 30) -- no other value is accepted
+  startHour?: number;        // First hour of the day shown (default: 6)
+  endHour?: number;          // Last hour of the day shown (default: 22)
 }
 
 interface Calendar {
@@ -104,15 +104,18 @@ interface Calendar {
 ## Controls
 
 **Display scenario:**
-- `←/→` or `h/l`: Navigate between days
-- `n` or `PageDown`: Next week
-- `p` or `PageUp`: Previous week
+- `←/→` or `n`/`p`: Change week (both do the same thing -- there is no
+  per-day navigation in this scenario)
+- `↑/↓`: Scroll the visible time window, when the day doesn't fit the pane
 - `t`: Jump to today
-- `q` or `Esc`: Quit
+- `q` or `Esc`: Quit (reports `{"status":"cancelled"}` via `wait`)
 
 **Meeting picker scenario:**
 - **Mouse click**: Select a free time slot
-- `←/→`: Navigate weeks
+- `↑/↓`: Move the cursor between time slots
+- `←/→`: Move the cursor between days (NOT weeks -- see `n`/`p` below)
+- `n`/`p`: Change week
+- `Enter` or `Space`: Pick the highlighted slot
 - `t`: Jump to today
 - `q` or `Esc`: Cancel selection
 
@@ -152,12 +155,14 @@ once the user picks a slot, `{"status":"cancelled"}` if they quit, or
 also be clicked; `Shift`+click or `Shift`+`Enter` skips the 3-second
 confirmation countdown.
 
-A day is 32 half-hour slots from 06:00 to 22:00, which is more than fits in
-a short pane. When it does not fit, the grid shows as many slots as it can
-and pages as the cursor crosses a boundary; the footer names the visible
-range (`11:30-17:00`). Every slot stays reachable, and a click maps to the
-slot actually under the pointer rather than to the same offset from the
-start of the day.
+A day is, by default, 32 half-hour slots from 06:00 to 22:00 (configurable
+via `startHour`/`endHour`), which is more than fits in a short pane. When it
+does not fit, the grid shows as many slots as it can and pages as the
+cursor crosses a boundary; the footer names the visible range
+(`11:30-17:00`). Every slot stays reachable, and a click maps to the slot
+actually under the pointer rather than to the same offset from the start of
+the day. The `display` scenario windows and pages the same way when its own
+day doesn't fit the pane, but only via `↑/↓` -- it has no mouse.
 
 ## Config errors
 
@@ -167,8 +172,14 @@ array is a config error, reported through `wait` as
 the read-only display, leaving a calendar the user could not pick from and
 a `wait` that answered `pending` 55 seconds later.
 
+A `slotGranularity` other than 15, 30, or 60 is also a config error, for
+the same reason: it used to reach the grid's slot-count math unchecked and
+produce fractional loop bounds.
+
 ## Reading the display scenario's config
 
 `get <id> config` returns the config a `display` calendar was given. That
 scenario also had no IPC server at all until 2026-09-08, so it could not be
-listed, read or closed.
+listed, read or closed. Quitting it with `q`/`Esc` reports
+`{"status":"cancelled"}` through `wait`, the same as every other view-only
+scenario in this project.

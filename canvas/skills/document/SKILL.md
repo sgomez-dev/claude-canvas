@@ -37,14 +37,13 @@ bun run ${CLAUDE_PLUGIN_ROOT}/dist/cli.js show document --scenario display --con
 Interactive document view with text selection. User can click and drag to select text, which is sent via IPC in real-time.
 
 - Renders markdown with syntax highlighting (headers, bold, italic, code, links, lists, blockquotes)
-- Diff highlighting: green background for additions, red for deletions
 - Click and drag to select text
 - Selection automatically sent via IPC
 
 ```bash
 bun run ${CLAUDE_PLUGIN_ROOT}/dist/cli.js spawn document --scenario edit --config '{
   "content": "# My Blog Post\n\nThis is the **introduction** to my post.\n\n## Section One\n\n- Point one\n- Point two",
-  "title": "Blog Post Draft",
+  "title": "Blog Post Draft"
 }'
 ```
 
@@ -67,12 +66,6 @@ interface DocumentConfig {
   content: string;        // Markdown content
   title?: string;         // Document title (shown in header)
   readOnly?: boolean;     // Disable selection (default: false for edit)
-}
-
-interface DocumentDiff {
-  startOffset: number;    // Character offset in content
-  endOffset: number;
-  type: "add" | "delete";
 }
 ```
 
@@ -117,7 +110,7 @@ bun run ${CLAUDE_PLUGIN_ROOT}/dist/cli.js show document --scenario display --con
 bun run ${CLAUDE_PLUGIN_ROOT}/dist/cli.js spawn document --scenario edit \
   --id doc-1 --config '{
     "content": "# My Document\n\nSelect some **text** here.",
-    "title": "Edit Mode",
+    "title": "Edit Mode"
   }'
 
 # Read the current selection on demand — this is pull-only, not push-based.

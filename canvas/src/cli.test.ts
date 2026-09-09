@@ -227,6 +227,16 @@ test("scenario shape is still validated before the registry is consulted", () =>
   expect(() => resolveScenario("calendar", "bad scenario!")).toThrow(/Invalid scenario/);
 });
 
+// resolveScenario's own precondition, not just its callers': both current
+// call sites (`runShow`/`runSpawn`) already call assertKnownKind first, but
+// resolveScenario didn't enforce that itself -- calling it directly with an
+// unknown kind (as this test does) used to fall through to a confusing
+// "Invalid scenario" error instead of naming the real problem.
+test("an unknown kind is rejected by name, not as a confusing scenario error", () => {
+  expect(() => resolveScenario("bogus-kind", undefined)).toThrow(/Unknown canvas kind: bogus-kind/);
+  expect(() => resolveScenario("bogus-kind", "display")).toThrow(/Unknown canvas kind: bogus-kind/);
+});
+
 test("spawn rejects an unknown scenario with exit 1, before ever calling the host", async () => {
   const { io, lines, exits } = captureIO();
   await runSpawn("calendar", { id: "cli-test-badscenario", scenario: "nope" }, io);

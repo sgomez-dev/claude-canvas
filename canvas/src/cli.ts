@@ -57,6 +57,15 @@ function assertKnownKind(kind: string): string {
 // every real (kind, scenario) pair, so this is the check it always should
 // have been backing.
 export function resolveScenario(kind: string, requested: string | undefined): string {
+  // Both current callers already call assertKnownKind first, which is the
+  // only thing that made the `!` below safe -- but that's a precondition
+  // resolveScenario itself never enforced, so calling it directly with a
+  // bad kind (as this file's own test suite does) fell through to
+  // `KIND_DEFAULT_SCENARIO.get(kind)` being undefined, and reported a
+  // confusing "Invalid scenario" instead of naming the actual problem: an
+  // unknown kind. Guarding it here makes the function safe regardless of
+  // caller discipline.
+  assertKnownKind(kind);
   const scenario = assertIdent("scenario", requested ?? KIND_DEFAULT_SCENARIO.get(kind)!);
   if (!getScenario(kind, scenario)) {
     throw new Error(

@@ -13,6 +13,7 @@ import { awaitRecord, isAlive, listRecords, readRecord, type CanvasRecord } from
 import { getScenario, listScenarios } from "./scenarios/registry";
 import { baseCapabilities, detectHost } from "./host";
 import { resolveGraphics } from "./host/graphics";
+import { systemProbe } from "./host/terminal-probe";
 import { version as PLUGIN_VERSION } from "../package.json";
 
 type Writer = (s: string) => boolean;
@@ -139,7 +140,7 @@ export async function runShow(kind: string, opts: ShowOpts, io: ActionIO = defau
     // the same tier with no further plumbing. `spawn` computes it in the
     // user's shell, where the terminal is still identifiable; a canvas in a
     // tmux pane sees only `TERM_PROGRAM=tmux` and could not work it out.
-    process.env.CANVAS_GRAPHICS = resolveGraphics(process.env, opts.graphics);
+    process.env.CANVAS_GRAPHICS = resolveGraphics(process.env, opts.graphics, systemProbe);
     const config = opts.configFile ? await Bun.file(opts.configFile).json() : undefined;
     process.stdout.write(`\x1b]0;canvas: ${kind}\x07`);
     const { renderCanvas } = await import("./canvases");
@@ -264,7 +265,7 @@ export async function runSpawn(kind: string, opts: SpawnOpts, io: ActionIO = def
       );
     }
 
-    const argv = buildShowArgv(kind, id, scenario, resolveGraphics(process.env));
+    const argv = buildShowArgv(kind, id, scenario, resolveGraphics(process.env, undefined, systemProbe));
     if (opts.config) {
       // Validate before writing: a malformed --config must never reach
       // configPath(id), or spawn would report {"status":"spawned"} while

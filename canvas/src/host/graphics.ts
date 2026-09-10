@@ -1,3 +1,5 @@
+import { outerTerminalEnv, type ProbeSource } from "./terminal-probe";
+
 /**
  * Which image protocol a terminal can render.
  *
@@ -122,12 +124,22 @@ export function detectGraphics(env: NodeJS.ProcessEnv): GraphicsTier {
  * 2. `passed` — what the controller detected and handed down. A canvas in a
  *    tmux pane cannot see the outer terminal, so this is the only real
  *    information it has.
- * 3. Environment detection — correct only when the canvas is NOT in a pane,
- *    which is `show` run directly.
+ * 3. A look at the process tree, when inside tmux and a probe was supplied.
+ *    The environment cannot be trusted there, and asking the terminal
+ *    directly can hang; the operating system knows the answer already.
+ * 4. Environment detection — correct when the canvas is NOT in a pane, which
+ *    is `show` run directly, and the fallback whenever the probe finds
+ *    nothing it recognises.
  */
 export function resolveGraphics(
   env: NodeJS.ProcessEnv,
-  passed?: string
+  passed?: string,
+  /**
+   * How to look up the terminal on the other side of tmux. Optional so the
+   * pure-environment behaviour stays available and testable; production
+   * passes `systemProbe`.
+   */
+  source?: ProbeSource
 ): GraphicsTier {
   const override = env.CANVAS_GRAPHICS;
   if (override !== undefined && override.length > 0) {
@@ -145,6 +157,17 @@ export function resolveGraphics(
       `Invalid --graphics: ${JSON.stringify(passed)}. ` +
         `Expected one of: ${GRAPHICS_TIERS.join(", ")}.`
     );
+  }
+  // 3. Inside tmux, look at the process tree instead of believing the
+  //    environment. A tmux server keeps the environment of whichever client
+  //    started it and never refreshes TERM_PROGRAM, so a server started from
+  //    Apple Terminal and attached from WezTerm reports Apple Terminal --
+  //    measured, with the Sixel-capable terminal on screen. The probe finds
+  //    the emulator above the client's tty; when it cannot, it returns null
+  //    and this falls through unchanged.
+  if (source !== undefined && env.TMUX !== undefined && env.TMUX.length > 0) {
+    const probed = outerTerminalEnv(source, env);
+    if (probed !== null) return detectGraphics(probed);
   }
   return detectGraphics(env);
 }

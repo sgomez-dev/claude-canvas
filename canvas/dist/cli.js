@@ -2550,6 +2550,99 @@ var init_socket_writer = __esm(() => {
   DEFAULT_MAX_QUEUED_BYTES = 32 * 1024 * 1024;
 });
 
+// canvas/src/host/terminal-probe.ts
+function outerTerminalEnv(source, env) {
+  let tty;
+  try {
+    tty = source.clientTty();
+  } catch {
+    return null;
+  }
+  if (tty === null || tty.length === 0)
+    return null;
+  let rows;
+  let seeds;
+  try {
+    rows = source.processes();
+    seeds = source.pidsOnTty(tty);
+  } catch {
+    return null;
+  }
+  if (rows.length === 0 || seeds.length === 0)
+    return null;
+  const parents = new Map;
+  for (const r of rows)
+    parents.set(r.pid, r);
+  for (const seed of seeds) {
+    let current = parents.get(seed);
+    for (let depth = 0;depth < MAX_DEPTH && current !== undefined; depth++) {
+      for (const terminal of TERMINALS) {
+        if (terminal.match.test(current.command)) {
+          return { ...terminal.env, TERM: env.TERM ?? "xterm-256color" };
+        }
+      }
+      if (current.ppid <= 1)
+        break;
+      const next = parents.get(current.ppid);
+      if (next === undefined || next.pid === current.pid)
+        break;
+      current = next;
+    }
+  }
+  return null;
+}
+function parseProcesses(stdout) {
+  const rows = [];
+  for (const line of stdout.split(`
+`)) {
+    const m = /^\s*(\d+)\s+(\d+)\s+(.*)$/.exec(line);
+    if (m === null)
+      continue;
+    const command = m[3].trim();
+    if (command.length === 0)
+      continue;
+    rows.push({ pid: Number(m[1]), ppid: Number(m[2]), command });
+  }
+  return rows;
+}
+function parsePids(stdout) {
+  return stdout.split(`
+`).map((l) => Number(l.trim())).filter((n) => Number.isInteger(n) && n > 0);
+}
+function run(cmd) {
+  const r = Bun.spawnSync(cmd, { stdout: "pipe", stderr: "ignore" });
+  if (r.exitCode !== 0)
+    return "";
+  return new TextDecoder().decode(r.stdout);
+}
+var TERMINALS, MAX_DEPTH = 24, systemProbe;
+var init_terminal_probe = __esm(() => {
+  TERMINALS = [
+    { match: /(^|\/)wezterm(-gui)?$/i, env: { TERM_PROGRAM: "WezTerm" } },
+    { match: /(^|\/)kitty$/i, env: { TERM: "xterm-kitty" } },
+    { match: /(^|\/)ghostty$/i, env: { TERM_PROGRAM: "ghostty" } },
+    { match: /(^|\/)iterm2?$/i, env: { TERM_PROGRAM: "iTerm.app" } },
+    { match: /(^|\/)foot$/i, env: { TERM: "foot" } },
+    { match: /(^|\/)alacritty$/i, env: { TERM_PROGRAM: "Alacritty" } },
+    { match: /(^|\/)Terminal$/, env: { TERM_PROGRAM: "Apple_Terminal" } },
+    { match: /(^|\/)WindowsTerminal(\.exe)?$/i, env: { WT_SESSION: "probed" } }
+  ];
+  systemProbe = {
+    clientTty() {
+      const pane = process.env.TMUX_PANE;
+      const argv = pane ? ["tmux", "display-message", "-p", "-t", pane, "#{client_tty}"] : ["tmux", "display-message", "-p", "#{client_tty}"];
+      const out = run(argv).trim();
+      return out.length > 0 ? out : null;
+    },
+    processes() {
+      return parseProcesses(run(["ps", "-axo", "pid=,ppid=,comm="]));
+    },
+    pidsOnTty(tty) {
+      return parsePids(run(["ps", "-t", tty.replace(/^\/dev\//, ""), "-o", "pid="]));
+    }
+  };
+});
+
 // canvas/src/host/graphics.ts
 function isGraphicsTier(value) {
   return typeof value === "string" && GRAPHICS_TIERS.includes(value);
@@ -2573,7 +2666,7 @@ function detectGraphics(env) {
     return "sixel";
   return "quadrants";
 }
-function resolveGraphics(env, passed) {
+function resolveGraphics(env, passed, source) {
   const override = env.CANVAS_GRAPHICS;
   if (override !== undefined && override.length > 0) {
     if (isGraphicsTier(override))
@@ -2585,10 +2678,16 @@ function resolveGraphics(env, passed) {
       return passed;
     throw new Error(`Invalid --graphics: ${JSON.stringify(passed)}. ` + `Expected one of: ${GRAPHICS_TIERS.join(", ")}.`);
   }
+  if (source !== undefined && env.TMUX !== undefined && env.TMUX.length > 0) {
+    const probed = outerTerminalEnv(source, env);
+    if (probed !== null)
+      return detectGraphics(probed);
+  }
   return detectGraphics(env);
 }
 var GRAPHICS_TIERS;
 var init_graphics = __esm(() => {
+  init_terminal_probe();
   GRAPHICS_TIERS = [
     "kitty",
     "iterm2",
@@ -2602,7 +2701,7 @@ var init_graphics = __esm(() => {
 // canvas/src/host/types.ts
 function baseCapabilities(env) {
   return {
-    graphics: resolveGraphics(env),
+    graphics: resolveGraphics(env, undefined, systemProbe),
     trueColor: env.COLORTERM === "truecolor" || env.COLORTERM === "24bit",
     mouse: (env.TERM ?? "").length > 0 || process.platform === "win32",
     columns: process.stdout.columns ?? 80,
@@ -2611,6 +2710,7 @@ function baseCapabilities(env) {
 }
 var init_types = __esm(() => {
   init_graphics();
+  init_terminal_probe();
 });
 
 // canvas/src/host/tmux.ts
@@ -24586,7 +24686,21 @@ var init_types3 = __esm(() => {
   VALID_SLOT_GRANULARITIES = [15, 30, 60];
 });
 
-// canvas/src/canvases/calendar.tsx
+// canvas/src/canvases/calendar/colors.ts
+var INK_COLORS, TEXT_COLORS2;
+var init_colors = __esm(() => {
+  INK_COLORS = ["yellow", "green", "blue", "magenta", "red", "cyan"];
+  TEXT_COLORS2 = {
+    yellow: "black",
+    cyan: "black",
+    green: "white",
+    blue: "white",
+    magenta: "white",
+    red: "white"
+  };
+});
+
+// canvas/src/canvases/calendar/dates.ts
 function isAllDayEvent(event) {
   if (event.allDay)
     return true;
@@ -24653,56 +24767,8 @@ function getAmPm2(hour) {
 function isSameDay2(d1, d2) {
   return d1.getFullYear() === d2.getFullYear() && d1.getMonth() === d2.getMonth() && d1.getDate() === d2.getDate();
 }
-function getDemoEvents() {
-  const today = new Date;
-  const monday = new Date(today);
-  const dayOfWeek = today.getDay();
-  monday.setDate(today.getDate() - dayOfWeek + (dayOfWeek === 0 ? -6 : 1));
-  return [
-    {
-      id: "1",
-      title: "Team Standup",
-      startTime: new Date(monday.getFullYear(), monday.getMonth(), monday.getDate(), 9, 0),
-      endTime: new Date(monday.getFullYear(), monday.getMonth(), monday.getDate(), 9, 30),
-      color: INK_COLORS[0]
-    },
-    {
-      id: "2",
-      title: "Design Review",
-      startTime: new Date(monday.getFullYear(), monday.getMonth(), monday.getDate() + 1, 14, 0),
-      endTime: new Date(monday.getFullYear(), monday.getMonth(), monday.getDate() + 1, 15, 30),
-      color: INK_COLORS[1]
-    },
-    {
-      id: "3",
-      title: "Lunch with Sarah",
-      startTime: new Date(monday.getFullYear(), monday.getMonth(), monday.getDate() + 2, 12, 0),
-      endTime: new Date(monday.getFullYear(), monday.getMonth(), monday.getDate() + 2, 13, 0),
-      color: INK_COLORS[2]
-    },
-    {
-      id: "4",
-      title: "Product Planning",
-      startTime: new Date(monday.getFullYear(), monday.getMonth(), monday.getDate() + 3, 10, 0),
-      endTime: new Date(monday.getFullYear(), monday.getMonth(), monday.getDate() + 3, 11, 30),
-      color: INK_COLORS[3]
-    },
-    {
-      id: "5",
-      title: "1:1 with Manager",
-      startTime: new Date(monday.getFullYear(), monday.getMonth(), monday.getDate() + 4, 15, 0),
-      endTime: new Date(monday.getFullYear(), monday.getMonth(), monday.getDate() + 4, 16, 0),
-      color: INK_COLORS[4]
-    },
-    {
-      id: "6",
-      title: "Sprint Retro",
-      startTime: new Date(monday.getFullYear(), monday.getMonth(), monday.getDate() + 4, 11, 0),
-      endTime: new Date(monday.getFullYear(), monday.getMonth(), monday.getDate() + 4, 12, 0),
-      color: INK_COLORS[5]
-    }
-  ];
-}
+
+// canvas/src/canvases/calendar/week-grid.tsx
 function DayColumn({
   date,
   events,
@@ -24863,76 +24929,70 @@ function AllDayEventsRow({ weekDays, events, columnWidth, timeColumnWidth }) {
     ]
   }, undefined, true, undefined, this);
 }
-function Calendar({ id, config, enabled = false, scenario = "display" }) {
-  if (scenario === "meeting-picker") {
-    if (!config || !isMeetingPickerConfig(config)) {
-      const message = !config ? "calendar config: scenario 'meeting-picker' needs a non-empty 'calendars' array" : meetingPickerConfigError(config) ?? "calendar config: invalid 'meeting-picker' config";
-      return /* @__PURE__ */ jsx_dev_runtime2.jsxDEV(CalendarConfigError, {
-        id,
-        scenario,
-        enabled,
-        message
-      }, undefined, false, undefined, this);
+var jsx_dev_runtime2;
+var init_week_grid = __esm(async () => {
+  init_colors();
+  await init_build2();
+  jsx_dev_runtime2 = __toESM(require_jsx_dev_runtime(), 1);
+});
+
+// canvas/src/canvases/calendar/demo-events.ts
+function getDemoEvents() {
+  const today = new Date;
+  const monday = new Date(today);
+  const dayOfWeek = today.getDay();
+  monday.setDate(today.getDate() - dayOfWeek + (dayOfWeek === 0 ? -6 : 1));
+  return [
+    {
+      id: "1",
+      title: "Team Standup",
+      startTime: new Date(monday.getFullYear(), monday.getMonth(), monday.getDate(), 9, 0),
+      endTime: new Date(monday.getFullYear(), monday.getMonth(), monday.getDate(), 9, 30),
+      color: INK_COLORS[0]
+    },
+    {
+      id: "2",
+      title: "Design Review",
+      startTime: new Date(monday.getFullYear(), monday.getMonth(), monday.getDate() + 1, 14, 0),
+      endTime: new Date(monday.getFullYear(), monday.getMonth(), monday.getDate() + 1, 15, 30),
+      color: INK_COLORS[1]
+    },
+    {
+      id: "3",
+      title: "Lunch with Sarah",
+      startTime: new Date(monday.getFullYear(), monday.getMonth(), monday.getDate() + 2, 12, 0),
+      endTime: new Date(monday.getFullYear(), monday.getMonth(), monday.getDate() + 2, 13, 0),
+      color: INK_COLORS[2]
+    },
+    {
+      id: "4",
+      title: "Product Planning",
+      startTime: new Date(monday.getFullYear(), monday.getMonth(), monday.getDate() + 3, 10, 0),
+      endTime: new Date(monday.getFullYear(), monday.getMonth(), monday.getDate() + 3, 11, 30),
+      color: INK_COLORS[3]
+    },
+    {
+      id: "5",
+      title: "1:1 with Manager",
+      startTime: new Date(monday.getFullYear(), monday.getMonth(), monday.getDate() + 4, 15, 0),
+      endTime: new Date(monday.getFullYear(), monday.getMonth(), monday.getDate() + 4, 16, 0),
+      color: INK_COLORS[4]
+    },
+    {
+      id: "6",
+      title: "Sprint Retro",
+      startTime: new Date(monday.getFullYear(), monday.getMonth(), monday.getDate() + 4, 11, 0),
+      endTime: new Date(monday.getFullYear(), monday.getMonth(), monday.getDate() + 4, 12, 0),
+      color: INK_COLORS[5]
     }
-    const pickerConfig = {
-      calendars: config.calendars,
-      slotGranularity: config.slotGranularity || 30,
-      title: config.title,
-      startHour: config.startHour ?? DEFAULT_START_HOUR,
-      endHour: config.endHour ?? DEFAULT_END_HOUR
-    };
-    return /* @__PURE__ */ jsx_dev_runtime2.jsxDEV(MeetingPickerView, {
-      id,
-      config: pickerConfig,
-      enabled
-    }, undefined, false, undefined, this);
-  }
-  const displayError = config ? displayConfigError(config) : null;
-  if (displayError) {
-    return /* @__PURE__ */ jsx_dev_runtime2.jsxDEV(CalendarConfigError, {
-      id,
-      scenario,
-      enabled,
-      message: displayError
-    }, undefined, false, undefined, this);
-  }
-  return /* @__PURE__ */ jsx_dev_runtime2.jsxDEV(CalendarDisplay, {
-    id,
-    config,
-    enabled,
-    scenario
-  }, undefined, false, undefined, this);
+  ];
 }
-function CalendarConfigError({ id, scenario, enabled, message }) {
-  const ipc = useCanvasServer({ id, kind: "calendar", scenario, enabled, onClose: () => {} });
-  const sentRef = import_react32.useRef(false);
-  import_react32.useEffect(() => {
-    if (ipc.isConnected && !sentRef.current) {
-      sentRef.current = true;
-      ipc.sendError(message);
-    }
-  }, [ipc.isConnected, ipc.sendError, message]);
-  return /* @__PURE__ */ jsx_dev_runtime2.jsxDEV(Box_default, {
-    flexDirection: "column",
-    borderStyle: "round",
-    borderColor: "red",
-    padding: 1,
-    children: /* @__PURE__ */ jsx_dev_runtime2.jsxDEV(Text, {
-      color: "red",
-      children: message
-    }, undefined, false, undefined, this)
-  }, undefined, false, undefined, this);
-}
-function CalendarDisplay({ id, config, enabled, scenario }) {
-  const ipc = useCanvasServer({
-    id,
-    kind: "calendar",
-    scenario,
-    enabled,
-    onClose: () => {},
-    onGet: (key) => key === "config" ? config ?? null : null
-  });
-  const { exit } = use_app_default();
+var init_demo_events = __esm(() => {
+  init_colors();
+});
+
+// canvas/src/canvases/calendar/display-view.tsx
+function CalendarDisplayView({ config, focused = true }) {
   const { stdout } = use_stdout_default();
   const [currentDate, setCurrentDate] = import_react32.useState(new Date);
   const [currentTime, setCurrentTime] = import_react32.useState(new Date);
@@ -24986,10 +25046,7 @@ function CalendarDisplay({ id, config, enabled, scenario }) {
   const extraRows = availableHeight - baseSlotHeight * visibleSlotCount;
   const slotHeights = Array.from({ length: visibleSlotCount }, (_, i) => baseSlotHeight + (i < extraRows ? 1 : 0));
   use_input_default((input, key) => {
-    if (input === "q" || key.escape) {
-      ipc.sendCancelled("User quit");
-      exit();
-    } else if (input === "n" || key.rightArrow) {
+    if (input === "n" || key.rightArrow) {
       setCurrentDate((d) => {
         const next = new Date(d);
         next.setDate(d.getDate() + 7);
@@ -25008,7 +25065,7 @@ function CalendarDisplay({ id, config, enabled, scenario }) {
     } else if (key.downArrow) {
       setTimeScroll((s) => Math.min(maxTimeScroll, Math.max(0, s) + 1));
     }
-  });
+  }, { isActive: focused });
   const currentHour = currentTime.getHours();
   const currentMinute = currentTime.getMinutes();
   const currentTimeDecimal = currentHour + currentMinute / 60;
@@ -25030,23 +25087,23 @@ function CalendarDisplay({ id, config, enabled, scenario }) {
         const hour12 = currentHour === 0 ? 12 : currentHour > 12 ? currentHour - 12 : currentHour;
         const ampm = currentHour < 12 ? "a" : "p";
         const timeStr = `${hour12}:${currentMinute.toString().padStart(2, "0")}${ampm}`;
-        lines.push(/* @__PURE__ */ jsx_dev_runtime2.jsxDEV(Text, {
+        lines.push(/* @__PURE__ */ jsx_dev_runtime3.jsxDEV(Text, {
           color: "red",
           bold: true,
           children: timeStr.padStart(timeColumnWidth - 1)
         }, line, false, undefined, this));
       } else if (half === 0 && line === 0) {
-        lines.push(/* @__PURE__ */ jsx_dev_runtime2.jsxDEV(Text, {
+        lines.push(/* @__PURE__ */ jsx_dev_runtime3.jsxDEV(Text, {
           color: "gray",
           children: `${formatHour2(hour)}${getAmPm2(hour)}`.padStart(timeColumnWidth - 1)
         }, line, false, undefined, this));
       } else {
-        lines.push(/* @__PURE__ */ jsx_dev_runtime2.jsxDEV(Text, {
+        lines.push(/* @__PURE__ */ jsx_dev_runtime3.jsxDEV(Text, {
           children: " "
         }, line, false, undefined, this));
       }
     }
-    timeSlots.push(/* @__PURE__ */ jsx_dev_runtime2.jsxDEV(Box_default, {
+    timeSlots.push(/* @__PURE__ */ jsx_dev_runtime3.jsxDEV(Box_default, {
       flexDirection: "column",
       height,
       width: timeColumnWidth,
@@ -25061,41 +25118,41 @@ function CalendarDisplay({ id, config, enabled, scenario }) {
     d.setHours(hour, minute, 0, 0);
     return d;
   };
-  return /* @__PURE__ */ jsx_dev_runtime2.jsxDEV(Box_default, {
+  return /* @__PURE__ */ jsx_dev_runtime3.jsxDEV(Box_default, {
     flexDirection: "column",
     width: termWidth,
     height: termHeight,
     paddingX: 1,
     children: [
-      /* @__PURE__ */ jsx_dev_runtime2.jsxDEV(Box_default, {
+      /* @__PURE__ */ jsx_dev_runtime3.jsxDEV(Box_default, {
         marginBottom: 1,
-        children: /* @__PURE__ */ jsx_dev_runtime2.jsxDEV(Text, {
+        children: /* @__PURE__ */ jsx_dev_runtime3.jsxDEV(Text, {
           bold: true,
           color: "white",
           children: formatMonthYear2(weekDays[0])
         }, undefined, false, undefined, this)
       }, undefined, false, undefined, this),
-      /* @__PURE__ */ jsx_dev_runtime2.jsxDEV(DayHeadersRow, {
+      /* @__PURE__ */ jsx_dev_runtime3.jsxDEV(DayHeadersRow, {
         weekDays,
         today,
         columnWidth,
         timeColumnWidth
       }, undefined, false, undefined, this),
-      hasAllDayEvents && /* @__PURE__ */ jsx_dev_runtime2.jsxDEV(AllDayEventsRow, {
+      hasAllDayEvents && /* @__PURE__ */ jsx_dev_runtime3.jsxDEV(AllDayEventsRow, {
         weekDays,
         events,
         columnWidth,
         timeColumnWidth
       }, undefined, false, undefined, this),
-      /* @__PURE__ */ jsx_dev_runtime2.jsxDEV(Box_default, {
+      /* @__PURE__ */ jsx_dev_runtime3.jsxDEV(Box_default, {
         flexGrow: 1,
         children: [
-          /* @__PURE__ */ jsx_dev_runtime2.jsxDEV(Box_default, {
+          /* @__PURE__ */ jsx_dev_runtime3.jsxDEV(Box_default, {
             flexDirection: "column",
             width: timeColumnWidth,
             children: timeSlots
           }, undefined, false, undefined, this),
-          weekDays.map((day, i) => /* @__PURE__ */ jsx_dev_runtime2.jsxDEV(DayColumn, {
+          weekDays.map((day, i) => /* @__PURE__ */ jsx_dev_runtime3.jsxDEV(DayColumn, {
             date: day,
             events,
             columnWidth,
@@ -25108,8 +25165,8 @@ function CalendarDisplay({ id, config, enabled, scenario }) {
           }, i, false, undefined, this))
         ]
       }, undefined, true, undefined, this),
-      /* @__PURE__ */ jsx_dev_runtime2.jsxDEV(Box_default, {
-        children: /* @__PURE__ */ jsx_dev_runtime2.jsxDEV(Text, {
+      /* @__PURE__ */ jsx_dev_runtime3.jsxDEV(Box_default, {
+        children: /* @__PURE__ */ jsx_dev_runtime3.jsxDEV(Text, {
           color: "gray",
           children: [
             totalSlots > visibleSlotCount ? `${formatTime(slotIndexToTime(windowStart))}-${formatTime(slotIndexToTime(windowStart + visibleSlotCount))}  ` : "",
@@ -25120,26 +25177,111 @@ function CalendarDisplay({ id, config, enabled, scenario }) {
     ]
   }, undefined, true, undefined, this);
 }
-var import_react32, jsx_dev_runtime2, START_HOUR = 6, END_HOUR = 22, INK_COLORS, TEXT_COLORS2;
+var import_react32, jsx_dev_runtime3, START_HOUR = 6, END_HOUR = 22;
+var init_display_view = __esm(async () => {
+  init_format();
+  init_demo_events();
+  await __promiseAll([
+    init_build2(),
+    init_week_grid()
+  ]);
+  import_react32 = __toESM(require_react(), 1);
+  jsx_dev_runtime3 = __toESM(require_jsx_dev_runtime(), 1);
+});
+
+// canvas/src/canvases/calendar.tsx
+function Calendar({ id, config, enabled = false, scenario = "display" }) {
+  if (scenario === "meeting-picker") {
+    if (!config || !isMeetingPickerConfig(config)) {
+      const message = !config ? "calendar config: scenario 'meeting-picker' needs a non-empty 'calendars' array" : meetingPickerConfigError(config) ?? "calendar config: invalid 'meeting-picker' config";
+      return /* @__PURE__ */ jsx_dev_runtime4.jsxDEV(CalendarConfigError, {
+        id,
+        scenario,
+        enabled,
+        message
+      }, undefined, false, undefined, this);
+    }
+    const pickerConfig = {
+      calendars: config.calendars,
+      slotGranularity: config.slotGranularity || 30,
+      title: config.title,
+      startHour: config.startHour ?? DEFAULT_START_HOUR,
+      endHour: config.endHour ?? DEFAULT_END_HOUR
+    };
+    return /* @__PURE__ */ jsx_dev_runtime4.jsxDEV(MeetingPickerView, {
+      id,
+      config: pickerConfig,
+      enabled
+    }, undefined, false, undefined, this);
+  }
+  const displayError = config ? displayConfigError(config) : null;
+  if (displayError) {
+    return /* @__PURE__ */ jsx_dev_runtime4.jsxDEV(CalendarConfigError, {
+      id,
+      scenario,
+      enabled,
+      message: displayError
+    }, undefined, false, undefined, this);
+  }
+  return /* @__PURE__ */ jsx_dev_runtime4.jsxDEV(CalendarDisplay, {
+    id,
+    config,
+    enabled,
+    scenario
+  }, undefined, false, undefined, this);
+}
+function CalendarConfigError({ id, scenario, enabled, message }) {
+  const ipc = useCanvasServer({ id, kind: "calendar", scenario, enabled, onClose: () => {} });
+  const sentRef = import_react33.useRef(false);
+  import_react33.useEffect(() => {
+    if (ipc.isConnected && !sentRef.current) {
+      sentRef.current = true;
+      ipc.sendError(message);
+    }
+  }, [ipc.isConnected, ipc.sendError, message]);
+  return /* @__PURE__ */ jsx_dev_runtime4.jsxDEV(Box_default, {
+    flexDirection: "column",
+    borderStyle: "round",
+    borderColor: "red",
+    padding: 1,
+    children: /* @__PURE__ */ jsx_dev_runtime4.jsxDEV(Text, {
+      color: "red",
+      children: message
+    }, undefined, false, undefined, this)
+  }, undefined, false, undefined, this);
+}
+function CalendarDisplay({ id, config, enabled, scenario }) {
+  const ipc = useCanvasServer({
+    id,
+    kind: "calendar",
+    scenario,
+    enabled,
+    onClose: () => {},
+    onGet: (key) => key === "config" ? config ?? null : null
+  });
+  const { exit } = use_app_default();
+  use_input_default((input, key) => {
+    if (input !== "q" && !key.escape)
+      return;
+    ipc.sendCancelled("User quit");
+    exit();
+  });
+  return /* @__PURE__ */ jsx_dev_runtime4.jsxDEV(CalendarDisplayView, {
+    config,
+    focused: true
+  }, undefined, false, undefined, this);
+}
+var import_react33, jsx_dev_runtime4;
 var init_calendar = __esm(async () => {
   init_types3();
-  init_format();
   await __promiseAll([
     init_build2(),
     init_meeting_picker_view(),
-    init_use_canvas_server()
+    init_use_canvas_server(),
+    init_display_view()
   ]);
-  import_react32 = __toESM(require_react(), 1);
-  jsx_dev_runtime2 = __toESM(require_jsx_dev_runtime(), 1);
-  INK_COLORS = ["yellow", "green", "blue", "magenta", "red", "cyan"];
-  TEXT_COLORS2 = {
-    yellow: "black",
-    cyan: "black",
-    green: "white",
-    blue: "white",
-    magenta: "white",
-    red: "white"
-  };
+  import_react33 = __toESM(require_react(), 1);
+  jsx_dev_runtime4 = __toESM(require_jsx_dev_runtime(), 1);
 });
 
 // canvas/src/canvases/document/components/raw-markdown-renderer.tsx
@@ -25269,7 +25411,7 @@ function RawMarkdownRenderer({
     offset += line.length + 1;
   }
   let inCodeBlock = false;
-  return /* @__PURE__ */ jsx_dev_runtime3.jsxDEV(Box_default, {
+  return /* @__PURE__ */ jsx_dev_runtime5.jsxDEV(Box_default, {
     flexDirection: "column",
     children: visibleLines.map((line, idx) => {
       const absoluteLineNumber = scrollOffset + idx;
@@ -25288,12 +25430,12 @@ function RawMarkdownRenderer({
         }
       }
       if (inCodeBlock && !line.startsWith("```")) {
-        return /* @__PURE__ */ jsx_dev_runtime3.jsxDEV(Box_default, {
+        return /* @__PURE__ */ jsx_dev_runtime5.jsxDEV(Box_default, {
           children: renderLineWithCursorAndSelection(line, hasCursor ? cursorCol : -1, lineSelStart, lineSelEnd, { color: SYNTAX_COLORS.codeBlock })
         }, absoluteLineNumber, false, undefined, this);
       }
       const segments = highlightLine(line);
-      return /* @__PURE__ */ jsx_dev_runtime3.jsxDEV(Box_default, {
+      return /* @__PURE__ */ jsx_dev_runtime5.jsxDEV(Box_default, {
         children: renderSegmentsWithCursorAndSelection(segments, line, hasCursor ? cursorCol : -1, lineSelStart, lineSelEnd)
       }, absoluteLineNumber, false, undefined, this);
     })
@@ -25303,7 +25445,7 @@ function renderLineWithCursorAndSelection(line, cursorCol, selStart, selEnd, sty
   const hasSelection = selStart >= 0 && selEnd > selStart;
   const hasCursor = cursorCol >= 0;
   if (!hasSelection && !hasCursor) {
-    return /* @__PURE__ */ jsx_dev_runtime3.jsxDEV(Text, {
+    return /* @__PURE__ */ jsx_dev_runtime5.jsxDEV(Text, {
       color: style.color,
       children: line || " "
     }, undefined, false, undefined, this);
@@ -25317,27 +25459,27 @@ function renderLineWithCursorAndSelection(line, cursorCol, selStart, selEnd, sty
     const isSelected = hasSelection && i >= selStart && i < selEnd;
     const isCursor = hasCursor && i === cursorCol;
     if (isCursor) {
-      result.push(/* @__PURE__ */ jsx_dev_runtime3.jsxDEV(Text, {
+      result.push(/* @__PURE__ */ jsx_dev_runtime5.jsxDEV(Text, {
         backgroundColor: "white",
         color: "black",
         children: char
       }, i, false, undefined, this));
     } else if (isSelected) {
-      result.push(/* @__PURE__ */ jsx_dev_runtime3.jsxDEV(Text, {
+      result.push(/* @__PURE__ */ jsx_dev_runtime5.jsxDEV(Text, {
         backgroundColor: "blue",
         color: "white",
         children: char
       }, i, false, undefined, this));
     } else {
-      result.push(/* @__PURE__ */ jsx_dev_runtime3.jsxDEV(Text, {
+      result.push(/* @__PURE__ */ jsx_dev_runtime5.jsxDEV(Text, {
         color: style.color,
         children: char
       }, i, false, undefined, this));
     }
   }
-  return result.length > 0 ? /* @__PURE__ */ jsx_dev_runtime3.jsxDEV(jsx_dev_runtime3.Fragment, {
+  return result.length > 0 ? /* @__PURE__ */ jsx_dev_runtime5.jsxDEV(jsx_dev_runtime5.Fragment, {
     children: result
-  }, undefined, false, undefined, this) : /* @__PURE__ */ jsx_dev_runtime3.jsxDEV(Text, {
+  }, undefined, false, undefined, this) : /* @__PURE__ */ jsx_dev_runtime5.jsxDEV(Text, {
     children: " "
   }, undefined, false, undefined, this);
 }
@@ -25346,18 +25488,18 @@ function renderSegmentsWithCursorAndSelection(segments, originalLine, cursorCol,
   const hasCursor = cursorCol >= 0;
   if (segments.length === 0) {
     if (hasCursor && cursorCol >= 0) {
-      return /* @__PURE__ */ jsx_dev_runtime3.jsxDEV(Text, {
+      return /* @__PURE__ */ jsx_dev_runtime5.jsxDEV(Text, {
         backgroundColor: "white",
         color: "black",
         children: " "
       }, undefined, false, undefined, this);
     }
-    return /* @__PURE__ */ jsx_dev_runtime3.jsxDEV(Text, {
+    return /* @__PURE__ */ jsx_dev_runtime5.jsxDEV(Text, {
       children: " "
     }, undefined, false, undefined, this);
   }
   if (!hasSelection && !hasCursor) {
-    return segments.map((seg, segIdx) => /* @__PURE__ */ jsx_dev_runtime3.jsxDEV(Text, {
+    return segments.map((seg, segIdx) => /* @__PURE__ */ jsx_dev_runtime5.jsxDEV(Text, {
       color: seg.color,
       bold: seg.bold,
       italic: seg.italic,
@@ -25375,19 +25517,19 @@ function renderSegmentsWithCursorAndSelection(segments, originalLine, cursorCol,
       const isSelected = hasSelection && globalIdx >= selStart && globalIdx < selEnd;
       const isCursor = hasCursor && globalIdx === cursorCol;
       if (isCursor) {
-        result.push(/* @__PURE__ */ jsx_dev_runtime3.jsxDEV(Text, {
+        result.push(/* @__PURE__ */ jsx_dev_runtime5.jsxDEV(Text, {
           backgroundColor: "white",
           color: "black",
           children: char
         }, `${segIdx}-${i}`, false, undefined, this));
       } else if (isSelected) {
-        result.push(/* @__PURE__ */ jsx_dev_runtime3.jsxDEV(Text, {
+        result.push(/* @__PURE__ */ jsx_dev_runtime5.jsxDEV(Text, {
           backgroundColor: "blue",
           color: "white",
           children: char
         }, `${segIdx}-${i}`, false, undefined, this));
       } else {
-        result.push(/* @__PURE__ */ jsx_dev_runtime3.jsxDEV(Text, {
+        result.push(/* @__PURE__ */ jsx_dev_runtime5.jsxDEV(Text, {
           color: seg.color,
           bold: seg.bold,
           italic: seg.italic,
@@ -25399,7 +25541,7 @@ function renderSegmentsWithCursorAndSelection(segments, originalLine, cursorCol,
     charIndex += seg.text.length;
   }
   if (hasCursor && cursorCol >= charIndex) {
-    result.push(/* @__PURE__ */ jsx_dev_runtime3.jsxDEV(Text, {
+    result.push(/* @__PURE__ */ jsx_dev_runtime5.jsxDEV(Text, {
       backgroundColor: "white",
       color: "black",
       children: " "
@@ -25407,10 +25549,10 @@ function renderSegmentsWithCursorAndSelection(segments, originalLine, cursorCol,
   }
   return result;
 }
-var jsx_dev_runtime3, SYNTAX_COLORS;
+var jsx_dev_runtime5, SYNTAX_COLORS;
 var init_raw_markdown_renderer = __esm(async () => {
   await init_build2();
-  jsx_dev_runtime3 = __toESM(require_jsx_dev_runtime(), 1);
+  jsx_dev_runtime5 = __toESM(require_jsx_dev_runtime(), 1);
   SYNTAX_COLORS = {
     header: "cyan",
     bold: "yellow",
@@ -25432,18 +25574,18 @@ function EmailHeader({ from, to, cc, bcc, subject, width }) {
     const displayValue = Array.isArray(value) ? value.join(", ") : value;
     if (!displayValue)
       return null;
-    return /* @__PURE__ */ jsx_dev_runtime4.jsxDEV(Box_default, {
+    return /* @__PURE__ */ jsx_dev_runtime6.jsxDEV(Box_default, {
       children: [
-        /* @__PURE__ */ jsx_dev_runtime4.jsxDEV(Box_default, {
+        /* @__PURE__ */ jsx_dev_runtime6.jsxDEV(Box_default, {
           width: labelWidth,
-          children: /* @__PURE__ */ jsx_dev_runtime4.jsxDEV(Text, {
+          children: /* @__PURE__ */ jsx_dev_runtime6.jsxDEV(Text, {
             color: "gray",
             children: label
           }, undefined, false, undefined, this)
         }, undefined, false, undefined, this),
-        /* @__PURE__ */ jsx_dev_runtime4.jsxDEV(Box_default, {
+        /* @__PURE__ */ jsx_dev_runtime6.jsxDEV(Box_default, {
           flexShrink: 1,
-          children: /* @__PURE__ */ jsx_dev_runtime4.jsxDEV(Text, {
+          children: /* @__PURE__ */ jsx_dev_runtime6.jsxDEV(Text, {
             color,
             wrap: "truncate-end",
             children: displayValue
@@ -25452,7 +25594,7 @@ function EmailHeader({ from, to, cc, bcc, subject, width }) {
       ]
     }, undefined, true, undefined, this);
   };
-  return /* @__PURE__ */ jsx_dev_runtime4.jsxDEV(Box_default, {
+  return /* @__PURE__ */ jsx_dev_runtime6.jsxDEV(Box_default, {
     flexDirection: "column",
     marginBottom: 1,
     children: [
@@ -25460,19 +25602,19 @@ function EmailHeader({ from, to, cc, bcc, subject, width }) {
       renderField("To:", to, "white"),
       cc && cc.length > 0 && renderField("Cc:", cc, "gray"),
       bcc && bcc.length > 0 && renderField("Bcc:", bcc, "gray"),
-      /* @__PURE__ */ jsx_dev_runtime4.jsxDEV(Box_default, {
+      /* @__PURE__ */ jsx_dev_runtime6.jsxDEV(Box_default, {
         marginTop: 1,
         children: [
-          /* @__PURE__ */ jsx_dev_runtime4.jsxDEV(Box_default, {
+          /* @__PURE__ */ jsx_dev_runtime6.jsxDEV(Box_default, {
             width: labelWidth,
-            children: /* @__PURE__ */ jsx_dev_runtime4.jsxDEV(Text, {
+            children: /* @__PURE__ */ jsx_dev_runtime6.jsxDEV(Text, {
               color: "gray",
               children: "Subject:"
             }, undefined, false, undefined, this)
           }, undefined, false, undefined, this),
-          /* @__PURE__ */ jsx_dev_runtime4.jsxDEV(Box_default, {
+          /* @__PURE__ */ jsx_dev_runtime6.jsxDEV(Box_default, {
             flexShrink: 1,
-            children: /* @__PURE__ */ jsx_dev_runtime4.jsxDEV(Text, {
+            children: /* @__PURE__ */ jsx_dev_runtime6.jsxDEV(Text, {
               bold: true,
               wrap: "truncate-end",
               children: subject
@@ -25480,9 +25622,9 @@ function EmailHeader({ from, to, cc, bcc, subject, width }) {
           }, undefined, false, undefined, this)
         ]
       }, undefined, true, undefined, this),
-      /* @__PURE__ */ jsx_dev_runtime4.jsxDEV(Box_default, {
+      /* @__PURE__ */ jsx_dev_runtime6.jsxDEV(Box_default, {
         marginTop: 1,
-        children: /* @__PURE__ */ jsx_dev_runtime4.jsxDEV(Text, {
+        children: /* @__PURE__ */ jsx_dev_runtime6.jsxDEV(Text, {
           color: "gray",
           dimColor: true,
           children: "\u2500".repeat(Math.max(0, width - 4))
@@ -25491,26 +25633,26 @@ function EmailHeader({ from, to, cc, bcc, subject, width }) {
     ]
   }, undefined, true, undefined, this);
 }
-var jsx_dev_runtime4;
+var jsx_dev_runtime6;
 var init_email_header = __esm(async () => {
   await init_build2();
-  jsx_dev_runtime4 = __toESM(require_jsx_dev_runtime(), 1);
+  jsx_dev_runtime6 = __toESM(require_jsx_dev_runtime(), 1);
 });
 
 // canvas/src/canvases/document.tsx
 function Document({ id, config: initialConfig, enabled, scenario = "display" }) {
   const { exit } = use_app_default();
   const { stdout } = use_stdout_default();
-  const [dimensions, setDimensions] = import_react33.useState({
+  const [dimensions, setDimensions] = import_react34.useState({
     width: stdout?.columns || 120,
     height: stdout?.rows || 40
   });
-  const [scrollOffset, setScrollOffset] = import_react33.useState(0);
-  const [cursorPosition, setCursorPosition] = import_react33.useState(0);
-  const [selectionStart, setSelectionStart] = import_react33.useState(null);
-  const [selectionEnd, setSelectionEnd] = import_react33.useState(null);
-  const isDraggingRef = import_react33.useRef(false);
-  const [liveConfig, setLiveConfig] = import_react33.useState(initialConfig);
+  const [scrollOffset, setScrollOffset] = import_react34.useState(0);
+  const [cursorPosition, setCursorPosition] = import_react34.useState(0);
+  const [selectionStart, setSelectionStart] = import_react34.useState(null);
+  const [selectionEnd, setSelectionEnd] = import_react34.useState(null);
+  const isDraggingRef = import_react34.useRef(false);
+  const [liveConfig, setLiveConfig] = import_react34.useState(initialConfig);
   const ipc = useCanvasServer({
     id,
     kind: "document",
@@ -25557,13 +25699,13 @@ No content provided.`,
   const emailCc = emailConfig?.cc;
   const emailBcc = emailConfig?.bcc;
   const emailSubject = emailConfig?.subject || "";
-  const [content, setContent] = import_react33.useState(initialContent);
-  import_react33.useEffect(() => {
+  const [content, setContent] = import_react34.useState(initialContent);
+  import_react34.useEffect(() => {
     if (liveConfig?.content) {
       setContent(liveConfig.content);
     }
   }, [liveConfig?.content]);
-  import_react33.useEffect(() => {
+  import_react34.useEffect(() => {
     const updateDimensions = () => {
       setDimensions({
         width: stdout?.columns || 120,
@@ -25590,7 +25732,7 @@ No content provided.`,
   const leftPadding = Math.max(0, Math.floor((termWidth - docWidth) / 2));
   const contentStartCol = leftPadding + 1 + 2 + 1;
   const contentStartRow = headerHeight + 1 + 1;
-  const terminalToOffset = import_react33.useCallback((termX, termY) => {
+  const terminalToOffset = import_react34.useCallback((termX, termY) => {
     const lines = content.split(`
 `);
     const col = termX - contentStartCol;
@@ -25604,7 +25746,7 @@ No content provided.`,
     offset += Math.max(0, Math.min(col, lineLength));
     return Math.min(offset, content.length);
   }, [content, contentStartCol, contentStartRow, scrollOffset]);
-  const handleMouseClick = import_react33.useCallback((event) => {
+  const handleMouseClick = import_react34.useCallback((event) => {
     if (readOnly)
       return;
     const offset = terminalToOffset(event.x, event.y);
@@ -25613,14 +25755,14 @@ No content provided.`,
     setSelectionEnd(null);
     isDraggingRef.current = true;
   }, [readOnly, terminalToOffset]);
-  const handleMouseMove = import_react33.useCallback((event) => {
+  const handleMouseMove = import_react34.useCallback((event) => {
     if (readOnly || !isDraggingRef.current)
       return;
     const offset = terminalToOffset(event.x, event.y);
     setSelectionEnd(offset);
     setCursorPosition(offset);
   }, [readOnly, terminalToOffset]);
-  const handleMouseRelease = import_react33.useCallback(() => {
+  const handleMouseRelease = import_react34.useCallback(() => {
     isDraggingRef.current = false;
     if (selectionStart !== null && selectionEnd !== null && selectionStart === selectionEnd) {
       setSelectionEnd(null);
@@ -25632,7 +25774,7 @@ No content provided.`,
     onMove: handleMouseMove,
     onRelease: handleMouseRelease
   });
-  const getSelectionBounds = import_react33.useCallback(() => {
+  const getSelectionBounds = import_react34.useCallback(() => {
     if (selectionStart === null || selectionEnd === null)
       return null;
     const start = Math.min(selectionStart, selectionEnd);
@@ -25641,18 +25783,18 @@ No content provided.`,
       return null;
     return { start, end };
   }, [selectionStart, selectionEnd]);
-  const deleteSelection = import_react33.useCallback(() => {
+  const deleteSelection = import_react34.useCallback(() => {
     const bounds = getSelectionBounds();
     if (!bounds)
       return null;
     const newText = content.slice(0, bounds.start) + content.slice(bounds.end);
     return { newText, newCursor: bounds.start };
   }, [content, getSelectionBounds]);
-  const clearSelection = import_react33.useCallback(() => {
+  const clearSelection = import_react34.useCallback(() => {
     setSelectionStart(null);
     setSelectionEnd(null);
   }, []);
-  const getCursorLine = import_react33.useCallback((pos, text) => {
+  const getCursorLine = import_react34.useCallback((pos, text) => {
     let line = 0;
     for (let i = 0;i < pos && i < text.length; i++) {
       if (text[i] === `
@@ -25661,7 +25803,7 @@ No content provided.`,
     }
     return line;
   }, []);
-  const ensureCursorVisible = import_react33.useCallback((pos, text) => {
+  const ensureCursorVisible = import_react34.useCallback((pos, text) => {
     const cursorLine = getCursorLine(pos, text);
     setScrollOffset((offset) => {
       if (cursorLine < offset)
@@ -25841,26 +25983,26 @@ No content provided.`,
     }
     charCount += line.length + 1;
   }
-  return /* @__PURE__ */ jsx_dev_runtime5.jsxDEV(Box_default, {
+  return /* @__PURE__ */ jsx_dev_runtime7.jsxDEV(Box_default, {
     flexDirection: "column",
     width: termWidth,
     height: termHeight,
     children: [
-      /* @__PURE__ */ jsx_dev_runtime5.jsxDEV(Box_default, {
+      /* @__PURE__ */ jsx_dev_runtime7.jsxDEV(Box_default, {
         justifyContent: "center",
         marginBottom: 1,
-        children: /* @__PURE__ */ jsx_dev_runtime5.jsxDEV(Box_default, {
+        children: /* @__PURE__ */ jsx_dev_runtime7.jsxDEV(Box_default, {
           width: docWidth,
           children: [
-            /* @__PURE__ */ jsx_dev_runtime5.jsxDEV(Text, {
+            /* @__PURE__ */ jsx_dev_runtime7.jsxDEV(Text, {
               bold: true,
               color: "white",
               children: isEmailPreview ? "Email Preview" : title || "Document"
             }, undefined, false, undefined, this),
-            /* @__PURE__ */ jsx_dev_runtime5.jsxDEV(Box_default, {
+            /* @__PURE__ */ jsx_dev_runtime7.jsxDEV(Box_default, {
               flexGrow: 1
             }, undefined, false, undefined, this),
-            /* @__PURE__ */ jsx_dev_runtime5.jsxDEV(Text, {
+            /* @__PURE__ */ jsx_dev_runtime7.jsxDEV(Text, {
               color: "gray",
               dimColor: true,
               children: totalLines > viewportHeight ? `${scrollPercent}%` : ""
@@ -25868,10 +26010,10 @@ No content provided.`,
           ]
         }, undefined, true, undefined, this)
       }, undefined, false, undefined, this),
-      /* @__PURE__ */ jsx_dev_runtime5.jsxDEV(Box_default, {
+      /* @__PURE__ */ jsx_dev_runtime7.jsxDEV(Box_default, {
         justifyContent: "center",
         flexGrow: 1,
-        children: /* @__PURE__ */ jsx_dev_runtime5.jsxDEV(Box_default, {
+        children: /* @__PURE__ */ jsx_dev_runtime7.jsxDEV(Box_default, {
           width: docWidth,
           flexDirection: "column",
           borderStyle: "round",
@@ -25879,7 +26021,7 @@ No content provided.`,
           paddingX: 2,
           paddingY: 1,
           children: [
-            isEmailPreview && /* @__PURE__ */ jsx_dev_runtime5.jsxDEV(EmailHeader, {
+            isEmailPreview && /* @__PURE__ */ jsx_dev_runtime7.jsxDEV(EmailHeader, {
               from: emailFrom,
               to: emailTo,
               cc: emailCc,
@@ -25887,7 +26029,7 @@ No content provided.`,
               subject: emailSubject,
               width: docWidth - 6
             }, undefined, false, undefined, this),
-            /* @__PURE__ */ jsx_dev_runtime5.jsxDEV(RawMarkdownRenderer, {
+            /* @__PURE__ */ jsx_dev_runtime7.jsxDEV(RawMarkdownRenderer, {
               content,
               cursorPosition: readOnly ? undefined : cursorPosition,
               selectionStart,
@@ -25899,29 +26041,29 @@ No content provided.`,
           ]
         }, undefined, true, undefined, this)
       }, undefined, false, undefined, this),
-      /* @__PURE__ */ jsx_dev_runtime5.jsxDEV(Box_default, {
+      /* @__PURE__ */ jsx_dev_runtime7.jsxDEV(Box_default, {
         justifyContent: "center",
-        children: /* @__PURE__ */ jsx_dev_runtime5.jsxDEV(Box_default, {
+        children: /* @__PURE__ */ jsx_dev_runtime7.jsxDEV(Box_default, {
           width: docWidth,
           justifyContent: "space-between",
           children: [
-            /* @__PURE__ */ jsx_dev_runtime5.jsxDEV(Text, {
+            /* @__PURE__ */ jsx_dev_runtime7.jsxDEV(Text, {
               color: "gray",
               dimColor: true,
               children: readOnly ? "\u2191\u2193 scroll \u2022 Esc quit" : "click/drag select \u2022 type to edit \u2022 Esc quit"
             }, undefined, false, undefined, this),
-            /* @__PURE__ */ jsx_dev_runtime5.jsxDEV(Text, {
+            /* @__PURE__ */ jsx_dev_runtime7.jsxDEV(Text, {
               color: "gray",
               dimColor: true,
               children: [
-                !readOnly && /* @__PURE__ */ jsx_dev_runtime5.jsxDEV(Text, {
+                !readOnly && /* @__PURE__ */ jsx_dev_runtime7.jsxDEV(Text, {
                   color: "cyan",
                   children: [
                     "Ln ",
                     cursorLine + 1,
                     ", Col ",
                     cursorCol + 1,
-                    /* @__PURE__ */ jsx_dev_runtime5.jsxDEV(Text, {
+                    /* @__PURE__ */ jsx_dev_runtime7.jsxDEV(Text, {
                       color: "gray",
                       dimColor: true,
                       children: " \u2022 "
@@ -25937,7 +26079,7 @@ No content provided.`,
     ]
   }, undefined, true, undefined, this);
 }
-var import_react33, jsx_dev_runtime5;
+var import_react34, jsx_dev_runtime7;
 var init_document = __esm(async () => {
   await __promiseAll([
     init_build2(),
@@ -25946,8 +26088,8 @@ var init_document = __esm(async () => {
     init_raw_markdown_renderer(),
     init_email_header()
   ]);
-  import_react33 = __toESM(require_react(), 1);
-  jsx_dev_runtime5 = __toESM(require_jsx_dev_runtime(), 1);
+  import_react34 = __toESM(require_react(), 1);
+  jsx_dev_runtime7 = __toESM(require_jsx_dev_runtime(), 1);
 });
 
 // canvas/src/canvases/flight/types.ts
@@ -26019,41 +26161,41 @@ var init_types4 = __esm(() => {
 function CyberpunkHeader({ title, width }) {
   const borderChar = "=";
   const border = borderChar.repeat(width - 2);
-  return /* @__PURE__ */ jsx_dev_runtime6.jsxDEV(Box_default, {
+  return /* @__PURE__ */ jsx_dev_runtime8.jsxDEV(Box_default, {
     flexDirection: "column",
     children: [
-      /* @__PURE__ */ jsx_dev_runtime6.jsxDEV(Text, {
+      /* @__PURE__ */ jsx_dev_runtime8.jsxDEV(Text, {
         color: CYBER_COLORS.neonMagenta,
         children: border
       }, undefined, false, undefined, this),
-      /* @__PURE__ */ jsx_dev_runtime6.jsxDEV(Box_default, {
+      /* @__PURE__ */ jsx_dev_runtime8.jsxDEV(Box_default, {
         justifyContent: "space-between",
         width: width - 2,
         children: [
-          /* @__PURE__ */ jsx_dev_runtime6.jsxDEV(Text, {
+          /* @__PURE__ */ jsx_dev_runtime8.jsxDEV(Text, {
             color: CYBER_COLORS.neonCyan,
             bold: true,
             children: title
           }, undefined, false, undefined, this),
-          /* @__PURE__ */ jsx_dev_runtime6.jsxDEV(Text, {
+          /* @__PURE__ */ jsx_dev_runtime8.jsxDEV(Text, {
             color: CYBER_COLORS.dim,
             children: formatTime(new Date)
           }, undefined, false, undefined, this)
         ]
       }, undefined, true, undefined, this),
-      /* @__PURE__ */ jsx_dev_runtime6.jsxDEV(Text, {
+      /* @__PURE__ */ jsx_dev_runtime8.jsxDEV(Text, {
         color: CYBER_COLORS.neonMagenta,
         children: border
       }, undefined, false, undefined, this)
     ]
   }, undefined, true, undefined, this);
 }
-var jsx_dev_runtime6;
+var jsx_dev_runtime8;
 var init_cyberpunk_header = __esm(async () => {
   init_types4();
   init_format();
   await init_build2();
-  jsx_dev_runtime6 = __toESM(require_jsx_dev_runtime(), 1);
+  jsx_dev_runtime8 = __toESM(require_jsx_dev_runtime(), 1);
 });
 
 // canvas/src/canvases/flight/components/flight-card.tsx
@@ -26063,15 +26205,15 @@ function FlightCard({ flight, selected, focused }) {
   const textColor = isHighlighted ? "black" : selected ? CYBER_COLORS.neonCyan : "white";
   const dimColor = isHighlighted ? "black" : CYBER_COLORS.dim;
   const stopsText = flight.stops === 0 ? "nonstop" : `${flight.stops} stop${flight.stops > 1 ? "s" : ""}`;
-  return /* @__PURE__ */ jsx_dev_runtime7.jsxDEV(Box_default, {
+  return /* @__PURE__ */ jsx_dev_runtime9.jsxDEV(Box_default, {
     flexDirection: "column",
     marginBottom: 1,
     paddingX: 1,
     backgroundColor: bgColor,
     children: [
-      /* @__PURE__ */ jsx_dev_runtime7.jsxDEV(Box_default, {
+      /* @__PURE__ */ jsx_dev_runtime9.jsxDEV(Box_default, {
         children: [
-          /* @__PURE__ */ jsx_dev_runtime7.jsxDEV(Text, {
+          /* @__PURE__ */ jsx_dev_runtime9.jsxDEV(Text, {
             color: textColor,
             bold: true,
             children: [
@@ -26079,15 +26221,15 @@ function FlightCard({ flight, selected, focused }) {
               flight.flightNumber.padEnd(8)
             ]
           }, undefined, true, undefined, this),
-          /* @__PURE__ */ jsx_dev_runtime7.jsxDEV(Text, {
+          /* @__PURE__ */ jsx_dev_runtime9.jsxDEV(Text, {
             color: isHighlighted ? "black" : CYBER_COLORS.neonGreen,
             bold: true,
             children: formatPrice(flight.price, flight.currency)
           }, undefined, false, undefined, this)
         ]
       }, undefined, true, undefined, this),
-      /* @__PURE__ */ jsx_dev_runtime7.jsxDEV(Box_default, {
-        children: /* @__PURE__ */ jsx_dev_runtime7.jsxDEV(Text, {
+      /* @__PURE__ */ jsx_dev_runtime9.jsxDEV(Box_default, {
+        children: /* @__PURE__ */ jsx_dev_runtime9.jsxDEV(Text, {
           color: dimColor,
           children: [
             "  ",
@@ -26099,8 +26241,8 @@ function FlightCard({ flight, selected, focused }) {
           ]
         }, undefined, true, undefined, this)
       }, undefined, false, undefined, this),
-      /* @__PURE__ */ jsx_dev_runtime7.jsxDEV(Box_default, {
-        children: /* @__PURE__ */ jsx_dev_runtime7.jsxDEV(Text, {
+      /* @__PURE__ */ jsx_dev_runtime9.jsxDEV(Box_default, {
+        children: /* @__PURE__ */ jsx_dev_runtime9.jsxDEV(Text, {
           color: dimColor,
           children: [
             "  ",
@@ -26113,18 +26255,18 @@ function FlightCard({ flight, selected, focused }) {
     ]
   }, undefined, true, undefined, this);
 }
-var jsx_dev_runtime7;
+var jsx_dev_runtime9;
 var init_flight_card = __esm(async () => {
   init_types4();
   await init_build2();
-  jsx_dev_runtime7 = __toESM(require_jsx_dev_runtime(), 1);
+  jsx_dev_runtime9 = __toESM(require_jsx_dev_runtime(), 1);
 });
 
 // canvas/src/canvases/flight/components/flight-list.tsx
 function FlightList({ flights, selectedIndex, focused, maxHeight }) {
   if (flights.length === 0) {
-    return /* @__PURE__ */ jsx_dev_runtime8.jsxDEV(Box_default, {
-      children: /* @__PURE__ */ jsx_dev_runtime8.jsxDEV(Text, {
+    return /* @__PURE__ */ jsx_dev_runtime10.jsxDEV(Box_default, {
+      children: /* @__PURE__ */ jsx_dev_runtime10.jsxDEV(Text, {
         color: CYBER_COLORS.dim,
         children: "No flights available"
       }, undefined, false, undefined, this)
@@ -26138,20 +26280,20 @@ function FlightList({ flights, selectedIndex, focused, maxHeight }) {
   }
   const endIndex = Math.min(startIndex + visibleItems, flights.length);
   const visibleFlights = flights.slice(startIndex, endIndex);
-  return /* @__PURE__ */ jsx_dev_runtime8.jsxDEV(Box_default, {
+  return /* @__PURE__ */ jsx_dev_runtime10.jsxDEV(Box_default, {
     flexDirection: "column",
     children: [
       visibleFlights.map((flight, i) => {
         const actualIndex = startIndex + i;
-        return /* @__PURE__ */ jsx_dev_runtime8.jsxDEV(FlightCard, {
+        return /* @__PURE__ */ jsx_dev_runtime10.jsxDEV(FlightCard, {
           flight,
           selected: actualIndex === selectedIndex,
           focused
         }, flight.id, false, undefined, this);
       }),
-      flights.length > visibleItems && /* @__PURE__ */ jsx_dev_runtime8.jsxDEV(Box_default, {
+      flights.length > visibleItems && /* @__PURE__ */ jsx_dev_runtime10.jsxDEV(Box_default, {
         marginTop: 1,
-        children: /* @__PURE__ */ jsx_dev_runtime8.jsxDEV(Text, {
+        children: /* @__PURE__ */ jsx_dev_runtime10.jsxDEV(Text, {
           color: CYBER_COLORS.dim,
           children: [
             startIndex > 0 ? "^ " : "  ",
@@ -26167,14 +26309,14 @@ function FlightList({ flights, selectedIndex, focused, maxHeight }) {
     ]
   }, undefined, true, undefined, this);
 }
-var jsx_dev_runtime8;
+var jsx_dev_runtime10;
 var init_flight_list = __esm(async () => {
   init_types4();
   await __promiseAll([
     init_build2(),
     init_flight_card()
   ]);
-  jsx_dev_runtime8 = __toESM(require_jsx_dev_runtime(), 1);
+  jsx_dev_runtime10 = __toESM(require_jsx_dev_runtime(), 1);
 });
 
 // canvas/src/canvases/flight/components/route-display.tsx
@@ -26186,18 +26328,18 @@ function RouteDisplay({ origin, destination, width }) {
   const airplane = "<=====|>";
   const halfRoute = Math.floor((routeLineWidth - airplane.length) / 2);
   const routeLine = "~".repeat(halfRoute) + airplane + "~".repeat(halfRoute);
-  return /* @__PURE__ */ jsx_dev_runtime9.jsxDEV(Box_default, {
+  return /* @__PURE__ */ jsx_dev_runtime11.jsxDEV(Box_default, {
     flexDirection: "column",
     children: [
-      /* @__PURE__ */ jsx_dev_runtime9.jsxDEV(Box_default, {
+      /* @__PURE__ */ jsx_dev_runtime11.jsxDEV(Box_default, {
         justifyContent: "center",
         children: [
-          /* @__PURE__ */ jsx_dev_runtime9.jsxDEV(Text, {
+          /* @__PURE__ */ jsx_dev_runtime11.jsxDEV(Text, {
             color: CYBER_COLORS.neonCyan,
             bold: true,
             children: origin.code
           }, undefined, false, undefined, this),
-          /* @__PURE__ */ jsx_dev_runtime9.jsxDEV(Text, {
+          /* @__PURE__ */ jsx_dev_runtime11.jsxDEV(Text, {
             color: CYBER_COLORS.neonMagenta,
             children: [
               " ",
@@ -26205,22 +26347,22 @@ function RouteDisplay({ origin, destination, width }) {
               " "
             ]
           }, undefined, true, undefined, this),
-          /* @__PURE__ */ jsx_dev_runtime9.jsxDEV(Text, {
+          /* @__PURE__ */ jsx_dev_runtime11.jsxDEV(Text, {
             color: CYBER_COLORS.neonCyan,
             bold: true,
             children: destination.code
           }, undefined, false, undefined, this)
         ]
       }, undefined, true, undefined, this),
-      /* @__PURE__ */ jsx_dev_runtime9.jsxDEV(Box_default, {
+      /* @__PURE__ */ jsx_dev_runtime11.jsxDEV(Box_default, {
         justifyContent: "space-between",
         width: width - 2,
         children: [
-          /* @__PURE__ */ jsx_dev_runtime9.jsxDEV(Text, {
+          /* @__PURE__ */ jsx_dev_runtime11.jsxDEV(Text, {
             color: CYBER_COLORS.dim,
             children: origin.city
           }, undefined, false, undefined, this),
-          /* @__PURE__ */ jsx_dev_runtime9.jsxDEV(Text, {
+          /* @__PURE__ */ jsx_dev_runtime11.jsxDEV(Text, {
             color: CYBER_COLORS.dim,
             children: destination.city
           }, undefined, false, undefined, this)
@@ -26229,11 +26371,11 @@ function RouteDisplay({ origin, destination, width }) {
     ]
   }, undefined, true, undefined, this);
 }
-var jsx_dev_runtime9;
+var jsx_dev_runtime11;
 var init_route_display = __esm(async () => {
   init_types4();
   await init_build2();
-  jsx_dev_runtime9 = __toESM(require_jsx_dev_runtime(), 1);
+  jsx_dev_runtime11 = __toESM(require_jsx_dev_runtime(), 1);
 });
 
 // canvas/src/canvases/flight/components/flight-info.tsx
@@ -26244,39 +26386,39 @@ function FlightInfo({ flight }) {
     business: "Business",
     first: "First Class"
   };
-  return /* @__PURE__ */ jsx_dev_runtime10.jsxDEV(Box_default, {
+  return /* @__PURE__ */ jsx_dev_runtime12.jsxDEV(Box_default, {
     flexDirection: "column",
     children: [
-      /* @__PURE__ */ jsx_dev_runtime10.jsxDEV(Box_default, {
+      /* @__PURE__ */ jsx_dev_runtime12.jsxDEV(Box_default, {
         children: [
-          /* @__PURE__ */ jsx_dev_runtime10.jsxDEV(Box_default, {
+          /* @__PURE__ */ jsx_dev_runtime12.jsxDEV(Box_default, {
             width: 20,
-            children: /* @__PURE__ */ jsx_dev_runtime10.jsxDEV(Text, {
+            children: /* @__PURE__ */ jsx_dev_runtime12.jsxDEV(Text, {
               color: CYBER_COLORS.dim,
               children: "DEPARTURE"
             }, undefined, false, undefined, this)
           }, undefined, false, undefined, this),
-          /* @__PURE__ */ jsx_dev_runtime10.jsxDEV(Box_default, {
+          /* @__PURE__ */ jsx_dev_runtime12.jsxDEV(Box_default, {
             width: 20,
-            children: /* @__PURE__ */ jsx_dev_runtime10.jsxDEV(Text, {
+            children: /* @__PURE__ */ jsx_dev_runtime12.jsxDEV(Text, {
               color: CYBER_COLORS.dim,
               children: "ARRIVAL"
             }, undefined, false, undefined, this)
           }, undefined, false, undefined, this),
-          /* @__PURE__ */ jsx_dev_runtime10.jsxDEV(Box_default, {
-            children: /* @__PURE__ */ jsx_dev_runtime10.jsxDEV(Text, {
+          /* @__PURE__ */ jsx_dev_runtime12.jsxDEV(Box_default, {
+            children: /* @__PURE__ */ jsx_dev_runtime12.jsxDEV(Text, {
               color: CYBER_COLORS.dim,
               children: "DURATION"
             }, undefined, false, undefined, this)
           }, undefined, false, undefined, this)
         ]
       }, undefined, true, undefined, this),
-      /* @__PURE__ */ jsx_dev_runtime10.jsxDEV(Box_default, {
+      /* @__PURE__ */ jsx_dev_runtime12.jsxDEV(Box_default, {
         marginBottom: 1,
         children: [
-          /* @__PURE__ */ jsx_dev_runtime10.jsxDEV(Box_default, {
+          /* @__PURE__ */ jsx_dev_runtime12.jsxDEV(Box_default, {
             width: 20,
-            children: /* @__PURE__ */ jsx_dev_runtime10.jsxDEV(Text, {
+            children: /* @__PURE__ */ jsx_dev_runtime12.jsxDEV(Text, {
               color: CYBER_COLORS.neonCyan,
               bold: true,
               children: [
@@ -26286,9 +26428,9 @@ function FlightInfo({ flight }) {
               ]
             }, undefined, true, undefined, this)
           }, undefined, false, undefined, this),
-          /* @__PURE__ */ jsx_dev_runtime10.jsxDEV(Box_default, {
+          /* @__PURE__ */ jsx_dev_runtime12.jsxDEV(Box_default, {
             width: 20,
-            children: /* @__PURE__ */ jsx_dev_runtime10.jsxDEV(Text, {
+            children: /* @__PURE__ */ jsx_dev_runtime12.jsxDEV(Text, {
               color: CYBER_COLORS.neonCyan,
               bold: true,
               children: [
@@ -26298,8 +26440,8 @@ function FlightInfo({ flight }) {
               ]
             }, undefined, true, undefined, this)
           }, undefined, false, undefined, this),
-          /* @__PURE__ */ jsx_dev_runtime10.jsxDEV(Box_default, {
-            children: /* @__PURE__ */ jsx_dev_runtime10.jsxDEV(Text, {
+          /* @__PURE__ */ jsx_dev_runtime12.jsxDEV(Box_default, {
+            children: /* @__PURE__ */ jsx_dev_runtime12.jsxDEV(Text, {
               color: CYBER_COLORS.neonCyan,
               bold: true,
               children: formatDuration(flight.duration)
@@ -26307,48 +26449,48 @@ function FlightInfo({ flight }) {
           }, undefined, false, undefined, this)
         ]
       }, undefined, true, undefined, this),
-      /* @__PURE__ */ jsx_dev_runtime10.jsxDEV(Box_default, {
+      /* @__PURE__ */ jsx_dev_runtime12.jsxDEV(Box_default, {
         children: [
-          /* @__PURE__ */ jsx_dev_runtime10.jsxDEV(Box_default, {
+          /* @__PURE__ */ jsx_dev_runtime12.jsxDEV(Box_default, {
             width: 20,
-            children: /* @__PURE__ */ jsx_dev_runtime10.jsxDEV(Text, {
+            children: /* @__PURE__ */ jsx_dev_runtime12.jsxDEV(Text, {
               color: CYBER_COLORS.dim,
               children: "AIRCRAFT"
             }, undefined, false, undefined, this)
           }, undefined, false, undefined, this),
-          /* @__PURE__ */ jsx_dev_runtime10.jsxDEV(Box_default, {
+          /* @__PURE__ */ jsx_dev_runtime12.jsxDEV(Box_default, {
             width: 20,
-            children: /* @__PURE__ */ jsx_dev_runtime10.jsxDEV(Text, {
+            children: /* @__PURE__ */ jsx_dev_runtime12.jsxDEV(Text, {
               color: CYBER_COLORS.dim,
               children: "CLASS"
             }, undefined, false, undefined, this)
           }, undefined, false, undefined, this),
-          /* @__PURE__ */ jsx_dev_runtime10.jsxDEV(Box_default, {
-            children: /* @__PURE__ */ jsx_dev_runtime10.jsxDEV(Text, {
+          /* @__PURE__ */ jsx_dev_runtime12.jsxDEV(Box_default, {
+            children: /* @__PURE__ */ jsx_dev_runtime12.jsxDEV(Text, {
               color: CYBER_COLORS.dim,
               children: "PRICE"
             }, undefined, false, undefined, this)
           }, undefined, false, undefined, this)
         ]
       }, undefined, true, undefined, this),
-      /* @__PURE__ */ jsx_dev_runtime10.jsxDEV(Box_default, {
+      /* @__PURE__ */ jsx_dev_runtime12.jsxDEV(Box_default, {
         children: [
-          /* @__PURE__ */ jsx_dev_runtime10.jsxDEV(Box_default, {
+          /* @__PURE__ */ jsx_dev_runtime12.jsxDEV(Box_default, {
             width: 20,
-            children: /* @__PURE__ */ jsx_dev_runtime10.jsxDEV(Text, {
+            children: /* @__PURE__ */ jsx_dev_runtime12.jsxDEV(Text, {
               color: "white",
               children: flight.aircraft || "---"
             }, undefined, false, undefined, this)
           }, undefined, false, undefined, this),
-          /* @__PURE__ */ jsx_dev_runtime10.jsxDEV(Box_default, {
+          /* @__PURE__ */ jsx_dev_runtime12.jsxDEV(Box_default, {
             width: 20,
-            children: /* @__PURE__ */ jsx_dev_runtime10.jsxDEV(Text, {
+            children: /* @__PURE__ */ jsx_dev_runtime12.jsxDEV(Text, {
               color: "white",
               children: cabinLabels[flight.cabinClass]
             }, undefined, false, undefined, this)
           }, undefined, false, undefined, this),
-          /* @__PURE__ */ jsx_dev_runtime10.jsxDEV(Box_default, {
-            children: /* @__PURE__ */ jsx_dev_runtime10.jsxDEV(Text, {
+          /* @__PURE__ */ jsx_dev_runtime12.jsxDEV(Box_default, {
+            children: /* @__PURE__ */ jsx_dev_runtime12.jsxDEV(Text, {
               color: CYBER_COLORS.neonGreen,
               bold: true,
               children: formatPrice(flight.price, flight.currency)
@@ -26356,9 +26498,9 @@ function FlightInfo({ flight }) {
           }, undefined, false, undefined, this)
         ]
       }, undefined, true, undefined, this),
-      /* @__PURE__ */ jsx_dev_runtime10.jsxDEV(Box_default, {
+      /* @__PURE__ */ jsx_dev_runtime12.jsxDEV(Box_default, {
         marginTop: 1,
-        children: /* @__PURE__ */ jsx_dev_runtime10.jsxDEV(Text, {
+        children: /* @__PURE__ */ jsx_dev_runtime12.jsxDEV(Text, {
           color: CYBER_COLORS.dim,
           children: [
             flight.airline,
@@ -26371,11 +26513,11 @@ function FlightInfo({ flight }) {
     ]
   }, undefined, true, undefined, this);
 }
-var jsx_dev_runtime10;
+var jsx_dev_runtime12;
 var init_flight_info = __esm(async () => {
   init_types4();
   await init_build2();
-  jsx_dev_runtime10 = __toESM(require_jsx_dev_runtime(), 1);
+  jsx_dev_runtime12 = __toESM(require_jsx_dev_runtime(), 1);
 });
 
 // canvas/src/canvases/flight/components/seatmap-panel.tsx
@@ -26399,12 +26541,12 @@ function SeatmapPanel({
   const endCol = Math.min(startCol + visibleCols - 1, seatmap.rows);
   const renderHeader = () => {
     const parts = [];
-    parts.push(/* @__PURE__ */ jsx_dev_runtime11.jsxDEV(Text, {
+    parts.push(/* @__PURE__ */ jsx_dev_runtime13.jsxDEV(Text, {
       color: CYBER_COLORS.neonMagenta,
       children: "\u25C0 "
     }, "nose", false, undefined, this));
     for (let row = startCol;row <= endCol; row++) {
-      parts.push(/* @__PURE__ */ jsx_dev_runtime11.jsxDEV(Text, {
+      parts.push(/* @__PURE__ */ jsx_dev_runtime13.jsxDEV(Text, {
         color: CYBER_COLORS.dim,
         children: [
           String(row).padStart(2, " "),
@@ -26412,7 +26554,7 @@ function SeatmapPanel({
         ]
       }, `row-${row}`, true, undefined, this));
     }
-    return /* @__PURE__ */ jsx_dev_runtime11.jsxDEV(Box_default, {
+    return /* @__PURE__ */ jsx_dev_runtime13.jsxDEV(Box_default, {
       children: parts
     }, undefined, false, undefined, this);
   };
@@ -26420,7 +26562,7 @@ function SeatmapPanel({
     const letter = seatmap.seatsPerRow[letterIndex];
     const isWindowSeat = letterIndex === 0 || letterIndex === seatmap.seatsPerRow.length - 1;
     const parts = [];
-    parts.push(/* @__PURE__ */ jsx_dev_runtime11.jsxDEV(Text, {
+    parts.push(/* @__PURE__ */ jsx_dev_runtime13.jsxDEV(Text, {
       color: isWindowSeat ? CYBER_COLORS.neonYellow : CYBER_COLORS.dim,
       children: [
         letter,
@@ -26452,7 +26594,7 @@ function SeatmapPanel({
         bgColor = CYBER_COLORS.neonCyan;
         color = "black";
       }
-      parts.push(/* @__PURE__ */ jsx_dev_runtime11.jsxDEV(Text, {
+      parts.push(/* @__PURE__ */ jsx_dev_runtime13.jsxDEV(Text, {
         backgroundColor: bgColor,
         color,
         children: [
@@ -26462,7 +26604,7 @@ function SeatmapPanel({
         ]
       }, seat, true, undefined, this));
     }
-    return /* @__PURE__ */ jsx_dev_runtime11.jsxDEV(Box_default, {
+    return /* @__PURE__ */ jsx_dev_runtime13.jsxDEV(Box_default, {
       children: parts
     }, letter, false, undefined, this);
   };
@@ -26471,22 +26613,22 @@ function SeatmapPanel({
     const letter = seatmap.seatsPerRow[i];
     seatRows.push(renderSeatLetterRow(i));
     if (seatmap.aisleAfter.includes(letter)) {
-      seatRows.push(/* @__PURE__ */ jsx_dev_runtime11.jsxDEV(Box_default, {
-        children: /* @__PURE__ */ jsx_dev_runtime11.jsxDEV(Text, {
+      seatRows.push(/* @__PURE__ */ jsx_dev_runtime13.jsxDEV(Box_default, {
+        children: /* @__PURE__ */ jsx_dev_runtime13.jsxDEV(Text, {
           color: CYBER_COLORS.dim,
           children: "  "
         }, undefined, false, undefined, this)
       }, `aisle-${letter}`, false, undefined, this));
     }
   }
-  return /* @__PURE__ */ jsx_dev_runtime11.jsxDEV(Box_default, {
+  return /* @__PURE__ */ jsx_dev_runtime13.jsxDEV(Box_default, {
     flexDirection: "column",
     children: [
       renderHeader(),
       seatRows,
-      seatmap.rows > visibleCols && /* @__PURE__ */ jsx_dev_runtime11.jsxDEV(Box_default, {
+      seatmap.rows > visibleCols && /* @__PURE__ */ jsx_dev_runtime13.jsxDEV(Box_default, {
         marginTop: 0,
-        children: /* @__PURE__ */ jsx_dev_runtime11.jsxDEV(Text, {
+        children: /* @__PURE__ */ jsx_dev_runtime13.jsxDEV(Text, {
           color: CYBER_COLORS.dim,
           children: [
             "  ",
@@ -26499,38 +26641,38 @@ function SeatmapPanel({
           ]
         }, undefined, true, undefined, this)
       }, undefined, false, undefined, this),
-      /* @__PURE__ */ jsx_dev_runtime11.jsxDEV(Box_default, {
+      /* @__PURE__ */ jsx_dev_runtime13.jsxDEV(Box_default, {
         marginTop: 1,
         children: [
-          /* @__PURE__ */ jsx_dev_runtime11.jsxDEV(Text, {
+          /* @__PURE__ */ jsx_dev_runtime13.jsxDEV(Text, {
             color: CYBER_COLORS.neonCyan,
             children: "[-]"
           }, undefined, false, undefined, this),
-          /* @__PURE__ */ jsx_dev_runtime11.jsxDEV(Text, {
+          /* @__PURE__ */ jsx_dev_runtime13.jsxDEV(Text, {
             color: CYBER_COLORS.dim,
             children: " avail "
           }, undefined, false, undefined, this),
-          /* @__PURE__ */ jsx_dev_runtime11.jsxDEV(Text, {
+          /* @__PURE__ */ jsx_dev_runtime13.jsxDEV(Text, {
             color: CYBER_COLORS.neonYellow,
             children: "[+]"
           }, undefined, false, undefined, this),
-          /* @__PURE__ */ jsx_dev_runtime11.jsxDEV(Text, {
+          /* @__PURE__ */ jsx_dev_runtime13.jsxDEV(Text, {
             color: CYBER_COLORS.dim,
             children: " premium "
           }, undefined, false, undefined, this),
-          /* @__PURE__ */ jsx_dev_runtime11.jsxDEV(Text, {
+          /* @__PURE__ */ jsx_dev_runtime13.jsxDEV(Text, {
             color: CYBER_COLORS.neonRed,
             children: "[X]"
           }, undefined, false, undefined, this),
-          /* @__PURE__ */ jsx_dev_runtime11.jsxDEV(Text, {
+          /* @__PURE__ */ jsx_dev_runtime13.jsxDEV(Text, {
             color: CYBER_COLORS.dim,
             children: " taken "
           }, undefined, false, undefined, this),
-          /* @__PURE__ */ jsx_dev_runtime11.jsxDEV(Text, {
+          /* @__PURE__ */ jsx_dev_runtime13.jsxDEV(Text, {
             color: CYBER_COLORS.neonGreen,
             children: "[*]"
           }, undefined, false, undefined, this),
-          /* @__PURE__ */ jsx_dev_runtime11.jsxDEV(Text, {
+          /* @__PURE__ */ jsx_dev_runtime13.jsxDEV(Text, {
             color: CYBER_COLORS.dim,
             children: " selected"
           }, undefined, false, undefined, this)
@@ -26539,11 +26681,11 @@ function SeatmapPanel({
     ]
   }, undefined, true, undefined, this);
 }
-var jsx_dev_runtime11;
+var jsx_dev_runtime13;
 var init_seatmap_panel = __esm(async () => {
   init_types4();
   await init_build2();
-  jsx_dev_runtime11 = __toESM(require_jsx_dev_runtime(), 1);
+  jsx_dev_runtime13 = __toESM(require_jsx_dev_runtime(), 1);
 });
 
 // canvas/src/canvases/flight/components/status-bar.tsx
@@ -26583,22 +26725,22 @@ function StatusBar({
       statusText = `Selected: ${selectedSeat}`;
     }
   }
-  return /* @__PURE__ */ jsx_dev_runtime12.jsxDEV(Box_default, {
+  return /* @__PURE__ */ jsx_dev_runtime14.jsxDEV(Box_default, {
     flexDirection: "column",
     children: [
-      /* @__PURE__ */ jsx_dev_runtime12.jsxDEV(Text, {
+      /* @__PURE__ */ jsx_dev_runtime14.jsxDEV(Text, {
         color: CYBER_COLORS.neonMagenta,
         children: border
       }, undefined, false, undefined, this),
-      /* @__PURE__ */ jsx_dev_runtime12.jsxDEV(Box_default, {
+      /* @__PURE__ */ jsx_dev_runtime14.jsxDEV(Box_default, {
         justifyContent: "space-between",
         width: width - 2,
         children: [
-          /* @__PURE__ */ jsx_dev_runtime12.jsxDEV(Text, {
+          /* @__PURE__ */ jsx_dev_runtime14.jsxDEV(Text, {
             color: CYBER_COLORS.dim,
             children: helpText
           }, undefined, false, undefined, this),
-          /* @__PURE__ */ jsx_dev_runtime12.jsxDEV(Text, {
+          /* @__PURE__ */ jsx_dev_runtime14.jsxDEV(Text, {
             color: CYBER_COLORS.neonGreen,
             children: statusText
           }, undefined, false, undefined, this)
@@ -26607,11 +26749,11 @@ function StatusBar({
     ]
   }, undefined, true, undefined, this);
 }
-var jsx_dev_runtime12;
+var jsx_dev_runtime14;
 var init_status_bar = __esm(async () => {
   init_types4();
   await init_build2();
-  jsx_dev_runtime12 = __toESM(require_jsx_dev_runtime(), 1);
+  jsx_dev_runtime14 = __toESM(require_jsx_dev_runtime(), 1);
 });
 
 // canvas/src/canvases/flight.tsx
@@ -26623,18 +26765,18 @@ function FlightCanvas({
 }) {
   const { exit } = use_app_default();
   const { stdout } = use_stdout_default();
-  const [dimensions, setDimensions] = import_react34.useState({
+  const [dimensions, setDimensions] = import_react35.useState({
     width: stdout?.columns || 120,
     height: stdout?.rows || 40
   });
-  const [config, setConfig] = import_react34.useState(initialConfig);
-  const [selectedFlightIndex, setSelectedFlightIndex] = import_react34.useState(0);
-  const [selectedSeat, setSelectedSeat] = import_react34.useState(null);
-  const [focusMode, setFocusMode] = import_react34.useState("flights");
-  const [seatCursorRow, setSeatCursorRow] = import_react34.useState(1);
-  const [seatCursorCol, setSeatCursorCol] = import_react34.useState(0);
-  const [countdown, setCountdown] = import_react34.useState(null);
-  const [spinnerFrame, setSpinnerFrame] = import_react34.useState(0);
+  const [config, setConfig] = import_react35.useState(initialConfig);
+  const [selectedFlightIndex, setSelectedFlightIndex] = import_react35.useState(0);
+  const [selectedSeat, setSelectedSeat] = import_react35.useState(null);
+  const [focusMode, setFocusMode] = import_react35.useState("flights");
+  const [seatCursorRow, setSeatCursorRow] = import_react35.useState(1);
+  const [seatCursorCol, setSeatCursorCol] = import_react35.useState(0);
+  const [countdown, setCountdown] = import_react35.useState(null);
+  const [spinnerFrame, setSpinnerFrame] = import_react35.useState(0);
   const spinnerChars = ["|", "/", "-", "\\"];
   const ipc = useCanvasServer({
     id,
@@ -26649,7 +26791,7 @@ function FlightCanvas({
   const flights = config?.flights || [];
   const selectedFlight = flights[selectedFlightIndex];
   const seatmap = selectedFlight?.seatmap;
-  import_react34.useEffect(() => {
+  import_react35.useEffect(() => {
     const updateDimensions = () => {
       setDimensions({
         width: stdout?.columns || 120,
@@ -26662,7 +26804,7 @@ function FlightCanvas({
       stdout?.off("resize", updateDimensions);
     };
   }, [stdout]);
-  import_react34.useEffect(() => {
+  import_react35.useEffect(() => {
     if (countdown === null)
       return;
     if (countdown === -1) {
@@ -26680,7 +26822,7 @@ function FlightCanvas({
     }, 1000);
     return () => clearTimeout(timer);
   }, [countdown, exit]);
-  import_react34.useEffect(() => {
+  import_react35.useEffect(() => {
     if (countdown === null)
       return;
     const interval = setInterval(() => {
@@ -26688,7 +26830,7 @@ function FlightCanvas({
     }, 100);
     return () => clearInterval(interval);
   }, [countdown, spinnerChars.length]);
-  const isSeatAvailable = import_react34.useCallback((row, letter) => {
+  const isSeatAvailable = import_react35.useCallback((row, letter) => {
     if (!seatmap)
       return false;
     const seat = buildSeat(row, letter);
@@ -26698,7 +26840,7 @@ function FlightCanvas({
       return false;
     return true;
   }, [seatmap]);
-  const handleConfirm = import_react34.useCallback((skipCountdown = false) => {
+  const handleConfirm = import_react35.useCallback((skipCountdown = false) => {
     if (!selectedFlight)
       return;
     const result = {
@@ -26784,35 +26926,35 @@ function FlightCanvas({
   const rightPanelWidth = termWidth - leftPanelWidth - 4;
   const seatmapHeight = seatmap ? Math.min(14, Math.max(12, Math.floor(contentHeight * 0.45))) : 0;
   const detailHeight = contentHeight - seatmapHeight;
-  return /* @__PURE__ */ jsx_dev_runtime13.jsxDEV(Box_default, {
+  return /* @__PURE__ */ jsx_dev_runtime15.jsxDEV(Box_default, {
     flexDirection: "column",
     width: termWidth,
     height: termHeight,
     children: [
-      /* @__PURE__ */ jsx_dev_runtime13.jsxDEV(CyberpunkHeader, {
+      /* @__PURE__ */ jsx_dev_runtime15.jsxDEV(CyberpunkHeader, {
         title: config?.title || "// FLIGHT_BOOKING_TERMINAL //",
         width: termWidth
       }, undefined, false, undefined, this),
-      /* @__PURE__ */ jsx_dev_runtime13.jsxDEV(Box_default, {
+      /* @__PURE__ */ jsx_dev_runtime15.jsxDEV(Box_default, {
         flexDirection: "row",
         height: contentHeight,
         children: [
-          /* @__PURE__ */ jsx_dev_runtime13.jsxDEV(Box_default, {
+          /* @__PURE__ */ jsx_dev_runtime15.jsxDEV(Box_default, {
             flexDirection: "column",
             width: leftPanelWidth,
             borderStyle: "single",
             borderColor: focusMode === "flights" ? CYBER_COLORS.neonCyan : CYBER_COLORS.dim,
             paddingX: 1,
             children: [
-              /* @__PURE__ */ jsx_dev_runtime13.jsxDEV(Box_default, {
+              /* @__PURE__ */ jsx_dev_runtime15.jsxDEV(Box_default, {
                 marginBottom: 1,
-                children: /* @__PURE__ */ jsx_dev_runtime13.jsxDEV(Text, {
+                children: /* @__PURE__ */ jsx_dev_runtime15.jsxDEV(Text, {
                   color: CYBER_COLORS.neonMagenta,
                   bold: true,
                   children: "[ FLIGHTS ]"
                 }, undefined, false, undefined, this)
               }, undefined, false, undefined, this),
-              /* @__PURE__ */ jsx_dev_runtime13.jsxDEV(FlightList, {
+              /* @__PURE__ */ jsx_dev_runtime15.jsxDEV(FlightList, {
                 flights,
                 selectedIndex: selectedFlightIndex,
                 focused: focusMode === "flights",
@@ -26820,34 +26962,34 @@ function FlightCanvas({
               }, undefined, false, undefined, this)
             ]
           }, undefined, true, undefined, this),
-          /* @__PURE__ */ jsx_dev_runtime13.jsxDEV(Box_default, {
+          /* @__PURE__ */ jsx_dev_runtime15.jsxDEV(Box_default, {
             flexDirection: "column",
             width: rightPanelWidth,
             paddingLeft: 1,
             children: [
-              /* @__PURE__ */ jsx_dev_runtime13.jsxDEV(Box_default, {
+              /* @__PURE__ */ jsx_dev_runtime15.jsxDEV(Box_default, {
                 flexDirection: "column",
                 borderStyle: "single",
                 borderColor: CYBER_COLORS.dim,
                 paddingX: 1,
                 height: Math.floor(detailHeight * 0.4),
                 children: [
-                  /* @__PURE__ */ jsx_dev_runtime13.jsxDEV(Box_default, {
+                  /* @__PURE__ */ jsx_dev_runtime15.jsxDEV(Box_default, {
                     marginBottom: 1,
-                    children: /* @__PURE__ */ jsx_dev_runtime13.jsxDEV(Text, {
+                    children: /* @__PURE__ */ jsx_dev_runtime15.jsxDEV(Text, {
                       color: CYBER_COLORS.neonMagenta,
                       bold: true,
                       children: "[ ROUTE ]"
                     }, undefined, false, undefined, this)
                   }, undefined, false, undefined, this),
-                  selectedFlight && /* @__PURE__ */ jsx_dev_runtime13.jsxDEV(RouteDisplay, {
+                  selectedFlight && /* @__PURE__ */ jsx_dev_runtime15.jsxDEV(RouteDisplay, {
                     origin: selectedFlight.origin,
                     destination: selectedFlight.destination,
                     width: rightPanelWidth - 4
                   }, undefined, false, undefined, this)
                 ]
               }, undefined, true, undefined, this),
-              /* @__PURE__ */ jsx_dev_runtime13.jsxDEV(Box_default, {
+              /* @__PURE__ */ jsx_dev_runtime15.jsxDEV(Box_default, {
                 flexDirection: "column",
                 borderStyle: "single",
                 borderColor: CYBER_COLORS.dim,
@@ -26855,35 +26997,35 @@ function FlightCanvas({
                 marginTop: 0,
                 height: Math.floor(detailHeight * 0.6),
                 children: [
-                  /* @__PURE__ */ jsx_dev_runtime13.jsxDEV(Box_default, {
+                  /* @__PURE__ */ jsx_dev_runtime15.jsxDEV(Box_default, {
                     marginBottom: 1,
-                    children: /* @__PURE__ */ jsx_dev_runtime13.jsxDEV(Text, {
+                    children: /* @__PURE__ */ jsx_dev_runtime15.jsxDEV(Text, {
                       color: CYBER_COLORS.neonMagenta,
                       bold: true,
                       children: "[ FLIGHT INFO ]"
                     }, undefined, false, undefined, this)
                   }, undefined, false, undefined, this),
-                  selectedFlight && /* @__PURE__ */ jsx_dev_runtime13.jsxDEV(FlightInfo, {
+                  selectedFlight && /* @__PURE__ */ jsx_dev_runtime15.jsxDEV(FlightInfo, {
                     flight: selectedFlight
                   }, undefined, false, undefined, this)
                 ]
               }, undefined, true, undefined, this),
-              seatmap && /* @__PURE__ */ jsx_dev_runtime13.jsxDEV(Box_default, {
+              seatmap && /* @__PURE__ */ jsx_dev_runtime15.jsxDEV(Box_default, {
                 flexDirection: "column",
                 borderStyle: "single",
                 borderColor: focusMode === "seatmap" ? CYBER_COLORS.neonCyan : CYBER_COLORS.dim,
                 paddingX: 1,
                 height: seatmapHeight,
                 children: [
-                  /* @__PURE__ */ jsx_dev_runtime13.jsxDEV(Box_default, {
+                  /* @__PURE__ */ jsx_dev_runtime15.jsxDEV(Box_default, {
                     marginBottom: 1,
                     children: [
-                      /* @__PURE__ */ jsx_dev_runtime13.jsxDEV(Text, {
+                      /* @__PURE__ */ jsx_dev_runtime15.jsxDEV(Text, {
                         color: CYBER_COLORS.neonMagenta,
                         bold: true,
                         children: "[ SEATMAP ]"
                       }, undefined, false, undefined, this),
-                      selectedSeat && /* @__PURE__ */ jsx_dev_runtime13.jsxDEV(Text, {
+                      selectedSeat && /* @__PURE__ */ jsx_dev_runtime15.jsxDEV(Text, {
                         color: CYBER_COLORS.neonGreen,
                         children: [
                           " Seat: ",
@@ -26892,7 +27034,7 @@ function FlightCanvas({
                       }, undefined, true, undefined, this)
                     ]
                   }, undefined, true, undefined, this),
-                  /* @__PURE__ */ jsx_dev_runtime13.jsxDEV(SeatmapPanel, {
+                  /* @__PURE__ */ jsx_dev_runtime15.jsxDEV(SeatmapPanel, {
                     seatmap,
                     selectedSeat,
                     cursorRow: seatCursorRow,
@@ -26907,7 +27049,7 @@ function FlightCanvas({
           }, undefined, true, undefined, this)
         ]
       }, undefined, true, undefined, this),
-      /* @__PURE__ */ jsx_dev_runtime13.jsxDEV(StatusBar, {
+      /* @__PURE__ */ jsx_dev_runtime15.jsxDEV(StatusBar, {
         focusMode,
         hasSeatmap: !!seatmap,
         selectedSeat,
@@ -26919,7 +27061,7 @@ function FlightCanvas({
     ]
   }, undefined, true, undefined, this);
 }
-var import_react34, jsx_dev_runtime13;
+var import_react35, jsx_dev_runtime15;
 var init_flight = __esm(async () => {
   init_types4();
   await __promiseAll([
@@ -26932,8 +27074,8 @@ var init_flight = __esm(async () => {
     init_seatmap_panel(),
     init_status_bar()
   ]);
-  import_react34 = __toESM(require_react(), 1);
-  jsx_dev_runtime13 = __toESM(require_jsx_dev_runtime(), 1);
+  import_react35 = __toESM(require_react(), 1);
+  jsx_dev_runtime15 = __toESM(require_jsx_dev_runtime(), 1);
 });
 
 // canvas/src/canvases/diff/view.tsx
@@ -26945,27 +27087,27 @@ function DiffView({
   focused,
   onSubmit
 }) {
-  const flatHunks = import_react35.useMemo(() => {
+  const flatHunks = import_react36.useMemo(() => {
     const refs = [];
     files.forEach((f, fileIndex) => {
       f.hunks.forEach((_h, hunkIndex) => refs.push({ fileIndex, hunkIndex }));
     });
     return refs;
   }, [files]);
-  const [cursor, setCursor] = import_react35.useState(0);
-  const cursorRef = import_react35.useRef(cursor);
+  const [cursor, setCursor] = import_react36.useState(0);
+  const cursorRef = import_react36.useRef(cursor);
   cursorRef.current = cursor;
-  const [lineOffset, setLineOffset] = import_react35.useState(0);
-  const maxLineOffsetRef = import_react35.useRef(0);
-  const hunkRowsRef = import_react35.useRef(1);
+  const [lineOffset, setLineOffset] = import_react36.useState(0);
+  const maxLineOffsetRef = import_react36.useRef(0);
+  const hunkRowsRef = import_react36.useRef(1);
   function maxLineOffsetForHunk(flatIndex) {
     const ref = flatHunks[flatIndex];
     const hunk = ref ? files[ref.fileIndex]?.hunks[ref.hunkIndex] : undefined;
     const lineCount = hunk?.lines.length ?? 0;
     return Math.max(0, lineCount - hunkRowsRef.current);
   }
-  const [decisions, setDecisions] = import_react35.useState(new Map);
-  const decisionsRef = import_react35.useRef(decisions);
+  const [decisions, setDecisions] = import_react36.useState(new Map);
+  const decisionsRef = import_react36.useRef(decisions);
   decisionsRef.current = decisions;
   use_input_default((input, key) => {
     if (key.return) {
@@ -27020,10 +27162,10 @@ function DiffView({
     }
   }, { isActive: focused });
   if (files.length === 0) {
-    return /* @__PURE__ */ jsx_dev_runtime14.jsxDEV(Box_default, {
+    return /* @__PURE__ */ jsx_dev_runtime16.jsxDEV(Box_default, {
       borderStyle: "round",
       padding: 1,
-      children: /* @__PURE__ */ jsx_dev_runtime14.jsxDEV(Text, {
+      children: /* @__PURE__ */ jsx_dev_runtime16.jsxDEV(Text, {
         dimColor: true,
         children: "Nothing to review."
       }, undefined, false, undefined, this)
@@ -27047,16 +27189,16 @@ function DiffView({
   const clampedLineOffset = Math.min(lineOffset, maxLineOffset);
   const visibleLines = hunkLines.slice(clampedLineOffset, clampedLineOffset + hunkRows);
   const nestedInnerWidth = Math.max(1, columns - NESTED_HORIZONTAL_CHROME);
-  return /* @__PURE__ */ jsx_dev_runtime14.jsxDEV(Box_default, {
+  return /* @__PURE__ */ jsx_dev_runtime16.jsxDEV(Box_default, {
     flexDirection: "column",
     children: [
-      /* @__PURE__ */ jsx_dev_runtime14.jsxDEV(Box_default, {
+      /* @__PURE__ */ jsx_dev_runtime16.jsxDEV(Box_default, {
         flexDirection: "column",
         borderStyle: "round",
         borderColor: focused ? "cyan" : "gray",
         paddingX: 1,
         children: [
-          /* @__PURE__ */ jsx_dev_runtime14.jsxDEV(Text, {
+          /* @__PURE__ */ jsx_dev_runtime16.jsxDEV(Text, {
             bold: true,
             children: [
               title ?? "Review Changes",
@@ -27072,7 +27214,7 @@ function DiffView({
             const rawEntry = `${f.newPath} (${f.status}) ${marker}`;
             const entryBudget = Math.max(1, nestedInnerWidth - 2);
             const entryText = truncateWithEllipsis(rawEntry, entryBudget);
-            return /* @__PURE__ */ jsx_dev_runtime14.jsxDEV(Text, {
+            return /* @__PURE__ */ jsx_dev_runtime16.jsxDEV(Text, {
               color: isCurrentFile ? "cyan" : undefined,
               children: [
                 isCurrentFile ? "> " : "  ",
@@ -27082,7 +27224,7 @@ function DiffView({
           })
         ]
       }, undefined, true, undefined, this),
-      currentHunk && currentFile ? /* @__PURE__ */ jsx_dev_runtime14.jsxDEV(Box_default, {
+      currentHunk && currentFile ? /* @__PURE__ */ jsx_dev_runtime16.jsxDEV(Box_default, {
         flexDirection: "column",
         borderStyle: "round",
         paddingX: 1,
@@ -27092,7 +27234,7 @@ function DiffView({
             const suffix = hunkLines.length > hunkRows ? `  [lines ${clampedLineOffset + 1}-${clampedLineOffset + visibleLines.length} of ${hunkLines.length}]` : "";
             const headerBudget = Math.max(1, nestedInnerWidth - displayWidth(suffix));
             const header = truncateWithEllipsis(currentHunk.header, headerBudget);
-            return /* @__PURE__ */ jsx_dev_runtime14.jsxDEV(Text, {
+            return /* @__PURE__ */ jsx_dev_runtime16.jsxDEV(Text, {
               dimColor: true,
               children: [
                 header,
@@ -27100,14 +27242,14 @@ function DiffView({
               ]
             }, undefined, true, undefined, this);
           })(),
-          visibleLines.map((line, i) => /* @__PURE__ */ jsx_dev_runtime14.jsxDEV(Text, {
+          visibleLines.map((line, i) => /* @__PURE__ */ jsx_dev_runtime16.jsxDEV(Text, {
             color: line.type === "add" ? "green" : line.type === "remove" ? "red" : undefined,
             children: [
               line.type === "add" ? "+" : line.type === "remove" ? "-" : " ",
               line.content
             ]
           }, clampedLineOffset + i, true, undefined, this)),
-          /* @__PURE__ */ jsx_dev_runtime14.jsxDEV(Text, {
+          /* @__PURE__ */ jsx_dev_runtime16.jsxDEV(Text, {
             bold: true,
             color: decisions.get(currentHunk.id) === "approved" ? "green" : decisions.get(currentHunk.id) === "rejected" ? "red" : "yellow",
             children: [
@@ -27117,18 +27259,18 @@ function DiffView({
             ]
           }, undefined, true, undefined, this)
         ]
-      }, undefined, true, undefined, this) : /* @__PURE__ */ jsx_dev_runtime14.jsxDEV(Box_default, {
+      }, undefined, true, undefined, this) : /* @__PURE__ */ jsx_dev_runtime16.jsxDEV(Box_default, {
         borderStyle: "round",
         paddingX: 1,
         marginTop: 1,
-        children: /* @__PURE__ */ jsx_dev_runtime14.jsxDEV(Text, {
+        children: /* @__PURE__ */ jsx_dev_runtime16.jsxDEV(Text, {
           dimColor: true,
           children: "No reviewable hunks \u2014 every file above is binary or empty. Enter submits an empty decision list."
         }, undefined, false, undefined, this)
       }, undefined, false, undefined, this),
-      /* @__PURE__ */ jsx_dev_runtime14.jsxDEV(Box_default, {
+      /* @__PURE__ */ jsx_dev_runtime16.jsxDEV(Box_default, {
         marginTop: 1,
-        children: /* @__PURE__ */ jsx_dev_runtime14.jsxDEV(Text, {
+        children: /* @__PURE__ */ jsx_dev_runtime16.jsxDEV(Text, {
           dimColor: true,
           children: flatHunks.length === 0 ? NO_HUNKS_FOOTER_HINT : FOOTER_HINT
         }, undefined, false, undefined, this)
@@ -27136,12 +27278,12 @@ function DiffView({
     ]
   }, undefined, true, undefined, this);
 }
-var import_react35, jsx_dev_runtime14, CHROME_ROWS = 10, MAX_FILE_ROWS = 5, HORIZONTAL_CHROME = 0, NESTED_HORIZONTAL_CHROME = 4, FOOTER_HINT = "a/r: approve/reject  \u2191/\u2193: hunk  PgUp/PgDn: scroll  Enter: submit  Esc: cancel", NO_HUNKS_FOOTER_HINT = "Enter: submit  Esc: cancel";
+var import_react36, jsx_dev_runtime16, CHROME_ROWS = 10, MAX_FILE_ROWS = 5, HORIZONTAL_CHROME = 0, NESTED_HORIZONTAL_CHROME = 4, FOOTER_HINT = "a/r: approve/reject  \u2191/\u2193: hunk  PgUp/PgDn: scroll  Enter: submit  Esc: cancel", NO_HUNKS_FOOTER_HINT = "Enter: submit  Esc: cancel";
 var init_view = __esm(async () => {
   init_width();
   await init_build2();
-  import_react35 = __toESM(require_react(), 1);
-  jsx_dev_runtime14 = __toESM(require_jsx_dev_runtime(), 1);
+  import_react36 = __toESM(require_react(), 1);
+  jsx_dev_runtime16 = __toESM(require_jsx_dev_runtime(), 1);
 });
 
 // canvas/src/canvases/diff/parser.ts
@@ -27359,11 +27501,11 @@ function Diff({
 }) {
   const { exit } = use_app_default();
   const { stdout } = use_stdout_default();
-  const [config, setConfig] = import_react36.useState(initialConfig);
-  const [generation, setGeneration] = import_react36.useState(0);
-  const { files, error } = import_react36.useMemo(() => parseDiffConfig(config), [config]);
-  const submittedRef = import_react36.useRef(false);
-  const sentRef = import_react36.useRef(false);
+  const [config, setConfig] = import_react37.useState(initialConfig);
+  const [generation, setGeneration] = import_react37.useState(0);
+  const { files, error } = import_react37.useMemo(() => parseDiffConfig(config), [config]);
+  const submittedRef = import_react37.useRef(false);
+  const sentRef = import_react37.useRef(false);
   const ipc = useCanvasServer({
     id,
     kind: "diff",
@@ -27376,7 +27518,7 @@ function Diff({
       sentRef.current = false;
     }
   });
-  import_react36.useEffect(() => {
+  import_react37.useEffect(() => {
     if (error && ipc.isConnected && !sentRef.current) {
       sentRef.current = true;
       ipc.sendError(error);
@@ -27399,12 +27541,12 @@ function Diff({
     exit();
   }
   if (error) {
-    return /* @__PURE__ */ jsx_dev_runtime15.jsxDEV(Box_default, {
+    return /* @__PURE__ */ jsx_dev_runtime17.jsxDEV(Box_default, {
       flexDirection: "column",
       borderStyle: "round",
       borderColor: "red",
       padding: 1,
-      children: /* @__PURE__ */ jsx_dev_runtime15.jsxDEV(Text, {
+      children: /* @__PURE__ */ jsx_dev_runtime17.jsxDEV(Text, {
         color: "red",
         children: [
           "Failed to parse diff: ",
@@ -27413,7 +27555,7 @@ function Diff({
       }, undefined, true, undefined, this)
     }, undefined, false, undefined, this);
   }
-  return /* @__PURE__ */ jsx_dev_runtime15.jsxDEV(DiffView, {
+  return /* @__PURE__ */ jsx_dev_runtime17.jsxDEV(DiffView, {
     files,
     title: config?.title,
     budget: stdout?.rows ?? 24,
@@ -27422,7 +27564,7 @@ function Diff({
     onSubmit: handleSubmit
   }, generation, false, undefined, this);
 }
-var import_react36, jsx_dev_runtime15;
+var import_react37, jsx_dev_runtime17;
 var init_diff2 = __esm(async () => {
   init_validate2();
   await __promiseAll([
@@ -27430,8 +27572,8 @@ var init_diff2 = __esm(async () => {
     init_use_canvas_server(),
     init_view()
   ]);
-  import_react36 = __toESM(require_react(), 1);
-  jsx_dev_runtime15 = __toESM(require_jsx_dev_runtime(), 1);
+  import_react37 = __toESM(require_react(), 1);
+  jsx_dev_runtime17 = __toESM(require_jsx_dev_runtime(), 1);
 });
 
 // canvas/src/canvases/picker/view.tsx
@@ -27456,11 +27598,11 @@ function PickerView({
   focused,
   onSubmit
 }) {
-  const [cursor, setCursor] = import_react37.useState(() => firstEnabledIndex(options));
-  const cursorRef = import_react37.useRef(cursor);
+  const [cursor, setCursor] = import_react38.useState(() => firstEnabledIndex(options));
+  const cursorRef = import_react38.useRef(cursor);
   cursorRef.current = cursor;
-  const [checked, setChecked] = import_react37.useState(new Set);
-  const checkedRef = import_react37.useRef(checked);
+  const [checked, setChecked] = import_react38.useState(new Set);
+  const checkedRef = import_react38.useRef(checked);
   checkedRef.current = checked;
   function moveCursor(delta) {
     if (options.length === 0)
@@ -27514,17 +27656,17 @@ function PickerView({
   const visibleOptions = options.slice(windowStart, windowStart + visibleCount);
   const optionPrefixWidth = mode === "multi" ? 6 : 2;
   const optionTextWidth = Math.max(1, innerWidth - optionPrefixWidth);
-  return /* @__PURE__ */ jsx_dev_runtime16.jsxDEV(Box_default, {
+  return /* @__PURE__ */ jsx_dev_runtime18.jsxDEV(Box_default, {
     flexDirection: "column",
     borderStyle: "round",
     borderColor: focused ? "cyan" : "gray",
     paddingX: 1,
     children: [
-      /* @__PURE__ */ jsx_dev_runtime16.jsxDEV(Text, {
+      /* @__PURE__ */ jsx_dev_runtime18.jsxDEV(Text, {
         bold: true,
         children: title ?? "Choose"
       }, undefined, false, undefined, this),
-      prompt ? /* @__PURE__ */ jsx_dev_runtime16.jsxDEV(Text, {
+      prompt ? /* @__PURE__ */ jsx_dev_runtime18.jsxDEV(Text, {
         dimColor: true,
         children: prompt
       }, undefined, false, undefined, this) : null,
@@ -27535,7 +27677,7 @@ function PickerView({
         const prefix = mode === "multi" ? `${isCursor ? "> " : "  "}${isChecked ? "[x] " : "[ ] "}` : isCursor ? "> " : "  ";
         const rawText = opt.label + (opt.description ? ` \u2014 ${opt.description}` : "");
         const text = truncateWithEllipsis(rawText, optionTextWidth);
-        return /* @__PURE__ */ jsx_dev_runtime16.jsxDEV(Text, {
+        return /* @__PURE__ */ jsx_dev_runtime18.jsxDEV(Text, {
           color: opt.disabled ? undefined : isCursor ? "cyan" : undefined,
           dimColor: opt.disabled,
           children: [
@@ -27544,9 +27686,9 @@ function PickerView({
           ]
         }, opt.id, true, undefined, this);
       }),
-      /* @__PURE__ */ jsx_dev_runtime16.jsxDEV(Box_default, {
+      /* @__PURE__ */ jsx_dev_runtime18.jsxDEV(Box_default, {
         marginTop: 1,
-        children: /* @__PURE__ */ jsx_dev_runtime16.jsxDEV(Text, {
+        children: /* @__PURE__ */ jsx_dev_runtime18.jsxDEV(Text, {
           dimColor: true,
           children: [
             options.length > visibleCount ? `${windowStart + 1}-${windowStart + visibleOptions.length} of ${options.length}  ` : "",
@@ -27557,12 +27699,12 @@ function PickerView({
     ]
   }, undefined, true, undefined, this);
 }
-var import_react37, jsx_dev_runtime16, CHROME_ROWS2 = 5, HORIZONTAL_CHROME2 = 4, SINGLE_FOOTER_HINT = "\u2191/\u2193: navigate  Enter: select  Esc: cancel", MULTI_FOOTER_HINT = "\u2191/\u2193: navigate  Space: toggle  Enter: submit  Esc: cancel";
+var import_react38, jsx_dev_runtime18, CHROME_ROWS2 = 5, HORIZONTAL_CHROME2 = 4, SINGLE_FOOTER_HINT = "\u2191/\u2193: navigate  Enter: select  Esc: cancel", MULTI_FOOTER_HINT = "\u2191/\u2193: navigate  Space: toggle  Enter: submit  Esc: cancel";
 var init_view2 = __esm(async () => {
   init_width();
   await init_build2();
-  import_react37 = __toESM(require_react(), 1);
-  jsx_dev_runtime16 = __toESM(require_jsx_dev_runtime(), 1);
+  import_react38 = __toESM(require_react(), 1);
+  jsx_dev_runtime18 = __toESM(require_jsx_dev_runtime(), 1);
 });
 
 // canvas/src/canvases/picker/validate.ts
@@ -27630,11 +27772,11 @@ function Picker({
 }) {
   const { exit } = use_app_default();
   const { stdout } = use_stdout_default();
-  const [config, setConfig] = import_react38.useState(initialConfig);
-  const [generation, setGeneration] = import_react38.useState(0);
-  const { options, mode, error } = import_react38.useMemo(() => validatePicker(config), [config]);
-  const submittedRef = import_react38.useRef(false);
-  const sentRef = import_react38.useRef(false);
+  const [config, setConfig] = import_react39.useState(initialConfig);
+  const [generation, setGeneration] = import_react39.useState(0);
+  const { options, mode, error } = import_react39.useMemo(() => validatePicker(config), [config]);
+  const submittedRef = import_react39.useRef(false);
+  const sentRef = import_react39.useRef(false);
   const ipc = useCanvasServer({
     id,
     kind: "picker",
@@ -27647,7 +27789,7 @@ function Picker({
       sentRef.current = false;
     }
   });
-  import_react38.useEffect(() => {
+  import_react39.useEffect(() => {
     if (error && ipc.isConnected && !sentRef.current) {
       sentRef.current = true;
       ipc.sendError(error);
@@ -27670,18 +27812,18 @@ function Picker({
     exit();
   }
   if (error) {
-    return /* @__PURE__ */ jsx_dev_runtime17.jsxDEV(Box_default, {
+    return /* @__PURE__ */ jsx_dev_runtime19.jsxDEV(Box_default, {
       flexDirection: "column",
       borderStyle: "round",
       borderColor: "red",
       padding: 1,
-      children: /* @__PURE__ */ jsx_dev_runtime17.jsxDEV(Text, {
+      children: /* @__PURE__ */ jsx_dev_runtime19.jsxDEV(Text, {
         color: "red",
         children: error
       }, undefined, false, undefined, this)
     }, undefined, false, undefined, this);
   }
-  return /* @__PURE__ */ jsx_dev_runtime17.jsxDEV(PickerView, {
+  return /* @__PURE__ */ jsx_dev_runtime19.jsxDEV(PickerView, {
     options,
     mode,
     title: config?.title,
@@ -27692,15 +27834,15 @@ function Picker({
     onSubmit: handleSubmit
   }, generation, false, undefined, this);
 }
-var import_react38, jsx_dev_runtime17;
+var import_react39, jsx_dev_runtime19;
 var init_picker = __esm(async () => {
   await __promiseAll([
     init_build2(),
     init_use_canvas_server(),
     init_view2()
   ]);
-  import_react38 = __toESM(require_react(), 1);
-  jsx_dev_runtime17 = __toESM(require_jsx_dev_runtime(), 1);
+  import_react39 = __toESM(require_react(), 1);
+  jsx_dev_runtime19 = __toESM(require_jsx_dev_runtime(), 1);
 });
 
 // canvas/src/canvases/form/view.tsx
@@ -27756,21 +27898,21 @@ function FormView({
   focused,
   onSubmit
 }) {
-  const valuesRef = import_react39.useRef((() => {
+  const valuesRef = import_react40.useRef((() => {
     const init = {};
     for (const f of fields)
       init[f.id] = initialValue(f);
     return init;
   })());
-  const [, forceRender] = import_react39.useReducer((n) => n + 1, 0);
+  const [, forceRender] = import_react40.useReducer((n) => n + 1, 0);
   function setValue(id, value) {
     valuesRef.current = { ...valuesRef.current, [id]: value };
     forceRender();
   }
-  const [focusIndex, setFocusIndex] = import_react39.useState(0);
-  const focusIndexRef = import_react39.useRef(focusIndex);
+  const [focusIndex, setFocusIndex] = import_react40.useState(0);
+  const focusIndexRef = import_react40.useRef(focusIndex);
   focusIndexRef.current = focusIndex;
-  const [errors, setErrors] = import_react39.useState(new Set);
+  const [errors, setErrors] = import_react40.useState(new Set);
   function moveFocus(delta) {
     const currentField = fields[focusIndexRef.current];
     if (currentField?.type === "number") {
@@ -27889,13 +28031,13 @@ function FormView({
   visibleFields = Math.max(1, Math.floor((budget - CHROME_ROWS3 - footerOverflow) / ROWS_PER_FIELD));
   const windowStart = windowStartFor(fields.length, focusIndex, visibleFields);
   const windowFields = fields.slice(windowStart, windowStart + visibleFields);
-  return /* @__PURE__ */ jsx_dev_runtime18.jsxDEV(Box_default, {
+  return /* @__PURE__ */ jsx_dev_runtime20.jsxDEV(Box_default, {
     flexDirection: "column",
     borderStyle: "round",
     borderColor: focused ? "cyan" : "gray",
     paddingX: 1,
     children: [
-      /* @__PURE__ */ jsx_dev_runtime18.jsxDEV(Text, {
+      /* @__PURE__ */ jsx_dev_runtime20.jsxDEV(Text, {
         bold: true,
         children: title ?? "Fill in the form"
       }, undefined, false, undefined, this),
@@ -27910,10 +28052,10 @@ function FormView({
         const labelPrefixWidth = 2;
         const labelBudget = Math.max(1, innerWidth - labelPrefixWidth - displayWidth(requiredMark) - displayWidth(errorMark));
         const shownLabel = truncateWithEllipsis(f.label, labelBudget);
-        return /* @__PURE__ */ jsx_dev_runtime18.jsxDEV(Box_default, {
+        return /* @__PURE__ */ jsx_dev_runtime20.jsxDEV(Box_default, {
           flexDirection: "column",
           children: [
-            /* @__PURE__ */ jsx_dev_runtime18.jsxDEV(Text, {
+            /* @__PURE__ */ jsx_dev_runtime20.jsxDEV(Text, {
               color: labelColor,
               children: [
                 isFocused ? "> " : "  ",
@@ -27922,11 +28064,11 @@ function FormView({
                 errorMark
               ]
             }, undefined, true, undefined, this),
-            /* @__PURE__ */ jsx_dev_runtime18.jsxDEV(Box_default, {
+            /* @__PURE__ */ jsx_dev_runtime20.jsxDEV(Box_default, {
               marginLeft: 2,
-              children: f.type === "checkbox" ? /* @__PURE__ */ jsx_dev_runtime18.jsxDEV(Text, {
+              children: f.type === "checkbox" ? /* @__PURE__ */ jsx_dev_runtime20.jsxDEV(Text, {
                 children: value ? "[x]" : "[ ]"
-              }, undefined, false, undefined, this) : f.type === "select" ? /* @__PURE__ */ jsx_dev_runtime18.jsxDEV(Text, {
+              }, undefined, false, undefined, this) : f.type === "select" ? /* @__PURE__ */ jsx_dev_runtime20.jsxDEV(Text, {
                 children: [
                   "< ",
                   f.options.find((o) => o.value === value)?.label ?? "",
@@ -27950,7 +28092,7 @@ function FormView({
                 const cursorWidth = isFocused ? 1 : 0;
                 const contentBudget = Math.max(0, availableWidth - displayWidth(marker) - trailingWidth - cursorWidth);
                 const shownLastLine = displayWidth(lastLine) > contentBudget ? truncateToWidthFromEnd(lastLine, contentBudget) : lastLine;
-                return /* @__PURE__ */ jsx_dev_runtime18.jsxDEV(Text, {
+                return /* @__PURE__ */ jsx_dev_runtime20.jsxDEV(Text, {
                   dimColor: raw.length === 0,
                   children: [
                     marker,
@@ -27964,11 +28106,11 @@ function FormView({
           ]
         }, f.id, true, undefined, this);
       }),
-      /* @__PURE__ */ jsx_dev_runtime18.jsxDEV(Box_default, {
+      /* @__PURE__ */ jsx_dev_runtime20.jsxDEV(Box_default, {
         marginTop: 1,
         children: (() => {
           const submitFocused = focusIndex === fields.length && focused;
-          return /* @__PURE__ */ jsx_dev_runtime18.jsxDEV(Text, {
+          return /* @__PURE__ */ jsx_dev_runtime20.jsxDEV(Text, {
             color: submitFocused ? "cyan" : undefined,
             bold: submitFocused,
             children: [
@@ -27978,9 +28120,9 @@ function FormView({
           }, undefined, true, undefined, this);
         })()
       }, undefined, false, undefined, this),
-      /* @__PURE__ */ jsx_dev_runtime18.jsxDEV(Box_default, {
+      /* @__PURE__ */ jsx_dev_runtime20.jsxDEV(Box_default, {
         marginTop: 1,
-        children: /* @__PURE__ */ jsx_dev_runtime18.jsxDEV(Text, {
+        children: /* @__PURE__ */ jsx_dev_runtime20.jsxDEV(Text, {
           dimColor: true,
           children: [
             fields.length > visibleFields ? `${windowStart + 1}-${windowStart + windowFields.length} of ${fields.length}  ` : "",
@@ -27991,12 +28133,12 @@ function FormView({
     ]
   }, undefined, true, undefined, this);
 }
-var import_react39, jsx_dev_runtime18, CHROME_ROWS3 = 7, ROWS_PER_FIELD = 2, HORIZONTAL_CHROME3 = 4, FOOTER_HINT2 = "Tab/Shift+Tab: move  Enter: submit (on the button)  Esc: cancel";
+var import_react40, jsx_dev_runtime20, CHROME_ROWS3 = 7, ROWS_PER_FIELD = 2, HORIZONTAL_CHROME3 = 4, FOOTER_HINT2 = "Tab/Shift+Tab: move  Enter: submit (on the button)  Esc: cancel";
 var init_view3 = __esm(async () => {
   init_width();
   await init_build2();
-  import_react39 = __toESM(require_react(), 1);
-  jsx_dev_runtime18 = __toESM(require_jsx_dev_runtime(), 1);
+  import_react40 = __toESM(require_react(), 1);
+  jsx_dev_runtime20 = __toESM(require_jsx_dev_runtime(), 1);
 });
 
 // canvas/src/canvases/form/validate.ts
@@ -28072,11 +28214,11 @@ function Form({
 }) {
   const { exit } = use_app_default();
   const { stdout } = use_stdout_default();
-  const [config, setConfig] = import_react40.useState(initialConfig);
-  const [generation, setGeneration] = import_react40.useState(0);
-  const { fields, error } = import_react40.useMemo(() => validateForm(config), [config]);
-  const submittedRef = import_react40.useRef(false);
-  const sentRef = import_react40.useRef(false);
+  const [config, setConfig] = import_react41.useState(initialConfig);
+  const [generation, setGeneration] = import_react41.useState(0);
+  const { fields, error } = import_react41.useMemo(() => validateForm(config), [config]);
+  const submittedRef = import_react41.useRef(false);
+  const sentRef = import_react41.useRef(false);
   const ipc = useCanvasServer({
     id,
     kind: "form",
@@ -28089,7 +28231,7 @@ function Form({
       sentRef.current = false;
     }
   });
-  import_react40.useEffect(() => {
+  import_react41.useEffect(() => {
     if (error && ipc.isConnected && !sentRef.current) {
       sentRef.current = true;
       ipc.sendError(error);
@@ -28112,18 +28254,18 @@ function Form({
     exit();
   }
   if (error) {
-    return /* @__PURE__ */ jsx_dev_runtime19.jsxDEV(Box_default, {
+    return /* @__PURE__ */ jsx_dev_runtime21.jsxDEV(Box_default, {
       flexDirection: "column",
       borderStyle: "round",
       borderColor: "red",
       padding: 1,
-      children: /* @__PURE__ */ jsx_dev_runtime19.jsxDEV(Text, {
+      children: /* @__PURE__ */ jsx_dev_runtime21.jsxDEV(Text, {
         color: "red",
         children: error
       }, undefined, false, undefined, this)
     }, undefined, false, undefined, this);
   }
-  return /* @__PURE__ */ jsx_dev_runtime19.jsxDEV(FormView, {
+  return /* @__PURE__ */ jsx_dev_runtime21.jsxDEV(FormView, {
     fields,
     title: config?.title,
     budget: stdout?.rows ?? 24,
@@ -28132,7 +28274,7 @@ function Form({
     onSubmit: handleSubmit
   }, generation, false, undefined, this);
 }
-var import_react40, jsx_dev_runtime19;
+var import_react41, jsx_dev_runtime21;
 var init_form = __esm(async () => {
   init_validate3();
   await __promiseAll([
@@ -28140,8 +28282,8 @@ var init_form = __esm(async () => {
     init_use_canvas_server(),
     init_view3()
   ]);
-  import_react40 = __toESM(require_react(), 1);
-  jsx_dev_runtime19 = __toESM(require_jsx_dev_runtime(), 1);
+  import_react41 = __toESM(require_react(), 1);
+  jsx_dev_runtime21 = __toESM(require_jsx_dev_runtime(), 1);
 });
 
 // canvas/src/canvases/table/view.tsx
@@ -28200,12 +28342,12 @@ function TableView({
   focused
 }) {
   const innerWidth = Math.max(1, terminalWidth - HORIZONTAL_CHROME4);
-  const widths = import_react41.useMemo(() => {
+  const widths = import_react42.useMemo(() => {
     const raw = columns.map((c) => computeWidth(c, rows));
     const budget = Math.max(columns.length, innerWidth - columns.length);
     return shrinkWidthsToFit(raw, budget);
   }, [columns, rows, innerWidth]);
-  const [scrollOffset, setScrollOffset] = import_react41.useState(0);
+  const [scrollOffset, setScrollOffset] = import_react42.useState(0);
   let footerRows = wrappedLineCount(FOOTER_HINT3, innerWidth);
   let footerOverflow = Math.max(0, footerRows - 1);
   let visibleCount = Math.max(1, budget - HEADER_OVERHEAD_ROWS - footerOverflow);
@@ -28226,17 +28368,17 @@ function TableView({
     }
   }, { isActive: focused });
   if (rows.length === 0) {
-    return /* @__PURE__ */ jsx_dev_runtime20.jsxDEV(Box_default, {
+    return /* @__PURE__ */ jsx_dev_runtime22.jsxDEV(Box_default, {
       flexDirection: "column",
       borderStyle: "round",
       borderColor: "cyan",
       padding: 1,
       children: [
-        /* @__PURE__ */ jsx_dev_runtime20.jsxDEV(Text, {
+        /* @__PURE__ */ jsx_dev_runtime22.jsxDEV(Text, {
           bold: true,
           children: title ?? "Table"
         }, undefined, false, undefined, this),
-        /* @__PURE__ */ jsx_dev_runtime20.jsxDEV(Text, {
+        /* @__PURE__ */ jsx_dev_runtime22.jsxDEV(Text, {
           dimColor: true,
           children: "No data."
         }, undefined, false, undefined, this)
@@ -28244,21 +28386,21 @@ function TableView({
     }, undefined, true, undefined, this);
   }
   const visibleRows = rows.slice(scrollOffset, scrollOffset + visibleCount);
-  return /* @__PURE__ */ jsx_dev_runtime20.jsxDEV(Box_default, {
+  return /* @__PURE__ */ jsx_dev_runtime22.jsxDEV(Box_default, {
     flexDirection: "column",
     borderStyle: "round",
     borderColor: focused ? "cyan" : "gray",
     paddingX: 1,
     children: [
-      /* @__PURE__ */ jsx_dev_runtime20.jsxDEV(Text, {
+      /* @__PURE__ */ jsx_dev_runtime22.jsxDEV(Text, {
         bold: true,
         children: [
           title ?? "Table",
           focused ? "" : "  (not focused)"
         ]
       }, undefined, true, undefined, this),
-      /* @__PURE__ */ jsx_dev_runtime20.jsxDEV(Box_default, {
-        children: columns.map((c, i) => /* @__PURE__ */ jsx_dev_runtime20.jsxDEV(Text, {
+      /* @__PURE__ */ jsx_dev_runtime22.jsxDEV(Box_default, {
+        children: columns.map((c, i) => /* @__PURE__ */ jsx_dev_runtime22.jsxDEV(Text, {
           bold: true,
           children: [
             fitCell(c.label, widths[i]),
@@ -28266,17 +28408,17 @@ function TableView({
           ]
         }, c.key, true, undefined, this))
       }, undefined, false, undefined, this),
-      visibleRows.map((row, rowIndex) => /* @__PURE__ */ jsx_dev_runtime20.jsxDEV(Box_default, {
-        children: columns.map((c, i) => /* @__PURE__ */ jsx_dev_runtime20.jsxDEV(Text, {
+      visibleRows.map((row, rowIndex) => /* @__PURE__ */ jsx_dev_runtime22.jsxDEV(Box_default, {
+        children: columns.map((c, i) => /* @__PURE__ */ jsx_dev_runtime22.jsxDEV(Text, {
           children: [
             fitCell(row[c.key] ?? "", widths[i]),
             " "
           ]
         }, c.key, true, undefined, this))
       }, scrollOffset + rowIndex, false, undefined, this)),
-      /* @__PURE__ */ jsx_dev_runtime20.jsxDEV(Box_default, {
+      /* @__PURE__ */ jsx_dev_runtime22.jsxDEV(Box_default, {
         marginTop: 1,
-        children: /* @__PURE__ */ jsx_dev_runtime20.jsxDEV(Text, {
+        children: /* @__PURE__ */ jsx_dev_runtime22.jsxDEV(Text, {
           dimColor: true,
           children: [
             rows.length > visibleCount ? `rows ${scrollOffset + 1}-${scrollOffset + visibleRows.length} of ${rows.length}  ` : "",
@@ -28287,12 +28429,12 @@ function TableView({
     ]
   }, undefined, true, undefined, this);
 }
-var import_react41, jsx_dev_runtime20, MAX_AUTO_WIDTH = 40, HEADER_OVERHEAD_ROWS = 6, HORIZONTAL_CHROME4 = 4, FOOTER_HINT3 = "\u2191/\u2193/PgUp/PgDn: scroll  Esc: close";
+var import_react42, jsx_dev_runtime22, MAX_AUTO_WIDTH = 40, HEADER_OVERHEAD_ROWS = 6, HORIZONTAL_CHROME4 = 4, FOOTER_HINT3 = "\u2191/\u2193/PgUp/PgDn: scroll  Esc: close";
 var init_view4 = __esm(async () => {
   init_width();
   await init_build2();
-  import_react41 = __toESM(require_react(), 1);
-  jsx_dev_runtime20 = __toESM(require_jsx_dev_runtime(), 1);
+  import_react42 = __toESM(require_react(), 1);
+  jsx_dev_runtime22 = __toESM(require_jsx_dev_runtime(), 1);
 });
 
 // canvas/src/canvases/table/validate.ts
@@ -28366,11 +28508,11 @@ function Table({
 }) {
   const { exit } = use_app_default();
   const { stdout } = use_stdout_default();
-  const [config, setConfig] = import_react42.useState(initialConfig);
-  const [generation, setGeneration] = import_react42.useState(0);
-  const { columns, rows, error } = import_react42.useMemo(() => validateTable(config), [config]);
-  const submittedRef = import_react42.useRef(false);
-  const sentRef = import_react42.useRef(false);
+  const [config, setConfig] = import_react43.useState(initialConfig);
+  const [generation, setGeneration] = import_react43.useState(0);
+  const { columns, rows, error } = import_react43.useMemo(() => validateTable(config), [config]);
+  const submittedRef = import_react43.useRef(false);
+  const sentRef = import_react43.useRef(false);
   const ipc = useCanvasServer({
     id,
     kind: "table",
@@ -28383,7 +28525,7 @@ function Table({
       sentRef.current = false;
     }
   });
-  import_react42.useEffect(() => {
+  import_react43.useEffect(() => {
     if (error && ipc.isConnected && !sentRef.current) {
       sentRef.current = true;
       ipc.sendError(error);
@@ -28399,18 +28541,18 @@ function Table({
     exit();
   });
   if (error) {
-    return /* @__PURE__ */ jsx_dev_runtime21.jsxDEV(Box_default, {
+    return /* @__PURE__ */ jsx_dev_runtime23.jsxDEV(Box_default, {
       flexDirection: "column",
       borderStyle: "round",
       borderColor: "red",
       padding: 1,
-      children: /* @__PURE__ */ jsx_dev_runtime21.jsxDEV(Text, {
+      children: /* @__PURE__ */ jsx_dev_runtime23.jsxDEV(Text, {
         color: "red",
         children: error
       }, undefined, false, undefined, this)
     }, undefined, false, undefined, this);
   }
-  return /* @__PURE__ */ jsx_dev_runtime21.jsxDEV(TableView, {
+  return /* @__PURE__ */ jsx_dev_runtime23.jsxDEV(TableView, {
     columns,
     rows,
     title: config?.title,
@@ -28419,15 +28561,15 @@ function Table({
     focused: true
   }, generation, false, undefined, this);
 }
-var import_react42, jsx_dev_runtime21;
+var import_react43, jsx_dev_runtime23;
 var init_table = __esm(async () => {
   await __promiseAll([
     init_build2(),
     init_use_canvas_server(),
     init_view4()
   ]);
-  import_react42 = __toESM(require_react(), 1);
-  jsx_dev_runtime21 = __toESM(require_jsx_dev_runtime(), 1);
+  import_react43 = __toESM(require_react(), 1);
+  jsx_dev_runtime23 = __toESM(require_jsx_dev_runtime(), 1);
 });
 
 // canvas/src/canvases/tree/view.tsx
@@ -28475,12 +28617,12 @@ function TreeView({
   focused,
   onSubmit
 }) {
-  const [collapsed, setCollapsed] = import_react43.useState(() => initialCollapsed(nodes));
-  const rows = import_react43.useMemo(() => flatten2(nodes, collapsed), [nodes, collapsed]);
-  const [cursor, setCursor] = import_react43.useState(0);
-  const cursorRef = import_react43.useRef(cursor);
+  const [collapsed, setCollapsed] = import_react44.useState(() => initialCollapsed(nodes));
+  const rows = import_react44.useMemo(() => flatten2(nodes, collapsed), [nodes, collapsed]);
+  const [cursor, setCursor] = import_react44.useState(0);
+  const cursorRef = import_react44.useRef(cursor);
   cursorRef.current = cursor;
-  const rowsRef = import_react43.useRef(rows);
+  const rowsRef = import_react44.useRef(rows);
   rowsRef.current = rows;
   const clamped = Math.min(cursor, Math.max(0, rows.length - 1));
   function move(delta) {
@@ -28546,17 +28688,17 @@ function TreeView({
   visibleCount = Math.max(1, budget - CHROME_ROWS4 - footerOverflow - promptRows);
   const windowStart = rows.length <= visibleCount ? 0 : Math.floor(clamped / visibleCount) * visibleCount;
   const windowRows = rows.slice(windowStart, windowStart + visibleCount);
-  return /* @__PURE__ */ jsx_dev_runtime22.jsxDEV(Box_default, {
+  return /* @__PURE__ */ jsx_dev_runtime24.jsxDEV(Box_default, {
     flexDirection: "column",
     borderStyle: "round",
     borderColor: focused ? "cyan" : "gray",
     paddingX: 1,
     children: [
-      /* @__PURE__ */ jsx_dev_runtime22.jsxDEV(Text, {
+      /* @__PURE__ */ jsx_dev_runtime24.jsxDEV(Text, {
         bold: true,
         children: title ?? "Tree"
       }, undefined, false, undefined, this),
-      prompt ? /* @__PURE__ */ jsx_dev_runtime22.jsxDEV(Text, {
+      prompt ? /* @__PURE__ */ jsx_dev_runtime24.jsxDEV(Text, {
         dimColor: true,
         children: prompt
       }, undefined, false, undefined, this) : null,
@@ -28568,7 +28710,7 @@ function TreeView({
         const labelBudget = Math.max(1, innerWidth - fixedPrefixWidth);
         const rawText = row.node.label + (row.node.badge ? ` ${row.node.badge}` : "");
         const text = truncateWithEllipsis(rawText, labelBudget);
-        return /* @__PURE__ */ jsx_dev_runtime22.jsxDEV(Text, {
+        return /* @__PURE__ */ jsx_dev_runtime24.jsxDEV(Text, {
           color: isCursor ? "cyan" : undefined,
           children: [
             isCursor ? "> " : "  ",
@@ -28578,9 +28720,9 @@ function TreeView({
           ]
         }, row.node.id, true, undefined, this);
       }),
-      /* @__PURE__ */ jsx_dev_runtime22.jsxDEV(Box_default, {
+      /* @__PURE__ */ jsx_dev_runtime24.jsxDEV(Box_default, {
         marginTop: 1,
-        children: /* @__PURE__ */ jsx_dev_runtime22.jsxDEV(Text, {
+        children: /* @__PURE__ */ jsx_dev_runtime24.jsxDEV(Text, {
           dimColor: true,
           children: [
             positionPrefix4(rows.length, clamped, visibleCount),
@@ -28591,12 +28733,12 @@ function TreeView({
     ]
   }, undefined, true, undefined, this);
 }
-var import_react43, jsx_dev_runtime22, CHROME_ROWS4 = 5, HORIZONTAL_CHROME5 = 4, FOOTER_HINT4 = "\u2191/\u2193: move  \u2190/\u2192: fold  Enter: pick  Esc: cancel";
+var import_react44, jsx_dev_runtime24, CHROME_ROWS4 = 5, HORIZONTAL_CHROME5 = 4, FOOTER_HINT4 = "\u2191/\u2193: move  \u2190/\u2192: fold  Enter: pick  Esc: cancel";
 var init_view5 = __esm(async () => {
   init_width();
   await init_build2();
-  import_react43 = __toESM(require_react(), 1);
-  jsx_dev_runtime22 = __toESM(require_jsx_dev_runtime(), 1);
+  import_react44 = __toESM(require_react(), 1);
+  jsx_dev_runtime24 = __toESM(require_jsx_dev_runtime(), 1);
 });
 
 // canvas/src/canvases/tree/validate.ts
@@ -28613,8 +28755,8 @@ function validateTree(config) {
   const walk = (list, depth, parentLabel) => {
     if (failure)
       return;
-    if (depth > MAX_DEPTH) {
-      failure = `tree config: nesting deeper than ${MAX_DEPTH} levels under ${JSON.stringify(parentLabel)}`;
+    if (depth > MAX_DEPTH2) {
+      failure = `tree config: nesting deeper than ${MAX_DEPTH2} levels under ${JSON.stringify(parentLabel)}`;
       return;
     }
     if (!Array.isArray(list)) {
@@ -28652,7 +28794,7 @@ function validateTree(config) {
     return { nodes: [], error: failure };
   return { nodes: raw, error: null };
 }
-var MAX_DEPTH = 32;
+var MAX_DEPTH2 = 32;
 
 // canvas/src/canvases/dashboard/validate.ts
 function validateRegionConfig(region) {
@@ -28752,10 +28894,10 @@ function Dashboard({
 }) {
   const { exit } = use_app_default();
   const { stdout } = use_stdout_default();
-  const [config, setConfig] = import_react44.useState(initialConfig);
-  const [generation, setGeneration] = import_react44.useState(0);
-  const { regions, error } = import_react44.useMemo(() => validateDashboard(config), [config]);
-  const focusable = import_react44.useMemo(() => {
+  const [config, setConfig] = import_react45.useState(initialConfig);
+  const [generation, setGeneration] = import_react45.useState(0);
+  const { regions, error } = import_react45.useMemo(() => validateDashboard(config), [config]);
+  const focusable = import_react45.useMemo(() => {
     const out = [];
     regions.forEach((r, i) => {
       if (isFocusable(r))
@@ -28763,11 +28905,11 @@ function Dashboard({
     });
     return out;
   }, [regions]);
-  const [focusSlot, setFocusSlot] = import_react44.useState(0);
-  const focusSlotRef = import_react44.useRef(focusSlot);
+  const [focusSlot, setFocusSlot] = import_react45.useState(0);
+  const focusSlotRef = import_react45.useRef(focusSlot);
   focusSlotRef.current = focusSlot;
-  const submittedRef = import_react44.useRef(false);
-  const sentRef = import_react44.useRef(false);
+  const submittedRef = import_react45.useRef(false);
+  const sentRef = import_react45.useRef(false);
   const ipc = useCanvasServer({
     id,
     kind: "dashboard",
@@ -28781,7 +28923,7 @@ function Dashboard({
       sentRef.current = false;
     }
   });
-  import_react44.useEffect(() => {
+  import_react45.useEffect(() => {
     if (error && ipc.isConnected && !sentRef.current) {
       sentRef.current = true;
       ipc.sendError(error);
@@ -28810,12 +28952,12 @@ function Dashboard({
     exit();
   }
   if (error) {
-    return /* @__PURE__ */ jsx_dev_runtime23.jsxDEV(Box_default, {
+    return /* @__PURE__ */ jsx_dev_runtime25.jsxDEV(Box_default, {
       flexDirection: "column",
       borderStyle: "round",
       borderColor: "red",
       padding: 1,
-      children: /* @__PURE__ */ jsx_dev_runtime23.jsxDEV(Text, {
+      children: /* @__PURE__ */ jsx_dev_runtime25.jsxDEV(Text, {
         color: "red",
         children: error
       }, undefined, false, undefined, this)
@@ -28824,24 +28966,24 @@ function Dashboard({
   const budget = Math.max(regions.length * MIN_REGION_ROWS, (stdout?.rows ?? 24) - CHROME_ROWS5);
   const heights = allocateRows(regions, budget);
   const focusedIndex = focusable[Math.min(focusSlot, Math.max(0, focusable.length - 1))];
-  return /* @__PURE__ */ jsx_dev_runtime23.jsxDEV(Box_default, {
+  return /* @__PURE__ */ jsx_dev_runtime25.jsxDEV(Box_default, {
     flexDirection: "column",
     children: [
-      /* @__PURE__ */ jsx_dev_runtime23.jsxDEV(Text, {
+      /* @__PURE__ */ jsx_dev_runtime25.jsxDEV(Text, {
         bold: true,
         children: config?.title ?? "Dashboard"
       }, undefined, false, undefined, this),
       regions.map((region, i) => {
         const focused = i === focusedIndex;
         const rows = heights[i];
-        return /* @__PURE__ */ jsx_dev_runtime23.jsxDEV(Box_default, {
+        return /* @__PURE__ */ jsx_dev_runtime25.jsxDEV(Box_default, {
           flexDirection: "column",
           children: renderRegion(region, rows, stdout?.columns ?? 80, focused, handleSubmit)
         }, region.id, false, undefined, this);
       }),
-      /* @__PURE__ */ jsx_dev_runtime23.jsxDEV(Box_default, {
+      /* @__PURE__ */ jsx_dev_runtime25.jsxDEV(Box_default, {
         marginTop: 1,
-        children: /* @__PURE__ */ jsx_dev_runtime23.jsxDEV(Text, {
+        children: /* @__PURE__ */ jsx_dev_runtime25.jsxDEV(Text, {
           dimColor: true,
           children: [
             focusable.length > 1 ? "Home/End: region  " : "",
@@ -28857,7 +28999,7 @@ function renderRegion(region, rows, columns, focused, onSubmit) {
   switch (region.kind) {
     case "picker": {
       const { options, mode } = validatePicker(region.config);
-      return /* @__PURE__ */ jsx_dev_runtime23.jsxDEV(PickerView, {
+      return /* @__PURE__ */ jsx_dev_runtime25.jsxDEV(PickerView, {
         options,
         mode,
         title: region.title,
@@ -28869,7 +29011,7 @@ function renderRegion(region, rows, columns, focused, onSubmit) {
     }
     case "table": {
       const { columns: tableColumns, rows: dataRows } = validateTable(region.config);
-      return /* @__PURE__ */ jsx_dev_runtime23.jsxDEV(TableView, {
+      return /* @__PURE__ */ jsx_dev_runtime25.jsxDEV(TableView, {
         columns: tableColumns,
         rows: dataRows,
         title: region.title,
@@ -28880,7 +29022,7 @@ function renderRegion(region, rows, columns, focused, onSubmit) {
     }
     case "form": {
       const { fields } = validateForm(region.config);
-      return /* @__PURE__ */ jsx_dev_runtime23.jsxDEV(FormView, {
+      return /* @__PURE__ */ jsx_dev_runtime25.jsxDEV(FormView, {
         fields,
         title: region.title,
         budget: rows,
@@ -28891,7 +29033,7 @@ function renderRegion(region, rows, columns, focused, onSubmit) {
     }
     case "tree": {
       const { nodes } = validateTree(region.config);
-      return /* @__PURE__ */ jsx_dev_runtime23.jsxDEV(TreeView, {
+      return /* @__PURE__ */ jsx_dev_runtime25.jsxDEV(TreeView, {
         nodes,
         title: region.title,
         budget: rows,
@@ -28902,7 +29044,7 @@ function renderRegion(region, rows, columns, focused, onSubmit) {
     }
     case "diff": {
       const { files } = parseDiffConfig(region.config);
-      return /* @__PURE__ */ jsx_dev_runtime23.jsxDEV(DiffView, {
+      return /* @__PURE__ */ jsx_dev_runtime25.jsxDEV(DiffView, {
         files,
         title: region.title,
         budget: rows,
@@ -28920,19 +29062,19 @@ function renderRegion(region, rows, columns, focused, onSubmit) {
       const truncated = lines.length > available;
       const shown = truncated ? lines.slice(0, Math.max(0, available - 1)) : lines;
       const hiddenCount = lines.length - shown.length;
-      return /* @__PURE__ */ jsx_dev_runtime23.jsxDEV(Box_default, {
+      return /* @__PURE__ */ jsx_dev_runtime25.jsxDEV(Box_default, {
         flexDirection: "column",
         borderStyle: "round",
         paddingX: 1,
         children: [
-          region.title ? /* @__PURE__ */ jsx_dev_runtime23.jsxDEV(Text, {
+          region.title ? /* @__PURE__ */ jsx_dev_runtime25.jsxDEV(Text, {
             bold: true,
             children: region.title
           }, undefined, false, undefined, this) : null,
-          shown.map((line, i) => /* @__PURE__ */ jsx_dev_runtime23.jsxDEV(Text, {
+          shown.map((line, i) => /* @__PURE__ */ jsx_dev_runtime25.jsxDEV(Text, {
             children: line
           }, i, false, undefined, this)),
-          truncated ? /* @__PURE__ */ jsx_dev_runtime23.jsxDEV(Text, {
+          truncated ? /* @__PURE__ */ jsx_dev_runtime25.jsxDEV(Text, {
             dimColor: true,
             children: [
               "(",
@@ -28945,7 +29087,7 @@ function renderRegion(region, rows, columns, focused, onSubmit) {
     }
   }
 }
-var import_react44, jsx_dev_runtime23, CHROME_ROWS5 = 3, MIN_REGION_ROWS = 3;
+var import_react45, jsx_dev_runtime25, CHROME_ROWS5 = 3, MIN_REGION_ROWS = 3;
 var init_dashboard = __esm(async () => {
   init_validate3();
   init_validate2();
@@ -28959,8 +29101,8 @@ var init_dashboard = __esm(async () => {
     init_view(),
     init_view5()
   ]);
-  import_react44 = __toESM(require_react(), 1);
-  jsx_dev_runtime23 = __toESM(require_jsx_dev_runtime(), 1);
+  import_react45 = __toESM(require_react(), 1);
+  jsx_dev_runtime25 = __toESM(require_jsx_dev_runtime(), 1);
 });
 
 // canvas/src/canvases/graphics/resample.ts
@@ -29060,11 +29202,11 @@ function HalfBlockImage({
   rows,
   background = DEFAULT_BACKGROUND
 }) {
-  const grid = import_react45.useMemo(() => toHalfBlocks(image, columns, rows, background), [image, columns, rows, background]);
-  return /* @__PURE__ */ jsx_dev_runtime24.jsxDEV(Box_default, {
+  const grid = import_react46.useMemo(() => toHalfBlocks(image, columns, rows, background), [image, columns, rows, background]);
+  return /* @__PURE__ */ jsx_dev_runtime26.jsxDEV(Box_default, {
     flexDirection: "column",
-    children: grid.map((runs, y) => /* @__PURE__ */ jsx_dev_runtime24.jsxDEV(Box_default, {
-      children: runs.map((run, i) => /* @__PURE__ */ jsx_dev_runtime24.jsxDEV(Text, {
+    children: grid.map((runs, y) => /* @__PURE__ */ jsx_dev_runtime26.jsxDEV(Box_default, {
+      children: runs.map((run, i) => /* @__PURE__ */ jsx_dev_runtime26.jsxDEV(Text, {
         color: run.fg,
         backgroundColor: run.bg,
         children: HALF_BLOCK.repeat(run.count)
@@ -29072,12 +29214,12 @@ function HalfBlockImage({
     }, y, false, undefined, this))
   }, undefined, false, undefined, this);
 }
-var import_react45, jsx_dev_runtime24;
+var import_react46, jsx_dev_runtime26;
 var init_halfblock_view = __esm(async () => {
   init_halfblocks();
   await init_build2();
-  import_react45 = __toESM(require_react(), 1);
-  jsx_dev_runtime24 = __toESM(require_jsx_dev_runtime(), 1);
+  import_react46 = __toESM(require_react(), 1);
+  jsx_dev_runtime26 = __toESM(require_jsx_dev_runtime(), 1);
 });
 
 // canvas/src/canvases/quadrants.ts
@@ -29192,11 +29334,11 @@ function QuadrantImage({
   rows,
   background = DEFAULT_BACKGROUND
 }) {
-  const grid = import_react46.useMemo(() => toQuadrants(image, columns, rows, background), [image, columns, rows, background]);
-  return /* @__PURE__ */ jsx_dev_runtime25.jsxDEV(Box_default, {
+  const grid = import_react47.useMemo(() => toQuadrants(image, columns, rows, background), [image, columns, rows, background]);
+  return /* @__PURE__ */ jsx_dev_runtime27.jsxDEV(Box_default, {
     flexDirection: "column",
-    children: grid.map((runs, y) => /* @__PURE__ */ jsx_dev_runtime25.jsxDEV(Box_default, {
-      children: runs.map((run, i) => /* @__PURE__ */ jsx_dev_runtime25.jsxDEV(Text, {
+    children: grid.map((runs, y) => /* @__PURE__ */ jsx_dev_runtime27.jsxDEV(Box_default, {
+      children: runs.map((run, i) => /* @__PURE__ */ jsx_dev_runtime27.jsxDEV(Text, {
         color: run.fg,
         backgroundColor: run.bg,
         children: run.glyph.repeat(run.count)
@@ -29204,12 +29346,12 @@ function QuadrantImage({
     }, y, false, undefined, this))
   }, undefined, false, undefined, this);
 }
-var import_react46, jsx_dev_runtime25;
+var import_react47, jsx_dev_runtime27;
 var init_quadrant_view = __esm(async () => {
   init_quadrants();
   await init_build2();
-  import_react46 = __toESM(require_react(), 1);
-  jsx_dev_runtime25 = __toESM(require_jsx_dev_runtime(), 1);
+  import_react47 = __toESM(require_react(), 1);
+  jsx_dev_runtime27 = __toESM(require_jsx_dev_runtime(), 1);
 });
 
 // canvas/src/canvases/image/types.ts
@@ -29230,36 +29372,36 @@ function ImageView({
   const chrome = BASE_CHROME_ROWS + (title !== undefined ? 1 : 0) + footerOverflow;
   const availableRows = Math.max(1, budget - chrome);
   const fit = fitToCells(image.width, image.height, innerWidth, availableRows);
-  return /* @__PURE__ */ jsx_dev_runtime26.jsxDEV(Box_default, {
+  return /* @__PURE__ */ jsx_dev_runtime28.jsxDEV(Box_default, {
     flexDirection: "column",
     borderStyle: "round",
     borderColor: "cyan",
     paddingX: 1,
     children: [
-      title !== undefined && /* @__PURE__ */ jsx_dev_runtime26.jsxDEV(Text, {
+      title !== undefined && /* @__PURE__ */ jsx_dev_runtime28.jsxDEV(Text, {
         bold: true,
         color: "cyan",
         children: title
       }, undefined, false, undefined, this),
-      mode === "quadrants" ? /* @__PURE__ */ jsx_dev_runtime26.jsxDEV(QuadrantImage, {
+      mode === "quadrants" ? /* @__PURE__ */ jsx_dev_runtime28.jsxDEV(QuadrantImage, {
         image,
         columns: fit.columns,
         rows: fit.rows,
         background
-      }, undefined, false, undefined, this) : /* @__PURE__ */ jsx_dev_runtime26.jsxDEV(HalfBlockImage, {
+      }, undefined, false, undefined, this) : /* @__PURE__ */ jsx_dev_runtime28.jsxDEV(HalfBlockImage, {
         image,
         columns: fit.columns,
         rows: fit.rows,
         background
       }, undefined, false, undefined, this),
-      /* @__PURE__ */ jsx_dev_runtime26.jsxDEV(Text, {
+      /* @__PURE__ */ jsx_dev_runtime28.jsxDEV(Text, {
         dimColor: true,
         children: footerText
       }, undefined, false, undefined, this)
     ]
   }, undefined, true, undefined, this);
 }
-var jsx_dev_runtime26, HORIZONTAL_CHROME6 = 4, BASE_CHROME_ROWS = 3;
+var jsx_dev_runtime28, HORIZONTAL_CHROME6 = 4, BASE_CHROME_ROWS = 3;
 var init_view6 = __esm(async () => {
   init_halfblocks();
   init_width();
@@ -29268,7 +29410,7 @@ var init_view6 = __esm(async () => {
     init_halfblock_view(),
     init_quadrant_view()
   ]);
-  jsx_dev_runtime26 = __toESM(require_jsx_dev_runtime(), 1);
+  jsx_dev_runtime28 = __toESM(require_jsx_dev_runtime(), 1);
 });
 
 // canvas/src/canvases/graphics/kitty.ts
@@ -29578,7 +29720,7 @@ function GraphicsImageView({
   const availableRows = Math.max(1, budget - titleRows - 1 - footerOverflow);
   const fit = fitToCells(image.width, image.height, terminalWidth, availableRows);
   const originRow = titleRows + 1;
-  import_react47.useEffect(() => {
+  import_react48.useEffect(() => {
     const bytes = paintBytes({
       tier,
       png,
@@ -29595,32 +29737,32 @@ function GraphicsImageView({
     if (bytes.length > 0)
       stdout?.write(bytes);
   });
-  return /* @__PURE__ */ jsx_dev_runtime27.jsxDEV(Box_default, {
+  return /* @__PURE__ */ jsx_dev_runtime29.jsxDEV(Box_default, {
     flexDirection: "column",
     children: [
-      title !== undefined && /* @__PURE__ */ jsx_dev_runtime27.jsxDEV(Text, {
+      title !== undefined && /* @__PURE__ */ jsx_dev_runtime29.jsxDEV(Text, {
         bold: true,
         color: "cyan",
         children: title
       }, undefined, false, undefined, this),
-      Array.from({ length: fit.rows }, (_, i) => /* @__PURE__ */ jsx_dev_runtime27.jsxDEV(Text, {
+      Array.from({ length: fit.rows }, (_, i) => /* @__PURE__ */ jsx_dev_runtime29.jsxDEV(Text, {
         children: " "
       }, i, false, undefined, this)),
-      /* @__PURE__ */ jsx_dev_runtime27.jsxDEV(Text, {
+      /* @__PURE__ */ jsx_dev_runtime29.jsxDEV(Text, {
         dimColor: true,
         children: footerText
       }, undefined, false, undefined, this)
     ]
   }, undefined, true, undefined, this);
 }
-var import_react47, jsx_dev_runtime27;
+var import_react48, jsx_dev_runtime29;
 var init_graphics_view = __esm(async () => {
   init_halfblocks();
   init_paint();
   init_width();
   await init_build2();
-  import_react47 = __toESM(require_react(), 1);
-  jsx_dev_runtime27 = __toESM(require_jsx_dev_runtime(), 1);
+  import_react48 = __toESM(require_react(), 1);
+  jsx_dev_runtime29 = __toESM(require_jsx_dev_runtime(), 1);
 });
 
 // canvas/src/canvases/image/validate.ts
@@ -29849,10 +29991,10 @@ function Image({
 }) {
   const { exit } = use_app_default();
   const { stdout } = use_stdout_default();
-  const [config, setConfig] = import_react48.useState(initialConfig);
-  const imageId = import_react48.useMemo(() => imageIdFor(id), [id]);
-  const { source, title, background, error } = import_react48.useMemo(() => validateImage(config), [config]);
-  const environment = import_react48.useMemo(() => {
+  const [config, setConfig] = import_react49.useState(initialConfig);
+  const imageId = import_react49.useMemo(() => imageIdFor(id), [id]);
+  const { source, title, background, error } = import_react49.useMemo(() => validateImage(config), [config]);
+  const environment = import_react49.useMemo(() => {
     try {
       return {
         tier: resolveGraphics(process.env),
@@ -29867,10 +30009,10 @@ function Image({
       };
     }
   }, []);
-  const [png, setPng] = import_react48.useState(null);
-  const [image, setImage] = import_react48.useState(null);
-  const [loadError, setLoadError] = import_react48.useState(null);
-  import_react48.useEffect(() => {
+  const [png, setPng] = import_react49.useState(null);
+  const [image, setImage] = import_react49.useState(null);
+  const [loadError, setLoadError] = import_react49.useState(null);
+  import_react49.useEffect(() => {
     if (source === null)
       return;
     let cancelled = false;
@@ -29899,8 +30041,8 @@ function Image({
     };
   }, [source]);
   const problem = error ?? environment.error ?? loadError;
-  const submittedRef = import_react48.useRef(false);
-  const sentRef = import_react48.useRef(false);
+  const submittedRef = import_react49.useRef(false);
+  const sentRef = import_react49.useRef(false);
   const ipc = useCanvasServer({
     id,
     kind: "image",
@@ -29911,7 +30053,7 @@ function Image({
       setConfig(next);
     }
   });
-  import_react48.useEffect(() => {
+  import_react49.useEffect(() => {
     if (problem !== null && ipc.isConnected && !sentRef.current) {
       sentRef.current = true;
       ipc.sendError(problem);
@@ -29927,31 +30069,31 @@ function Image({
     exit();
   });
   if (problem !== null) {
-    return /* @__PURE__ */ jsx_dev_runtime28.jsxDEV(Box_default, {
+    return /* @__PURE__ */ jsx_dev_runtime30.jsxDEV(Box_default, {
       flexDirection: "column",
       borderStyle: "round",
       borderColor: "red",
       padding: 1,
-      children: /* @__PURE__ */ jsx_dev_runtime28.jsxDEV(Text, {
+      children: /* @__PURE__ */ jsx_dev_runtime30.jsxDEV(Text, {
         color: "red",
         children: problem
       }, undefined, false, undefined, this)
     }, undefined, false, undefined, this);
   }
   if (image === null || png === null) {
-    return /* @__PURE__ */ jsx_dev_runtime28.jsxDEV(Box_default, {
+    return /* @__PURE__ */ jsx_dev_runtime30.jsxDEV(Box_default, {
       flexDirection: "column",
       borderStyle: "round",
       borderColor: "cyan",
       paddingX: 1,
-      children: /* @__PURE__ */ jsx_dev_runtime28.jsxDEV(Text, {
+      children: /* @__PURE__ */ jsx_dev_runtime30.jsxDEV(Text, {
         dimColor: true,
         children: loadingLabel(source)
       }, undefined, false, undefined, this)
     }, undefined, false, undefined, this);
   }
   if (usesProtocol(environment.tier)) {
-    return /* @__PURE__ */ jsx_dev_runtime28.jsxDEV(GraphicsImageView, {
+    return /* @__PURE__ */ jsx_dev_runtime30.jsxDEV(GraphicsImageView, {
       image,
       png,
       tier: environment.tier,
@@ -29963,7 +30105,7 @@ function Image({
       imageId
     }, undefined, false, undefined, this);
   }
-  return /* @__PURE__ */ jsx_dev_runtime28.jsxDEV(ImageView, {
+  return /* @__PURE__ */ jsx_dev_runtime30.jsxDEV(ImageView, {
     image,
     mode: environment.tier === "quadrants" ? "quadrants" : "halfblocks",
     title,
@@ -29977,7 +30119,7 @@ function loadingLabel(source) {
     return "Loading\u2026";
   return source.kind === "data" ? "Decoding\u2026" : `Loading ${source.path}\u2026`;
 }
-var import_react48, jsx_dev_runtime28;
+var import_react49, jsx_dev_runtime30;
 var init_image = __esm(async () => {
   init_validate5();
   init_png();
@@ -29990,8 +30132,8 @@ var init_image = __esm(async () => {
     init_view6(),
     init_graphics_view()
   ]);
-  import_react48 = __toESM(require_react(), 1);
-  jsx_dev_runtime28 = __toESM(require_jsx_dev_runtime(), 1);
+  import_react49 = __toESM(require_react(), 1);
+  jsx_dev_runtime30 = __toESM(require_jsx_dev_runtime(), 1);
 });
 
 // canvas/src/canvases/index.tsx
@@ -30043,7 +30185,7 @@ async function renderCanvas(kind, id, config, options) {
   }
 }
 async function renderCalendar(id, config, options) {
-  const { waitUntilExit } = render_default(/* @__PURE__ */ jsx_dev_runtime29.jsxDEV(Calendar, {
+  const { waitUntilExit } = render_default(/* @__PURE__ */ jsx_dev_runtime31.jsxDEV(Calendar, {
     id,
     config,
     enabled: options?.enabled ?? false,
@@ -30054,7 +30196,7 @@ async function renderCalendar(id, config, options) {
   await waitUntilExit();
 }
 async function renderDocument(id, config, options) {
-  const { waitUntilExit } = render_default(/* @__PURE__ */ jsx_dev_runtime29.jsxDEV(Document, {
+  const { waitUntilExit } = render_default(/* @__PURE__ */ jsx_dev_runtime31.jsxDEV(Document, {
     id,
     config,
     enabled: options?.enabled ?? false,
@@ -30065,7 +30207,7 @@ async function renderDocument(id, config, options) {
   await waitUntilExit();
 }
 async function renderFlight(id, config, options) {
-  const { waitUntilExit } = render_default(/* @__PURE__ */ jsx_dev_runtime29.jsxDEV(FlightCanvas, {
+  const { waitUntilExit } = render_default(/* @__PURE__ */ jsx_dev_runtime31.jsxDEV(FlightCanvas, {
     id,
     config,
     enabled: options?.enabled ?? false,
@@ -30076,7 +30218,7 @@ async function renderFlight(id, config, options) {
   await waitUntilExit();
 }
 async function renderDiff(id, config, options) {
-  const { waitUntilExit } = render_default(/* @__PURE__ */ jsx_dev_runtime29.jsxDEV(Diff, {
+  const { waitUntilExit } = render_default(/* @__PURE__ */ jsx_dev_runtime31.jsxDEV(Diff, {
     id,
     config,
     enabled: options?.enabled ?? false,
@@ -30087,7 +30229,7 @@ async function renderDiff(id, config, options) {
   await waitUntilExit();
 }
 async function renderPicker(id, config, options) {
-  const { waitUntilExit } = render_default(/* @__PURE__ */ jsx_dev_runtime29.jsxDEV(Picker, {
+  const { waitUntilExit } = render_default(/* @__PURE__ */ jsx_dev_runtime31.jsxDEV(Picker, {
     id,
     config,
     enabled: options?.enabled ?? false,
@@ -30098,7 +30240,7 @@ async function renderPicker(id, config, options) {
   await waitUntilExit();
 }
 async function renderForm(id, config, options) {
-  const { waitUntilExit } = render_default(/* @__PURE__ */ jsx_dev_runtime29.jsxDEV(Form, {
+  const { waitUntilExit } = render_default(/* @__PURE__ */ jsx_dev_runtime31.jsxDEV(Form, {
     id,
     config,
     enabled: options?.enabled ?? false,
@@ -30109,7 +30251,7 @@ async function renderForm(id, config, options) {
   await waitUntilExit();
 }
 async function renderTable(id, config, options) {
-  const { waitUntilExit } = render_default(/* @__PURE__ */ jsx_dev_runtime29.jsxDEV(Table, {
+  const { waitUntilExit } = render_default(/* @__PURE__ */ jsx_dev_runtime31.jsxDEV(Table, {
     id,
     config,
     enabled: options?.enabled ?? false,
@@ -30120,7 +30262,7 @@ async function renderTable(id, config, options) {
   await waitUntilExit();
 }
 async function renderImage(id, config, options) {
-  const { waitUntilExit } = render_default(/* @__PURE__ */ jsx_dev_runtime29.jsxDEV(Image, {
+  const { waitUntilExit } = render_default(/* @__PURE__ */ jsx_dev_runtime31.jsxDEV(Image, {
     id,
     config,
     enabled: options?.enabled ?? false,
@@ -30131,7 +30273,7 @@ async function renderImage(id, config, options) {
   await waitUntilExit();
 }
 async function renderDashboard(id, config, options) {
-  const { waitUntilExit } = render_default(/* @__PURE__ */ jsx_dev_runtime29.jsxDEV(Dashboard, {
+  const { waitUntilExit } = render_default(/* @__PURE__ */ jsx_dev_runtime31.jsxDEV(Dashboard, {
     id,
     config,
     enabled: options?.enabled ?? false,
@@ -30141,7 +30283,7 @@ async function renderDashboard(id, config, options) {
   });
   await waitUntilExit();
 }
-var jsx_dev_runtime29;
+var jsx_dev_runtime31;
 var init_canvases = __esm(async () => {
   init_paths();
   await __promiseAll([
@@ -30156,7 +30298,7 @@ var init_canvases = __esm(async () => {
     init_dashboard(),
     init_image()
   ]);
-  jsx_dev_runtime29 = __toESM(require_jsx_dev_runtime(), 1);
+  jsx_dev_runtime31 = __toESM(require_jsx_dev_runtime(), 1);
 });
 
 // node_modules/.bun/commander@14.0.3/node_modules/commander/index.js
@@ -30547,6 +30689,7 @@ function listScenarios(canvasKind) {
 // canvas/src/cli.ts
 init_host();
 init_graphics();
+init_terminal_probe();
 // canvas/package.json
 var version = "0.2.1";
 
@@ -30607,7 +30750,7 @@ async function runShow(kind, opts, io = defaultIO) {
     assertIdent("kind", kind);
     assertKnownKind(kind);
     const scenario = resolveScenario(kind, opts.scenario);
-    process.env.CANVAS_GRAPHICS = resolveGraphics(process.env, opts.graphics);
+    process.env.CANVAS_GRAPHICS = resolveGraphics(process.env, opts.graphics, systemProbe);
     const config = opts.configFile ? await Bun.file(opts.configFile).json() : undefined;
     process.stdout.write(`\x1B]0;canvas: ${kind}\x07`);
     await init_canvases();
@@ -30651,7 +30794,7 @@ async function runSpawn(kind, opts, io = defaultIO) {
     if (existing && isAlive(existing.pid)) {
       throw new Error(`Canvas ${id} is already running (pid ${existing.pid}). Close it first with \`canvas close ${id}\`, or use a different --id.`);
     }
-    const argv = buildShowArgv(kind, id, scenario, resolveGraphics(process.env));
+    const argv = buildShowArgv(kind, id, scenario, resolveGraphics(process.env, undefined, systemProbe));
     if (opts.config) {
       try {
         JSON.parse(opts.config);

@@ -806,92 +806,69 @@ left open for the user instead. kitty, Ghostty and iTerm2 remain
 unverifiable on this machine -- none is installed and Apple Terminal
 supports none of them.
 
-### Found the hard way: a tmux server can report the WRONG terminal
+### Fixed: a tmux server reporting the WRONG terminal
 
-Reproduced accidentally and then deliberately on 2026-09-10. The smoke
-script's image case went blank, and the cause was not the code:
+Reproduced by accident, then hit for real by the user, then fixed.
 
 ```
-$ tmux show-environment -g | grep -i wezterm
-TERM_PROGRAM=WezTerm
-WEZTERM_EXECUTABLE=/opt/homebrew/bin/wezterm
+$ tmux show-environment -g | grep TERM_PROGRAM
+TERM_PROGRAM=Apple_Terminal
 ```
 
-A tmux **server** keeps a global environment, taken from whichever client
-started it. That server had been started from a WezTerm pane earlier in the
-session; a session created later from **Apple Terminal** inherited
-`TERM_PROGRAM=WezTerm`, so `detectGraphics` answered `sixel` and the canvas
-emitted Sixel escapes into a terminal that cannot render them. The pane
-showed a title and nothing else.
+A tmux **server** keeps the environment of whichever client started it, and
+`update-environment` refreshes `TERM` and `DISPLAY` on attach but never
+`TERM_PROGRAM`. So a server started from Apple Terminal and later attached
+from WezTerm still reports Apple Terminal, and the image canvas picked a
+block tier for a terminal that does Sixel. Measured on the user's live
+machine: two sessions on one server, one client per terminal, and both
+resolving to `quadrants` with the Sixel-capable terminal on screen.
 
-This contradicts, in one direction, the comment `graphics.ts` has carried
-since step 1 — that inside tmux "the outer terminal's identity is erased
-entirely". It is not erased; it can be **stale**, which is worse. Erased
-degrades to the block tier, which is safe. Stale points confidently at a
-terminal that is not the one attached, which is precisely the failure the
-tier detection was written to avoid: "emitting Sixel escapes into terminals
-that render them as garbage, which is a far worse failure than painting
-blocks".
+This is worse than the comment `graphics.ts` had carried since step 1, which
+said the outer terminal's identity is "erased entirely" inside tmux. Erased
+degrades to the safe tier. **Stale points confidently at the wrong
+terminal**, which is exactly the failure the detection was written to avoid.
 
-Real-world route to the same thing, no experiments needed: start tmux from
-WezTerm, detach, re-attach from Terminal.app. `update-environment` refreshes
-`TERM` and `DISPLAY` on attach but not `TERM_PROGRAM`.
+**Ruling 42: ask the operating system, not the terminal.** `terminal-probe.ts`
+takes the tty of the tmux client attached to this pane
+(`#{client_tty}`) and walks the process tree above it to the emulator.
+Verified on the real machine:
 
-**Deliberately NOT fixed here, because the fix is a trade-off and not a
-typo.** Refusing to infer a protocol tier whenever `TMUX` is set would make
-this safe, and would also throw away the WezTerm-through-tmux Sixel path
-verified two sections above — which genuinely works. Validating the stale
-value against the attached client is the better answer but tmux exposes
-`#{client_termname}` (TERM) and not `TERM_PROGRAM`, so it cannot fully
-confirm one. That decision deserves its own pass rather than a drive-by.
+```
+ttys017 → -zsh  → /Applications/WezTerm.app/.../wezterm-gui  → sixel
+ttys015 → login → /System/.../Terminal.app/.../Terminal      → quadrants
+```
 
-Mitigated meanwhile: `CANVAS_GRAPHICS` overrides it in one variable, and the
-smoke script now **pins the tier per case** instead of detecting it, since a
-smoke case that silently changes which renderer it exercises is not testing
-what its marker claims. 18 smoke cases, 0 fail, both block tiers now covered
-in a real Apple Terminal pane.
+Deliberately **not** a DA1 query. That reply has to travel back through tmux,
+may never arrive, and a canvas that hangs on startup is worse than one that
+paints a lower-fidelity image -- the same reasoning that kept `detectGraphics`
+from interrogating anything.
 
-### CI went red on the quadrants commit: one mine, one not
+**Ruling 43: the probe returns an ENVIRONMENT, not a tier.** It answers with
+the `TERM_PROGRAM`/`TERM` the outer terminal would have set, and
+`detectGraphics` maps that as usual. A probe that returned tiers would be a
+second copy of the tier table, free to disagree with the first.
 
-**Mine, found and fixed.** `an unset override detects quadrants` deleted
-`CANVAS_GRAPHICS` and expected the detected default -- but `detectGraphics`
-reads `TERM` and `TERM_PROGRAM`, and a CI runner has neither of the
-developer's. It now sets both explicitly and restores them in a `finally`.
-The same lesson `test/setup.ts` already records three times over: environment
-a test depends on is environment the test has to state. Reproduced locally
-with `TERM=dumb`, which also exposed that nine colour/snapshot tests are
-sensitive to `TERM` despite `FORCE_COLOR` being pinned -- noted, not chased.
+**Ruling 44: it can improve a guess and never break one.** Any failure --
+no tmux binary, no attached client, a `ps` that behaves differently, an
+emulator nobody has heard of -- returns null and falls through to the old
+environment path. `CANVAS_GRAPHICS` and `--graphics` still win, and outside
+tmux the probe is not consulted at all (a spy in the tests asserts it is
+never called). The walk is depth-bounded so a cycle cannot spin.
 
-**Not mine, and NOT reproduced.** `a negative startHour is rejected as a
-config error` failed with `no canvas mpc-hours-…` from `openConnection`,
-meaning the record vanished between `awaitRecord` finding it and
-`readRecord` reading it. This exact failure took CI down once before, on
-`9f9c3c5`, and was answered by two commits (`0141c91`, `47a99f9`) that added
-`expect(await awaitRecord(...)).not.toBeNull()` before connecting. That
-improves the *message* but cannot prevent the record from disappearing
-afterwards, so the underlying race was never addressed.
+**Two wrong turns, both caught by measuring rather than reasoning.** The
+first live test reported `quadrants` and looked like a broken walk; tracing
+the parent chain by hand showed it reached WezTerm correctly. The real fault
+was elsewhere in my own change: `baseCapabilities` in `host/types.ts` called
+`resolveGraphics(env)` without the probe, so `env` -- the very command
+someone runs to find out why their images look wrong -- was still measuring
+the old path. Two call sites needed it, not the one I remembered. Before
+that I suspected a stale bundle and checked (`grep wezterm` → 2
+occurrences); it was fine, and checking saved chasing it.
 
-Attempted reproduction, so the next person does not start from zero: three
-sequential full-suite runs and four concurrent ones, 598 pass 0 fail every
-time. Not reproducible here.
+The two process trees in `terminal-probe.test.ts` are **not invented**: they
+were read off the machine where the bug happened.
 
-A plausible mechanism, found by reading rather than by measurement and
-therefore **unconfirmed**: `listRecords` prunes a `.json` whose `readRecord`
-returns null, on the stated assumption that "no write is in flight here".
-The `.tmp` branch immediately above it was age-gated for exactly that
-reason -- "a temp file can also be genuinely mid-write right now... deleting
-THAT out from under its writer is its own bug" -- and the `.json` branch
-carries the same assumption with no such gate. If anything sweeps while a
-record is momentarily unreadable, it deletes a live canvas's record.
-
-Deliberately not changed: that is a product behaviour change resting on a
-hypothesis nobody has reproduced, and the honest sequence is reproduce,
-then fix. The timing-independent API for these tests is `waitForOutcome`,
-which checks the record first and consumes it -- "what makes the documented
-spawn → wait flow correct regardless of timing" -- and is probably what
-those config-error tests should use instead of `openConnection` plus
-`nextOutcome`.
-
+### Next
 ### Next
 
 Nothing in the image pipeline. The open follow-ups are unchanged and none

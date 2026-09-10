@@ -31,7 +31,13 @@ test("an empty calendars array is rejected as a config error", async () => {
   const id = "mpc-empty-calendars";
   const { r, restore } = mount(id, { calendars: [] });
   await r.settle();
-  await awaitRecord(id, 5000);
+  // The record's write races the render on a busy machine (see the
+  // registry.ts doc comments on rename contention under load); asserting
+  // here turns a genuinely slow-but-eventually-successful write into a
+  // clear "the record never appeared" failure instead of the confusing
+  // "no canvas <id>" connection error openConnection throws when called
+  // against an id with no record at all.
+  expect(await awaitRecord(id, 5000)).not.toBeNull();
   const conn = await openConnection(id);
 
   const msg = await nextOutcome(conn, 2000);
@@ -47,7 +53,13 @@ test("a missing calendars field is rejected as a config error", async () => {
   const id = "mpc-missing-calendars";
   const { r, restore } = mount(id, {});
   await r.settle();
-  await awaitRecord(id, 5000);
+  // The record's write races the render on a busy machine (see the
+  // registry.ts doc comments on rename contention under load); asserting
+  // here turns a genuinely slow-but-eventually-successful write into a
+  // clear "the record never appeared" failure instead of the confusing
+  // "no canvas <id>" connection error openConnection throws when called
+  // against an id with no record at all.
+  expect(await awaitRecord(id, 5000)).not.toBeNull();
   const conn = await openConnection(id);
 
   const msg = await nextOutcome(conn, 2000);
@@ -66,7 +78,13 @@ test("a slotGranularity outside 15/30/60 is rejected as a config error", async (
     slotGranularity: 7,
   });
   await r.settle();
-  await awaitRecord(id, 5000);
+  // The record's write races the render on a busy machine (see the
+  // registry.ts doc comments on rename contention under load); asserting
+  // here turns a genuinely slow-but-eventually-successful write into a
+  // clear "the record never appeared" failure instead of the confusing
+  // "no canvas <id>" connection error openConnection throws when called
+  // against an id with no record at all.
+  expect(await awaitRecord(id, 5000)).not.toBeNull();
   const conn = await openConnection(id);
 
   const msg = await nextOutcome(conn, 2000);
@@ -126,7 +144,13 @@ async function expectRejected(config: unknown, messageSubstring: string) {
   const id = `mpc-hours-${Math.random().toString(36).slice(2)}`;
   const { r, restore } = mount(id, config);
   await r.settle();
-  await awaitRecord(id, 5000);
+  // The record's write races the render on a busy machine (see the
+  // registry.ts doc comments on rename contention under load); asserting
+  // here turns a genuinely slow-but-eventually-successful write into a
+  // clear "the record never appeared" failure instead of the confusing
+  // "no canvas <id>" connection error openConnection throws when called
+  // against an id with no record at all.
+  expect(await awaitRecord(id, 5000)).not.toBeNull();
   const conn = await openConnection(id);
 
   const msg = await nextOutcome(conn, 2000);

@@ -33,7 +33,13 @@ async function expectRejected(config: unknown, messageSubstring: string) {
   const id = `cdc-${Math.random().toString(36).slice(2)}`;
   const { r, restore } = mount(id, config);
   await r.settle();
-  await awaitRecord(id, 5000);
+  // The record's write races the render on a busy machine (see the
+  // registry.ts doc comments on rename contention under load); asserting
+  // here turns a genuinely slow-but-eventually-successful write into a
+  // clear "the record never appeared" failure instead of the confusing
+  // "no canvas <id>" connection error openConnection throws when called
+  // against an id with no record at all.
+  expect(await awaitRecord(id, 5000)).not.toBeNull();
   const conn = await openConnection(id);
 
   const msg = await nextOutcome(conn, 2000);

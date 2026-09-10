@@ -57,15 +57,22 @@ test("Windows Terminal is detected even with no TERM set at all (native PowerShe
 // support is patch-dependent and a compile-time option. Inferring sixel
 // from TERM would emit escapes that render as garbage.
 test("TERM=xterm* alone never implies sixel", () => {
-  expect(detectGraphics({ TERM: "xterm-256color" })).toBe("halfblocks");
-  expect(detectGraphics({ TERM: "xterm" })).toBe("halfblocks");
-  expect(detectGraphics(plain({ TERM_PROGRAM: "Apple_Terminal" }))).toBe("halfblocks");
+  expect(detectGraphics({ TERM: "xterm-256color" })).toBe("quadrants");
+  expect(detectGraphics({ TERM: "xterm" })).toBe("quadrants");
+  expect(detectGraphics(plain({ TERM_PROGRAM: "Apple_Terminal" }))).toBe("quadrants");
 });
 
-test("terminals with no protocol fall to halfblocks, the baseline", () => {
-  expect(detectGraphics(plain({ TERM_PROGRAM: "Apple_Terminal" }))).toBe("halfblocks");
-  expect(detectGraphics(plain({ TERM_PROGRAM: "vscode" }))).toBe("halfblocks");
-  expect(detectGraphics({ TERM: "alacritty" })).toBe("halfblocks");
+// The baseline is `quadrants`, not `halfblocks`: 2x2 pixels per cell rather
+// than 1x2, measured at 61% less error on this repository's own screenshot.
+// Nothing a terminal reports says which glyphs its font carries, so this is
+// a choice rather than a detection -- justified by reading the fonts'
+// own cmap tables on macOS 26.6: both Menlo and SF Mono carry the full
+// quadrant set. `CANVAS_GRAPHICS=halfblocks` is the documented escape for a
+// font that does not.
+test("terminals with no protocol fall to quadrants, the baseline", () => {
+  expect(detectGraphics(plain({ TERM_PROGRAM: "Apple_Terminal" }))).toBe("quadrants");
+  expect(detectGraphics(plain({ TERM_PROGRAM: "vscode" }))).toBe("quadrants");
+  expect(detectGraphics({ TERM: "alacritty" })).toBe("quadrants");
 });
 
 // Measured 2026-09-09: inside tmux, TERM_PROGRAM becomes "tmux" and TERM
@@ -82,7 +89,7 @@ test("inside tmux the outer terminal is invisible, so detection degrades to the 
   };
   // Even if the OUTER terminal were kitty or WezTerm, this is all a canvas
   // in the pane can see.
-  expect(detectGraphics(insideTmux)).toBe("halfblocks");
+  expect(detectGraphics(insideTmux)).toBe("quadrants");
 });
 
 // --- resolveGraphics -----------------------------------------------------
@@ -92,7 +99,7 @@ test("the controller's answer is used when the canvas cannot detect anything", (
   expect(resolveGraphics(insideTmux, "sixel")).toBe("sixel");
   expect(resolveGraphics(insideTmux, "kitty")).toBe("kitty");
   // Without it, the pane is stuck with the baseline.
-  expect(resolveGraphics(insideTmux)).toBe("halfblocks");
+  expect(resolveGraphics(insideTmux)).toBe("quadrants");
 });
 
 test("CANVAS_GRAPHICS overrides both detection and the controller", () => {
@@ -115,7 +122,7 @@ test("an empty override is ignored rather than treated as a tier", () => {
 // telling them nothing.
 test("a misspelled override or argument is rejected, naming the valid tiers", () => {
   expect(() => resolveGraphics(plain({ CANVAS_GRAPHICS: "sixl" }))).toThrow(
-    /Invalid CANVAS_GRAPHICS: "sixl".*kitty, iterm2, sixel, halfblocks, none/
+    /Invalid CANVAS_GRAPHICS: "sixl".*kitty, iterm2, sixel, quadrants, halfblocks, none/
   );
   expect(() => resolveGraphics(plain(), "blocks")).toThrow(
     /Invalid --graphics: "blocks".*halfblocks/
@@ -123,7 +130,7 @@ test("a misspelled override or argument is rejected, naming the valid tiers", ()
 });
 
 test("isGraphicsTier accepts exactly the five tiers", () => {
-  for (const t of ["kitty", "iterm2", "sixel", "halfblocks", "none"]) {
+  for (const t of ["kitty", "iterm2", "sixel", "quadrants", "halfblocks", "none"]) {
     expect(isGraphicsTier(t)).toBe(true);
   }
   for (const t of ["Sixel", "half-blocks", "", undefined, null, 3]) {

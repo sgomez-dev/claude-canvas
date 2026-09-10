@@ -2571,7 +2571,7 @@ function detectGraphics(env) {
     return "sixel";
   if (env.WT_SESSION !== undefined)
     return "sixel";
-  return "halfblocks";
+  return "quadrants";
 }
 function resolveGraphics(env, passed) {
   const override = env.CANVAS_GRAPHICS;
@@ -2593,6 +2593,7 @@ var init_graphics = __esm(() => {
     "kitty",
     "iterm2",
     "sixel",
+    "quadrants",
     "halfblocks",
     "none"
   ];
@@ -29079,12 +29080,145 @@ var init_halfblock_view = __esm(async () => {
   jsx_dev_runtime24 = __toESM(require_jsx_dev_runtime(), 1);
 });
 
+// canvas/src/canvases/quadrants.ts
+function hex2(r, g, b) {
+  return `#${(1 << 24 | r << 16 | g << 8 | b).toString(16).slice(1)}`;
+}
+function bestCell(q) {
+  let bestMask = 15;
+  let bestError = Infinity;
+  let bestFg = [0, 0, 0];
+  let bestBg = [0, 0, 0];
+  for (let mask = 15;mask >= 0; mask--) {
+    let fr = 0;
+    let fg2 = 0;
+    let fb = 0;
+    let fn = 0;
+    let br = 0;
+    let bg2 = 0;
+    let bb = 0;
+    let bn = 0;
+    for (let i = 0;i < 4; i++) {
+      const p = q[i];
+      if ((mask & 1 << i) !== 0) {
+        fr += p[0];
+        fg2 += p[1];
+        fb += p[2];
+        fn++;
+      } else {
+        br += p[0];
+        bg2 += p[1];
+        bb += p[2];
+        bn++;
+      }
+    }
+    const fore = fn === 0 ? [Math.round(br / bn), Math.round(bg2 / bn), Math.round(bb / bn)] : [Math.round(fr / fn), Math.round(fg2 / fn), Math.round(fb / fn)];
+    const back = bn === 0 ? [Math.round(fr / fn), Math.round(fg2 / fn), Math.round(fb / fn)] : [Math.round(br / bn), Math.round(bg2 / bn), Math.round(bb / bn)];
+    let error = 0;
+    for (let i = 0;i < 4; i++) {
+      const p = q[i];
+      const c = (mask & 1 << i) !== 0 ? fore : back;
+      error += (p[0] - c[0]) ** 2 + (p[1] - c[1]) ** 2 + (p[2] - c[2]) ** 2;
+    }
+    if (error < bestError) {
+      bestError = error;
+      bestMask = mask;
+      bestFg = fore;
+      bestBg = back;
+    }
+  }
+  return {
+    glyph: QUADRANT_GLYPHS[bestMask],
+    fg: hex2(bestFg[0], bestFg[1], bestFg[2]),
+    bg: hex2(bestBg[0], bestBg[1], bestBg[2])
+  };
+}
+function toQuadrants(img, columns, rows, background = DEFAULT_BACKGROUND) {
+  const width = Math.max(1, columns) * 2;
+  const rgb = resampleRGB(img, width, Math.max(1, rows) * 2, background);
+  const out = [];
+  for (let row = 0;row < rows; row++) {
+    const runs = [];
+    for (let col = 0;col < columns; col++) {
+      const q = [];
+      for (const [dy, dx] of [
+        [0, 0],
+        [0, 1],
+        [1, 0],
+        [1, 1]
+      ]) {
+        const o = ((row * 2 + dy) * width + col * 2 + dx) * 3;
+        q.push([rgb[o], rgb[o + 1], rgb[o + 2]]);
+      }
+      const cell = bestCell(q);
+      const last = runs[runs.length - 1];
+      if (last !== undefined && last.glyph === cell.glyph && last.fg === cell.fg && last.bg === cell.bg) {
+        last.count++;
+      } else {
+        runs.push({ ...cell, count: 1 });
+      }
+    }
+    out.push(runs);
+  }
+  return out;
+}
+var QUADRANT_GLYPHS;
+var init_quadrants = __esm(() => {
+  init_resample();
+  QUADRANT_GLYPHS = [
+    " ",
+    "\u2598",
+    "\u259D",
+    "\u2580",
+    "\u2596",
+    "\u258C",
+    "\u259E",
+    "\u259B",
+    "\u2597",
+    "\u259A",
+    "\u2590",
+    "\u259C",
+    "\u2584",
+    "\u2599",
+    "\u259F",
+    "\u2588"
+  ];
+});
+
+// canvas/src/canvases/quadrant-view.tsx
+function QuadrantImage({
+  image,
+  columns,
+  rows,
+  background = DEFAULT_BACKGROUND
+}) {
+  const grid = import_react46.useMemo(() => toQuadrants(image, columns, rows, background), [image, columns, rows, background]);
+  return /* @__PURE__ */ jsx_dev_runtime25.jsxDEV(Box_default, {
+    flexDirection: "column",
+    children: grid.map((runs, y) => /* @__PURE__ */ jsx_dev_runtime25.jsxDEV(Box_default, {
+      children: runs.map((run, i) => /* @__PURE__ */ jsx_dev_runtime25.jsxDEV(Text, {
+        color: run.fg,
+        backgroundColor: run.bg,
+        children: run.glyph.repeat(run.count)
+      }, i, false, undefined, this))
+    }, y, false, undefined, this))
+  }, undefined, false, undefined, this);
+}
+var import_react46, jsx_dev_runtime25;
+var init_quadrant_view = __esm(async () => {
+  init_quadrants();
+  await init_build2();
+  import_react46 = __toESM(require_react(), 1);
+  jsx_dev_runtime25 = __toESM(require_jsx_dev_runtime(), 1);
+});
+
 // canvas/src/canvases/image/types.ts
 var FOOTER_HINT5 = "Esc: close";
 
 // canvas/src/canvases/image/view.tsx
 function ImageView({
   image,
+  mode,
   title,
   background,
   budget,
@@ -29096,39 +29230,45 @@ function ImageView({
   const chrome = BASE_CHROME_ROWS + (title !== undefined ? 1 : 0) + footerOverflow;
   const availableRows = Math.max(1, budget - chrome);
   const fit = fitToCells(image.width, image.height, innerWidth, availableRows);
-  return /* @__PURE__ */ jsx_dev_runtime25.jsxDEV(Box_default, {
+  return /* @__PURE__ */ jsx_dev_runtime26.jsxDEV(Box_default, {
     flexDirection: "column",
     borderStyle: "round",
     borderColor: "cyan",
     paddingX: 1,
     children: [
-      title !== undefined && /* @__PURE__ */ jsx_dev_runtime25.jsxDEV(Text, {
+      title !== undefined && /* @__PURE__ */ jsx_dev_runtime26.jsxDEV(Text, {
         bold: true,
         color: "cyan",
         children: title
       }, undefined, false, undefined, this),
-      /* @__PURE__ */ jsx_dev_runtime25.jsxDEV(HalfBlockImage, {
+      mode === "quadrants" ? /* @__PURE__ */ jsx_dev_runtime26.jsxDEV(QuadrantImage, {
+        image,
+        columns: fit.columns,
+        rows: fit.rows,
+        background
+      }, undefined, false, undefined, this) : /* @__PURE__ */ jsx_dev_runtime26.jsxDEV(HalfBlockImage, {
         image,
         columns: fit.columns,
         rows: fit.rows,
         background
       }, undefined, false, undefined, this),
-      /* @__PURE__ */ jsx_dev_runtime25.jsxDEV(Text, {
+      /* @__PURE__ */ jsx_dev_runtime26.jsxDEV(Text, {
         dimColor: true,
         children: footerText
       }, undefined, false, undefined, this)
     ]
   }, undefined, true, undefined, this);
 }
-var jsx_dev_runtime25, HORIZONTAL_CHROME6 = 4, BASE_CHROME_ROWS = 3;
+var jsx_dev_runtime26, HORIZONTAL_CHROME6 = 4, BASE_CHROME_ROWS = 3;
 var init_view6 = __esm(async () => {
   init_halfblocks();
   init_width();
   await __promiseAll([
     init_build2(),
-    init_halfblock_view()
+    init_halfblock_view(),
+    init_quadrant_view()
   ]);
-  jsx_dev_runtime25 = __toESM(require_jsx_dev_runtime(), 1);
+  jsx_dev_runtime26 = __toESM(require_jsx_dev_runtime(), 1);
 });
 
 // canvas/src/canvases/graphics/kitty.ts
@@ -29405,6 +29545,7 @@ function imageEscapes(req) {
       return encodeITerm2(req.png, placement);
     case "sixel":
       return encodeSixel(req.image, placement, req.background ?? DEFAULT_BACKGROUND, req.cell ?? CELL_PIXELS);
+    case "quadrants":
     case "halfblocks":
     case "none":
       return [];
@@ -29437,7 +29578,7 @@ function GraphicsImageView({
   const availableRows = Math.max(1, budget - titleRows - 1 - footerOverflow);
   const fit = fitToCells(image.width, image.height, terminalWidth, availableRows);
   const originRow = titleRows + 1;
-  import_react46.useEffect(() => {
+  import_react47.useEffect(() => {
     const bytes = paintBytes({
       tier,
       png,
@@ -29454,32 +29595,32 @@ function GraphicsImageView({
     if (bytes.length > 0)
       stdout?.write(bytes);
   });
-  return /* @__PURE__ */ jsx_dev_runtime26.jsxDEV(Box_default, {
+  return /* @__PURE__ */ jsx_dev_runtime27.jsxDEV(Box_default, {
     flexDirection: "column",
     children: [
-      title !== undefined && /* @__PURE__ */ jsx_dev_runtime26.jsxDEV(Text, {
+      title !== undefined && /* @__PURE__ */ jsx_dev_runtime27.jsxDEV(Text, {
         bold: true,
         color: "cyan",
         children: title
       }, undefined, false, undefined, this),
-      Array.from({ length: fit.rows }, (_, i) => /* @__PURE__ */ jsx_dev_runtime26.jsxDEV(Text, {
+      Array.from({ length: fit.rows }, (_, i) => /* @__PURE__ */ jsx_dev_runtime27.jsxDEV(Text, {
         children: " "
       }, i, false, undefined, this)),
-      /* @__PURE__ */ jsx_dev_runtime26.jsxDEV(Text, {
+      /* @__PURE__ */ jsx_dev_runtime27.jsxDEV(Text, {
         dimColor: true,
         children: footerText
       }, undefined, false, undefined, this)
     ]
   }, undefined, true, undefined, this);
 }
-var import_react46, jsx_dev_runtime26;
+var import_react47, jsx_dev_runtime27;
 var init_graphics_view = __esm(async () => {
   init_halfblocks();
   init_paint();
   init_width();
   await init_build2();
-  import_react46 = __toESM(require_react(), 1);
-  jsx_dev_runtime26 = __toESM(require_jsx_dev_runtime(), 1);
+  import_react47 = __toESM(require_react(), 1);
+  jsx_dev_runtime27 = __toESM(require_jsx_dev_runtime(), 1);
 });
 
 // canvas/src/canvases/image/validate.ts
@@ -29708,10 +29849,10 @@ function Image({
 }) {
   const { exit } = use_app_default();
   const { stdout } = use_stdout_default();
-  const [config, setConfig] = import_react47.useState(initialConfig);
-  const imageId = import_react47.useMemo(() => imageIdFor(id), [id]);
-  const { source, title, background, error } = import_react47.useMemo(() => validateImage(config), [config]);
-  const environment = import_react47.useMemo(() => {
+  const [config, setConfig] = import_react48.useState(initialConfig);
+  const imageId = import_react48.useMemo(() => imageIdFor(id), [id]);
+  const { source, title, background, error } = import_react48.useMemo(() => validateImage(config), [config]);
+  const environment = import_react48.useMemo(() => {
     try {
       return {
         tier: resolveGraphics(process.env),
@@ -29726,10 +29867,10 @@ function Image({
       };
     }
   }, []);
-  const [png, setPng] = import_react47.useState(null);
-  const [image, setImage] = import_react47.useState(null);
-  const [loadError, setLoadError] = import_react47.useState(null);
-  import_react47.useEffect(() => {
+  const [png, setPng] = import_react48.useState(null);
+  const [image, setImage] = import_react48.useState(null);
+  const [loadError, setLoadError] = import_react48.useState(null);
+  import_react48.useEffect(() => {
     if (source === null)
       return;
     let cancelled = false;
@@ -29758,8 +29899,8 @@ function Image({
     };
   }, [source]);
   const problem = error ?? environment.error ?? loadError;
-  const submittedRef = import_react47.useRef(false);
-  const sentRef = import_react47.useRef(false);
+  const submittedRef = import_react48.useRef(false);
+  const sentRef = import_react48.useRef(false);
   const ipc = useCanvasServer({
     id,
     kind: "image",
@@ -29770,7 +29911,7 @@ function Image({
       setConfig(next);
     }
   });
-  import_react47.useEffect(() => {
+  import_react48.useEffect(() => {
     if (problem !== null && ipc.isConnected && !sentRef.current) {
       sentRef.current = true;
       ipc.sendError(problem);
@@ -29786,31 +29927,31 @@ function Image({
     exit();
   });
   if (problem !== null) {
-    return /* @__PURE__ */ jsx_dev_runtime27.jsxDEV(Box_default, {
+    return /* @__PURE__ */ jsx_dev_runtime28.jsxDEV(Box_default, {
       flexDirection: "column",
       borderStyle: "round",
       borderColor: "red",
       padding: 1,
-      children: /* @__PURE__ */ jsx_dev_runtime27.jsxDEV(Text, {
+      children: /* @__PURE__ */ jsx_dev_runtime28.jsxDEV(Text, {
         color: "red",
         children: problem
       }, undefined, false, undefined, this)
     }, undefined, false, undefined, this);
   }
   if (image === null || png === null) {
-    return /* @__PURE__ */ jsx_dev_runtime27.jsxDEV(Box_default, {
+    return /* @__PURE__ */ jsx_dev_runtime28.jsxDEV(Box_default, {
       flexDirection: "column",
       borderStyle: "round",
       borderColor: "cyan",
       paddingX: 1,
-      children: /* @__PURE__ */ jsx_dev_runtime27.jsxDEV(Text, {
+      children: /* @__PURE__ */ jsx_dev_runtime28.jsxDEV(Text, {
         dimColor: true,
         children: loadingLabel(source)
       }, undefined, false, undefined, this)
     }, undefined, false, undefined, this);
   }
   if (usesProtocol(environment.tier)) {
-    return /* @__PURE__ */ jsx_dev_runtime27.jsxDEV(GraphicsImageView, {
+    return /* @__PURE__ */ jsx_dev_runtime28.jsxDEV(GraphicsImageView, {
       image,
       png,
       tier: environment.tier,
@@ -29822,8 +29963,9 @@ function Image({
       imageId
     }, undefined, false, undefined, this);
   }
-  return /* @__PURE__ */ jsx_dev_runtime27.jsxDEV(ImageView, {
+  return /* @__PURE__ */ jsx_dev_runtime28.jsxDEV(ImageView, {
     image,
+    mode: environment.tier === "quadrants" ? "quadrants" : "halfblocks",
     title,
     background,
     budget: stdout?.rows ?? 24,
@@ -29835,7 +29977,7 @@ function loadingLabel(source) {
     return "Loading\u2026";
   return source.kind === "data" ? "Decoding\u2026" : `Loading ${source.path}\u2026`;
 }
-var import_react47, jsx_dev_runtime27;
+var import_react48, jsx_dev_runtime28;
 var init_image = __esm(async () => {
   init_validate5();
   init_png();
@@ -29848,8 +29990,8 @@ var init_image = __esm(async () => {
     init_view6(),
     init_graphics_view()
   ]);
-  import_react47 = __toESM(require_react(), 1);
-  jsx_dev_runtime27 = __toESM(require_jsx_dev_runtime(), 1);
+  import_react48 = __toESM(require_react(), 1);
+  jsx_dev_runtime28 = __toESM(require_jsx_dev_runtime(), 1);
 });
 
 // canvas/src/canvases/index.tsx
@@ -29901,7 +30043,7 @@ async function renderCanvas(kind, id, config, options) {
   }
 }
 async function renderCalendar(id, config, options) {
-  const { waitUntilExit } = render_default(/* @__PURE__ */ jsx_dev_runtime28.jsxDEV(Calendar, {
+  const { waitUntilExit } = render_default(/* @__PURE__ */ jsx_dev_runtime29.jsxDEV(Calendar, {
     id,
     config,
     enabled: options?.enabled ?? false,
@@ -29912,7 +30054,7 @@ async function renderCalendar(id, config, options) {
   await waitUntilExit();
 }
 async function renderDocument(id, config, options) {
-  const { waitUntilExit } = render_default(/* @__PURE__ */ jsx_dev_runtime28.jsxDEV(Document, {
+  const { waitUntilExit } = render_default(/* @__PURE__ */ jsx_dev_runtime29.jsxDEV(Document, {
     id,
     config,
     enabled: options?.enabled ?? false,
@@ -29923,7 +30065,7 @@ async function renderDocument(id, config, options) {
   await waitUntilExit();
 }
 async function renderFlight(id, config, options) {
-  const { waitUntilExit } = render_default(/* @__PURE__ */ jsx_dev_runtime28.jsxDEV(FlightCanvas, {
+  const { waitUntilExit } = render_default(/* @__PURE__ */ jsx_dev_runtime29.jsxDEV(FlightCanvas, {
     id,
     config,
     enabled: options?.enabled ?? false,
@@ -29934,7 +30076,7 @@ async function renderFlight(id, config, options) {
   await waitUntilExit();
 }
 async function renderDiff(id, config, options) {
-  const { waitUntilExit } = render_default(/* @__PURE__ */ jsx_dev_runtime28.jsxDEV(Diff, {
+  const { waitUntilExit } = render_default(/* @__PURE__ */ jsx_dev_runtime29.jsxDEV(Diff, {
     id,
     config,
     enabled: options?.enabled ?? false,
@@ -29945,7 +30087,7 @@ async function renderDiff(id, config, options) {
   await waitUntilExit();
 }
 async function renderPicker(id, config, options) {
-  const { waitUntilExit } = render_default(/* @__PURE__ */ jsx_dev_runtime28.jsxDEV(Picker, {
+  const { waitUntilExit } = render_default(/* @__PURE__ */ jsx_dev_runtime29.jsxDEV(Picker, {
     id,
     config,
     enabled: options?.enabled ?? false,
@@ -29956,7 +30098,7 @@ async function renderPicker(id, config, options) {
   await waitUntilExit();
 }
 async function renderForm(id, config, options) {
-  const { waitUntilExit } = render_default(/* @__PURE__ */ jsx_dev_runtime28.jsxDEV(Form, {
+  const { waitUntilExit } = render_default(/* @__PURE__ */ jsx_dev_runtime29.jsxDEV(Form, {
     id,
     config,
     enabled: options?.enabled ?? false,
@@ -29967,7 +30109,7 @@ async function renderForm(id, config, options) {
   await waitUntilExit();
 }
 async function renderTable(id, config, options) {
-  const { waitUntilExit } = render_default(/* @__PURE__ */ jsx_dev_runtime28.jsxDEV(Table, {
+  const { waitUntilExit } = render_default(/* @__PURE__ */ jsx_dev_runtime29.jsxDEV(Table, {
     id,
     config,
     enabled: options?.enabled ?? false,
@@ -29978,7 +30120,7 @@ async function renderTable(id, config, options) {
   await waitUntilExit();
 }
 async function renderImage(id, config, options) {
-  const { waitUntilExit } = render_default(/* @__PURE__ */ jsx_dev_runtime28.jsxDEV(Image, {
+  const { waitUntilExit } = render_default(/* @__PURE__ */ jsx_dev_runtime29.jsxDEV(Image, {
     id,
     config,
     enabled: options?.enabled ?? false,
@@ -29989,7 +30131,7 @@ async function renderImage(id, config, options) {
   await waitUntilExit();
 }
 async function renderDashboard(id, config, options) {
-  const { waitUntilExit } = render_default(/* @__PURE__ */ jsx_dev_runtime28.jsxDEV(Dashboard, {
+  const { waitUntilExit } = render_default(/* @__PURE__ */ jsx_dev_runtime29.jsxDEV(Dashboard, {
     id,
     config,
     enabled: options?.enabled ?? false,
@@ -29999,7 +30141,7 @@ async function renderDashboard(id, config, options) {
   });
   await waitUntilExit();
 }
-var jsx_dev_runtime28;
+var jsx_dev_runtime29;
 var init_canvases = __esm(async () => {
   init_paths();
   await __promiseAll([
@@ -30014,7 +30156,7 @@ var init_canvases = __esm(async () => {
     init_dashboard(),
     init_image()
   ]);
-  jsx_dev_runtime28 = __toESM(require_jsx_dev_runtime(), 1);
+  jsx_dev_runtime29 = __toESM(require_jsx_dev_runtime(), 1);
 });
 
 // node_modules/.bun/commander@14.0.3/node_modules/commander/index.js

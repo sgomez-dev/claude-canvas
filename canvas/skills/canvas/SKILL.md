@@ -48,8 +48,9 @@ Canvas provides interactive terminal displays (TUIs) that Claude can spawn and c
 | `image` | Show a PNG scaled to fit the pane, view-only | `display` |
 
 The `image` canvas picks an image protocol per terminal (kitty, iTerm2,
-Sixel) and falls back to half-block cells, which work anywhere. Inside tmux
-the protocol tiers need `allow-passthrough on`; see the `image` skill.
+Sixel) and falls back to quadrant block cells, which work anywhere 24-bit
+colour does. Inside tmux the protocol tiers need `allow-passthrough on`; see
+the `image` skill.
 | `dashboard` | Several of the above composed into one pane | `display` |
 
 ## Quick Start

@@ -77,6 +77,62 @@ test("the sixel tier emits a sixel DCS with raster attributes", async () => {
   r.dispose();
 });
 
+// The default tier for a terminal with no image protocol, and therefore the
+// one most people see.
+//
+// Asserted by CONTRAST rather than by looking for a particular glyph: which
+// glyph a quadrant cell picks depends entirely on the image (a horizontally
+// split one legitimately renders as ▀ or ▄, since quadrants subsume the
+// half-block tier), so naming one would pin an incidental. What must hold is
+// that choosing the tier chooses the renderer, and that neither block tier
+// emits a protocol escape.
+test("the quadrants tier renders block text, and differs from halfblocks", async () => {
+  const quad = await mountAt("quadrants", "tier-quad");
+  const half = await mountAt("halfblocks", "tier-quad-half");
+  const qf = inkFrame(quad);
+  const hf = inkFrame(half);
+  quad.dispose();
+  half.dispose();
+
+  expect(qf).not.toBe("");
+  expect(qf).not.toBe(hf);
+  for (const frame of [qf, hf]) {
+    expect(frame).not.toContain("\x1b_G");
+    expect(frame).not.toContain("\x1b]1337");
+    expect(frame).not.toContain("\x1bP0;1;0q");
+  }
+  // Half-blocks have exactly one glyph available; quadrants have sixteen, so
+  // the frames can only match when the image happens to need ▀.
+  expect(hf).toContain("▀");
+  expect(qf).not.toContain("▀");
+});
+
+// Detection cannot know which glyphs a font carries, so the default is a
+// deliberate choice. Pinned because flipping it is a visible change for
+// every user without an image protocol.
+test("an unset override detects quadrants, not halfblocks", async () => {
+  delete process.env.CANVAS_GRAPHICS;
+  const auto = renderCanvas(<Image id="tier-default" config={CONFIG} enabled={false} />, {
+    columns: 40,
+    rows: 12,
+  });
+  await settleUntil(auto, (f) => f.includes("Tiered"));
+  const autoFrame = inkFrame(auto);
+  auto.dispose();
+
+  process.env.CANVAS_GRAPHICS = "quadrants";
+  const forced = renderCanvas(<Image id="tier-forced" config={CONFIG} enabled={false} />, {
+    columns: 40,
+    rows: 12,
+  });
+  await settleUntil(forced, (f) => f.includes("Tiered"));
+  const forcedFrame = inkFrame(forced);
+  forced.dispose();
+
+  expect(autoFrame).not.toBe("");
+  expect(autoFrame).toBe(forcedFrame);
+});
+
 // The baseline tier must emit no protocol escape at all. A stray one would
 // print as garbage in Apple Terminal, which is the most common host.
 test("the halfblocks tier emits no protocol escape whatsoever", async () => {

@@ -161,13 +161,29 @@ run_case table sm-table display \
   '{"status":"cancelled","reason":"escape"}' \
   Escape
 
-# The image case renders the repository's own 3384x2160 screenshot as
-# half-block cells, so the captured pane below is the actual proof that the
-# tier works in a real terminal rather than only in the snapshot harness.
-PANE_MARKER='▀' run_case image sm-image display \
-  '{"title":"Smoke image","path":"media/screenshot.png"}' \
+# The image cases render the repository's own 3384x2160 screenshot, so the
+# captured panes below are the actual proof that the block tiers work in a
+# real terminal rather than only in the snapshot harness.
+#
+# The tier is PINNED per case rather than detected, and that is not
+# belt-and-braces: on 2026-09-10 this assertion failed because a tmux server
+# still running from an earlier WezTerm session carried
+# `TERM_PROGRAM=WezTerm` in its global environment, so a session created
+# later from Apple Terminal detected `sixel` and painted nothing a capture
+# could see. A smoke case that silently changes which renderer it exercises
+# is not testing what its marker claims.
+export CANVAS_GRAPHICS=quadrants
+PANE_MARKER='█' run_case image sm-image display \
+  '{"title":"Smoke image (quadrants)","path":"media/screenshot.png"}' \
   '{"status":"cancelled","reason":"escape"}' \
   Escape
+
+export CANVAS_GRAPHICS=halfblocks
+PANE_MARKER='▀' run_case image sm-image-half display \
+  '{"title":"Smoke image (halfblocks)","path":"media/screenshot.png"}' \
+  '{"status":"cancelled","reason":"escape"}' \
+  Escape
+unset CANVAS_GRAPHICS
 
 run_case form sm-form fill \
   '{"title":"Smoke form","fields":[{"id":"who","type":"text","label":"Who","required":true},{"id":"ok","type":"checkbox","label":"Confirmed"}]}' \

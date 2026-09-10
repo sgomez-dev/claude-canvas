@@ -7,12 +7,19 @@
  * a graphics protocol as the normal path gets the common case backwards.
  * `none` means there is no usable terminal at all.
  */
-export type GraphicsTier = "kitty" | "iterm2" | "sixel" | "halfblocks" | "none";
+export type GraphicsTier =
+  | "kitty"
+  | "iterm2"
+  | "sixel"
+  | "quadrants"
+  | "halfblocks"
+  | "none";
 
 export const GRAPHICS_TIERS: readonly GraphicsTier[] = [
   "kitty",
   "iterm2",
   "sixel",
+  "quadrants",
   "halfblocks",
   "none",
 ];
@@ -86,8 +93,22 @@ export function detectGraphics(env: NodeJS.ProcessEnv): GraphicsTier {
   // recorded rather than falling through silently: Apple Terminal has none,
   // Alacritty rejected Sixel upstream, and VS Code's support is behind a
   // setting we cannot read from here (`terminal.integrated.enableImages`),
-  // so it gets the safe tier and the override.
-  return "halfblocks";
+  // so it gets a block-character tier and the override.
+  //
+  // `quadrants`, not `halfblocks`: 2x2 pixels per cell instead of 1x2, which
+  // measured 61% less error on this repository's own screenshot. The cost is
+  // a slightly larger font requirement, and it CANNOT be detected -- nothing
+  // a terminal reports says which glyphs its font has.
+  //
+  // Measured on macOS 26.6 (2026-09-10) by reading the fonts' own cmap
+  // tables: Menlo and SF Mono, which covers Terminal.app's default and its
+  // most common alternative, both carry the full quadrant set. Courier New
+  // carries the half blocks but not the quadrants, and Monaco carries
+  // neither -- so a Monaco user was already seeing nothing under the old
+  // default. Cost if wrong: empty boxes instead of an image, which is
+  // obvious rather than subtly wrong, and `CANVAS_GRAPHICS=halfblocks`
+  // fixes it in one variable. That is documented in the image skill.
+  return "quadrants";
 }
 
 /**

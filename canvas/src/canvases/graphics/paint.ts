@@ -79,9 +79,10 @@ function imageEscapes(req: PaintRequest): string[] {
         req.background ?? DEFAULT_BACKGROUND,
         req.cell ?? CELL_PIXELS
       );
-    // Not an omission: these two have no protocol to emit. `halfblocks`
-    // paints through Ink as styled text, and `none` means there is no
-    // terminal to paint into at all.
+    // Not an omission: these have no protocol to emit. `quadrants` and
+    // `halfblocks` paint through Ink as styled text, and `none` means there
+    // is no terminal to paint into at all.
+    case "quadrants":
     case "halfblocks":
     case "none":
       return [];

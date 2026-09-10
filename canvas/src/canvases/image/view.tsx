@@ -1,13 +1,24 @@
 import React from "react";
 import { Box, Text } from "ink";
 import { HalfBlockImage } from "../halfblock-view";
+import { QuadrantImage } from "../quadrant-view";
 import { fitToCells, type RGB } from "../halfblocks";
 import { wrappedLineCount } from "../width";
 import type { DecodedImage } from "../png";
 import { FOOTER_HINT } from "./types";
 
+/** Which block-character renderer paints the pixels. */
+export type BlockMode = "halfblocks" | "quadrants";
+
 export interface ImageViewProps {
   image: DecodedImage;
+  /**
+   * `quadrants` fits 2x2 pixels per cell, `halfblocks` 1x2. Both are
+   * ordinary styled text; only the sampling and the glyph set differ, so
+   * everything around them -- the frame, the title, the footer and the row
+   * budget -- is shared rather than duplicated per mode.
+   */
+  mode: BlockMode;
   title?: string;
   background: RGB;
   /** Rows this view may paint into: the terminal height, or a region's share. */
@@ -31,6 +42,7 @@ const BASE_CHROME_ROWS = 3;
  */
 export function ImageView({
   image,
+  mode,
   title,
   background,
   budget,
@@ -56,12 +68,21 @@ export function ImageView({
           {title}
         </Text>
       )}
-      <HalfBlockImage
-        image={image}
-        columns={fit.columns}
-        rows={fit.rows}
-        background={background}
-      />
+      {mode === "quadrants" ? (
+        <QuadrantImage
+          image={image}
+          columns={fit.columns}
+          rows={fit.rows}
+          background={background}
+        />
+      ) : (
+        <HalfBlockImage
+          image={image}
+          columns={fit.columns}
+          rows={fit.rows}
+          background={background}
+        />
+      )}
       <Text dimColor>{footerText}</Text>
     </Box>
   );

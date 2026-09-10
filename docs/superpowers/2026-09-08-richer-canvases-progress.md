@@ -714,6 +714,143 @@ whose only symptom is a wrongly sized image, and `allow-passthrough` is not
 set by this project -- a tmux user without it sees nothing on a protocol
 tier, which is documented in the skill but not detected.
 
+### The `quadrants` tier — DONE, and it is now the default
+
+Asked whether Terminal.app could do better than half-blocks, since it
+supports no image protocol at all. It can, and the answer turned on a
+measurement rather than an opinion: **which glyphs the fonts actually
+carry**, read out of their own `cmap` tables on macOS 26.6.
+
+| Glyphs | Menlo | SF Mono | Monaco | Courier New | Per cell |
+|---|---|---|---|---|---|
+| Half blocks `▀▄` | yes | yes | **no** | yes | 1×2 |
+| Quadrants `▘▝▖▗▚▞▙▟` | **yes** | **yes** | no | **no** | 2×2 |
+| Braille | no | no | no | no | 2×4 |
+| Sextants | no | no | no | no | 2×3 |
+| Octants | no | no | no | no | 2×4 |
+
+Sextants and octants are in **no font Apple ships**, so anything beyond 2×2
+needs a third-party font. Braille exists only in Apple Symbols, and relying
+on font fallback for cell width in a monospace grid is not worth it. That
+leaves quadrants as the most resolution obtainable in Terminal.app with
+nothing installed.
+
+**Ruling 37: a cell's two colours are spent on four pixels, not two, and the
+split is chosen exhaustively.** All sixteen partitions are representable --
+the ten QUADRANT characters plus the four halves, the full block and a space
+-- so the search is a true optimum rather than a heuristic, at sixteen
+partitions × four pixels per cell. Measured against a 2×2-per-cell reference
+on this repository's screenshot at 76×24: half-blocks 1.26/255 per channel,
+quadrants 0.49. **61% less error for the same cells**, differing in 21% of
+them.
+
+**Ruling 38: the objective is squared error.** The mean of a group is what
+minimises its squared error, so scoring a split by absolute error would pick
+colours inconsistent with the split they are scored against. This was
+**invisible to every test** until sabotage showed swapping the objective
+changed nothing; a case was then found by exhaustive search over grey
+quadruples (0, 0, 15, 35 → squared isolates the outlier as `▗`, absolute
+groups the darks as `▄`) and pinned. A comment claiming a property no test
+checks is the thing this project keeps getting caught by.
+
+**Ruling 39: ties go to the higher mask, so a flat cell is a full block.**
+Not cosmetic: the alternative is a space relying on its background colour,
+and many terminals clear to end of line without preserving one -- which
+would eat the right edge of an image whose last cells happen to be flat.
+
+**Ruling 40: `quadrants` is the default, and that is a choice, not a
+detection.** Nothing a terminal reports says which glyphs its font has. Cost
+if wrong: empty boxes instead of an image -- obvious rather than subtly
+wrong -- fixed by `CANVAS_GRAPHICS=halfblocks`, documented in the skill.
+Justified by the table above: the two fonts that cover Terminal.app's
+default and its usual alternative both carry the set, and the one font that
+lacks it (Monaco) lacked the half blocks too, so those users were already
+seeing nothing.
+
+**Ruling 41: the chrome is shared, the renderer is a `mode` prop.** Both
+block tiers are ordinary styled text and differ only in sampling and glyph
+set, so `ImageView` owns the frame, title, footer and row budget once. The
+alternative was a second view -- which is exactly how `FOOTER_HINT` got
+duplicated between `view.tsx` and `graphics-view.tsx` and had to be
+un-duplicated later.
+
+**Sabotage matrix, all five caught after the objective test was added:**
+inverted TR/BL bit order (7 fail), tie-break reversed (12), sampling 1×2
+instead of 2×2 (9), the shell ignoring `mode` (1), absolute instead of
+squared error (1).
+
+The five detection tests that pinned `halfblocks` as the baseline were
+updated to `quadrants` with the reasoning recorded, rather than the
+assertion merely flipped. The test preload still pins
+`CANVAS_GRAPHICS=halfblocks`, which is why 32 existing snapshots did not
+move; the quadrant tier has its own.
+
+### Also settled on this machine: the protocol tiers do work
+
+WezTerm turned out to be installed, which is a Sixel terminal, so two of the
+three protocol tiers stopped being unverifiable here:
+
+- **Sixel in WezTerm, direct.** The pane's text is the title on row 1, 22
+  blank rows, and the footer on row 24 -- no wall of sixel characters, so the
+  terminal consumed the escape as graphics. The half-block control in the
+  same terminal shows the bordered box and `▀`, which is the contrast that
+  makes it evidence rather than an absence.
+- **Sixel through tmux, the real `spawn` path.** The spawned canvas received
+  `--graphics sixel`, its record says `host=tmux`, and again no garbage in
+  the pane. So the DCS passthrough is accepted.
+
+Still unseen by human eyes: the pixels themselves. `screencapture` cannot be
+scoped to one window here (no Quartz bindings in the system Python) and
+capturing a whole screen unasked is not appropriate, so the windows were
+left open for the user instead. kitty, Ghostty and iTerm2 remain
+unverifiable on this machine -- none is installed and Apple Terminal
+supports none of them.
+
+### Found the hard way: a tmux server can report the WRONG terminal
+
+Reproduced accidentally and then deliberately on 2026-09-10. The smoke
+script's image case went blank, and the cause was not the code:
+
+```
+$ tmux show-environment -g | grep -i wezterm
+TERM_PROGRAM=WezTerm
+WEZTERM_EXECUTABLE=/opt/homebrew/bin/wezterm
+```
+
+A tmux **server** keeps a global environment, taken from whichever client
+started it. That server had been started from a WezTerm pane earlier in the
+session; a session created later from **Apple Terminal** inherited
+`TERM_PROGRAM=WezTerm`, so `detectGraphics` answered `sixel` and the canvas
+emitted Sixel escapes into a terminal that cannot render them. The pane
+showed a title and nothing else.
+
+This contradicts, in one direction, the comment `graphics.ts` has carried
+since step 1 — that inside tmux "the outer terminal's identity is erased
+entirely". It is not erased; it can be **stale**, which is worse. Erased
+degrades to the block tier, which is safe. Stale points confidently at a
+terminal that is not the one attached, which is precisely the failure the
+tier detection was written to avoid: "emitting Sixel escapes into terminals
+that render them as garbage, which is a far worse failure than painting
+blocks".
+
+Real-world route to the same thing, no experiments needed: start tmux from
+WezTerm, detach, re-attach from Terminal.app. `update-environment` refreshes
+`TERM` and `DISPLAY` on attach but not `TERM_PROGRAM`.
+
+**Deliberately NOT fixed here, because the fix is a trade-off and not a
+typo.** Refusing to infer a protocol tier whenever `TMUX` is set would make
+this safe, and would also throw away the WezTerm-through-tmux Sixel path
+verified two sections above — which genuinely works. Validating the stale
+value against the attached client is the better answer but tmux exposes
+`#{client_termname}` (TERM) and not `TERM_PROGRAM`, so it cannot fully
+confirm one. That decision deserves its own pass rather than a drive-by.
+
+Mitigated meanwhile: `CANVAS_GRAPHICS` overrides it in one variable, and the
+smoke script now **pins the tier per case** instead of detecting it, since a
+smoke case that silently changes which renderer it exercises is not testing
+what its marker claims. 18 smoke cases, 0 fail, both block tiers now covered
+in a real Apple Terminal pane.
+
 ### Next
 
 Nothing in the image pipeline. The open follow-ups are unchanged and none

@@ -64,14 +64,39 @@ The tier is detected for you and the config is identical either way.
 | `kitty` | kitty, Ghostty | Full resolution. The terminal decodes the PNG. |
 | `iterm2` | iTerm2 | Full resolution, via inline images. |
 | `sixel` | WezTerm, foot, Windows Terminal, xterm | Full resolution, 256 colours. |
-| `halfblocks` | everything else, including the default macOS Terminal | Roughly `columns × 2·rows` pixels. |
+| `quadrants` | **the default** for everything else, including the macOS Terminal | `2·columns × 2·rows` pixels. |
+| `halfblocks` | fallback for a font without the quadrant glyphs | `columns × 2·rows` pixels. |
 
-`halfblocks` is the **baseline, not a failure**: `▀` painted with a
-foreground and a background colour puts two vertically stacked pixels in one
-character cell, so the image is box-averaged down to the pane. It is a real
-image and it works anywhere 24-bit colour does -- but it is genuinely low
-resolution. Fine text in a screenshot will not be readable there; a chart, a
-diagram, a UI layout or a visual diff will be.
+A cell can hold exactly two colours whatever glyph it contains. `halfblocks`
+spends them on two stacked pixels (`▀`) and is therefore exact. `quadrants`
+spends them on four (`▘▝▖▗▚▞▙▟` and the halves and full block) and picks,
+per cell, the two-colour split that costs least -- which is what buys the
+resolution. Measured on this repository's own screenshot at 76×24 cells:
+**61% less error than half-blocks for the same number of cells.**
+
+Both are a real image, not ASCII art, and both work anywhere 24-bit colour
+does. Both are still genuinely low resolution: fine text in a screenshot
+will not be readable, while a chart, a diagram, a UI layout or a visual diff
+will be.
+
+**The one thing that can go wrong**, and it cannot be detected — nothing a
+terminal reports says which glyphs its font has. If you see empty boxes
+instead of an image, the font lacks the quadrant characters:
+
+```bash
+CANVAS_GRAPHICS=halfblocks
+```
+
+Measured on macOS by reading the fonts' own tables: Menlo and SF Mono (the
+Terminal default and its usual alternative) both carry the full quadrant set.
+Courier New carries the half blocks but not the quadrants. Monaco carries
+neither, so it never worked with either tier.
+
+**Want more resolution in Terminal.app?** Reduce the font size -- resolution
+is the cell count, so a smaller font is a direct, linear win and needs no
+configuration. Sextants (2×3) and octants (2×4) would go further but are in
+**no font Apple ships**; they need a third-party one such as Iosevka,
+Cascadia Code or JuliaMono.
 
 Inside tmux the escapes are wrapped in a DCS passthrough, which needs
 `allow-passthrough` on (tmux 3.3+):
@@ -85,8 +110,9 @@ because it is ordinary text.
 
 Two overrides, for when detection is wrong:
 
-- `CANVAS_GRAPHICS=kitty|iterm2|sixel|halfblocks|none` forces the tier. Set
-  it to `halfblocks` if a protocol tier shows garbage.
+- `CANVAS_GRAPHICS=kitty|iterm2|sixel|quadrants|halfblocks|none` forces the
+  tier. Set it to `halfblocks` if you see empty boxes, or if a protocol tier
+  shows garbage.
 - `CANVAS_CELL_PIXELS=WxH` tells the Sixel encoder how many pixels a cell
   is. It cannot be detected without interrogating the terminal, so it is
   assumed to be 8x16 -- deliberately small, so an image under-fills its rows

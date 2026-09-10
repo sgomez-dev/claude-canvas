@@ -240,6 +240,10 @@ export function Image({
   return (
     <ImageView
       image={image}
+      // Every non-protocol tier lands here, so `none` renders half-blocks
+      // too: there is no terminal to paint into in that case, and the
+      // narrower font requirement is the better thing to fall back on.
+      mode={environment.tier === "quadrants" ? "quadrants" : "halfblocks"}
       title={title}
       background={background}
       budget={stdout?.rows ?? 24}

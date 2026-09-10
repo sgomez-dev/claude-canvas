@@ -6,8 +6,9 @@ import { GraphicsImageView } from "./image/graphics-view";
 import { validateImage, type ImageSource } from "./image/validate";
 import { decodePng, type DecodedImage } from "./png";
 import { resolveGraphics } from "../host/graphics";
-import { resolveCellPixels } from "./graphics/sixel";
+import { resolveCellPixels, CELL_PIXELS } from "./graphics/sixel";
 import { usesProtocol } from "./graphics/paint";
+import { imageIdFor } from "./graphics/kitty";
 import type { ImageConfig } from "./image/types";
 
 export interface ImageProps {
@@ -56,6 +57,16 @@ export function Image({
 
   const [config, setConfig] = useState<ImageConfig | undefined>(initialConfig);
 
+  // Derived once from this canvas's own id, not regenerated per render or
+  // per repaint: two `image` panes open side by side are a supported flow,
+  // and kitty's placements are scoped by this number, not by anything Ink
+  // or the terminal already keeps separate. Without a STABLE, per-instance
+  // id, one canvas's own repaint-triggered clear (`encodeKittyClear`) would
+  // either target nothing (a fresh id every time) or, with the old
+  // "delete everything" directive this replaces, wipe the other canvas's
+  // image too.
+  const imageId = useMemo(() => imageIdFor(id), [id]);
+
   const { source, title, background, error } = useMemo(
     () => validateImage(config),
     [config]
@@ -76,7 +87,7 @@ export function Image({
     } catch (e) {
       return {
         tier: "halfblocks" as const,
-        cell: { width: 8, height: 16 },
+        cell: CELL_PIXELS,
         error: e instanceof Error ? e.message : String(e),
       };
     }
@@ -97,14 +108,21 @@ export function Image({
     // image over the current one. The race is real and reachable -- the
     // `await` on the file read is a genuine yield point, so a config pushed
     // during it runs this effect's cleanup and starts a second read while
-    // the first is still suspended.
+    // the first is still suspended. Checked immediately after that `await`
+    // and BEFORE `decodePng` runs, not merely before the `setState` calls
+    // that use its result: `decodePng` is synchronous and can take hundreds
+    // of milliseconds on a large image, so a superseded read that decoded
+    // anyway would still pay that cost in full -- fully blocking the event
+    // loop the IPC server needs to read its socket, and blocking Escape --
+    // for a result about to be thrown away. Checking first skips the decode
+    // entirely instead of merely discarding its output.
     //
-    // **Untested, and the Phase 3 ledger says why.** The only lever on this
-    // config is IPC (it lives in state, so a prop change does not reach
-    // it), and decodePng is synchronous, so a payload slow enough to
-    // overlap also blocks the event loop the IPC needs. Two attempts at a
-    // test are recorded there, one of which hung rather than failed. Do not
-    // remove this guard on the strength of no test covering it.
+    // Tested: see "a superseded read is abandoned before the expensive
+    // decode, not merely before the render" in image.test.tsx. The earlier
+    // claim here that this was "structurally untestable" was wrong -- the
+    // reachable yield point is the async file read above, not `decodePng`'s
+    // synchronicity; pushing a second, smaller config while a large image's
+    // read is still in flight reproduces the race directly.
     let cancelled = false;
     setImage(null);
     setPng(null);
@@ -115,6 +133,7 @@ export function Image({
           source.kind === "data"
             ? source.bytes
             : await Bun.file(source.path).bytes();
+        if (cancelled) return;
         const decoded = decodePng(bytes);
         if (!cancelled) {
           setPng(bytes);
@@ -204,6 +223,7 @@ export function Image({
         budget={stdout?.rows ?? 24}
         terminalWidth={stdout?.columns ?? 80}
         cell={environment.cell}
+        imageId={imageId}
       />
     );
   }

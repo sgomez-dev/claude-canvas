@@ -1,5 +1,8 @@
 import { test, expect, afterEach } from "bun:test";
 import React from "react";
+import { randomBytes } from "node:crypto";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { Image } from "../../src/canvases/image";
 import { renderCanvas } from "../harness/render";
 import { awaitRecord, deleteRecord } from "../../src/runtime/registry";
@@ -56,8 +59,10 @@ test("Escape produces a cancelled outcome, over the socket", async () => {
   r.dispose();
 });
 
-// A pushed config is a new image, and the view is remounted on a generation
-// counter rather than reset by hand.
+// A pushed config is a new image. `ImageView` carries no state of its own --
+// the image itself lives in the shell, and the load effect replaces it -- so
+// there is no generation counter to remount on; see the "Carries no
+// `generation` counter" note on the `Image` component for why.
 test("a pushed config replaces the image", async () => {
   const id = "ipc-image-update";
   const r = await mount(<Image id={id} config={{ data: png64(8, 8) }} enabled={true} />, id);
@@ -138,3 +143,48 @@ test("a malformed config is reported over the socket, not just rendered", async 
   conn.close();
   r.dispose();
 });
+
+// The stale-read race, made real rather than theoretical. A `path` source's
+// read is a genuine async yield point (`await Bun.file(...).bytes()`), so a
+// config pushed while a large image is still being read starts a SECOND
+// load while the first is still in flight -- both racing to decide what
+// finally renders. This was previously asserted to be "structurally
+// untestable" on the (incorrect) theory that `decodePng`'s synchronicity
+// closed the window; the actual yield point is the read above, not the
+// decode, and pushing a second, smaller config during a large image's read
+// reproduces the race directly, as below.
+// A larger timeout than this file's other tests: disposing a canvas that
+// persisted a config via a real file interacts with writeRecordSync's own
+// Windows EPERM retry budget (registry.ts's SYNC_RETRY_DELAYS_MS, up to
+// ~3.2s) when the OS briefly holds a registry file open -- documented there
+// as routine under antivirus/indexer contention, not something this test's
+// race triggers on its own.
+test("a config pushed while a large image is still loading does not lose to a stale, late-arriving read", async () => {
+  // Real, incompressible pixel data: a deterministic pattern compresses away
+  // to almost nothing, which would make the read too fast to race against.
+  // 500x400 is small enough to keep this test fast and light on memory while
+  // still forcing a real disk read with a genuine, if brief, async gap.
+  const width = 500;
+  const height = 400;
+  const bigBytes = encode(width, height, 4, randomBytes(width * height * 4), 0);
+  const bigPath = join(tmpdir(), `image-race-${Date.now()}-${Math.random().toString(36).slice(2)}.png`);
+  await Bun.write(bigPath, bigBytes);
+
+  const id = "ipc-image-race-" + Date.now();
+  try {
+    const r = await mount(<Image id={id} config={{ path: bigPath }} enabled={true} />, id);
+
+    // Pushed immediately, while the big image's read is presumably still in
+    // flight -- not after waiting for it to settle.
+    await pushUpdate(id, { data: png64(20, 10), title: "the final answer" });
+
+    const frame = await settleUntil(r, (f) => f.includes("20×10"), 5000);
+    expect(frame).toContain("20×10");
+    expect(frame).toContain("the final answer");
+    // Never a trace of the superseded large image's own dimensions.
+    expect(frame).not.toContain(`${width}×${height}`);
+    r.dispose();
+  } finally {
+    await Bun.file(bigPath).delete?.().catch(() => {});
+  }
+}, 15000);

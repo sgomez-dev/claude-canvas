@@ -88,7 +88,13 @@ async function verifyClickOnSixAmRowBooksSixAm(
 ) {
   const r = mount(id, calendars, size);
   const frame = await r.settle();
-  await awaitRecord(id, 5000);
+  // The record's write races the render on a busy machine (see the
+  // registry.ts doc comments on rename contention under load); asserting
+  // here turns a genuinely slow-but-eventually-successful write into a
+  // clear "the record never appeared" failure instead of the confusing
+  // "no canvas <id>" connection error openConnection (below) throws when
+  // called against an id with no record at all.
+  expect(await awaitRecord(id, 5000)).not.toBeNull();
 
   // Confirm this scenario really does reproduce the wrap this fix targets:
   // the legend must actually occupy 2+ lines at this width, otherwise the
@@ -146,7 +152,8 @@ test("a single short calendar name (1-line legend) still books the row shown as 
   const id = "mplw-single-short";
   const r = mount(id, [{ name: "Ana", color: "cyan" }], { columns: 70, rows: 18 });
   const frame = await r.settle();
-  await awaitRecord(id, 5000);
+  // See the identical comment in verifyClickOnSixAmRowBooksSixAm above.
+  expect(await awaitRecord(id, 5000)).not.toBeNull();
 
   const lines = stripAnsi(frame).split("\n");
   const legendLineIdx = lines.findIndex((l) => l.includes("Ana"));
@@ -181,7 +188,8 @@ test("clicking below the grid (on the help bar) books nothing", async () => {
   const id = "mplw-below-grid";
   const r = mount(id, FIVE_FULL_NAMES, { columns: 70, rows: 18 });
   await r.settle();
-  await awaitRecord(id, 5000);
+  // See the identical comment in verifyClickOnSixAmRowBooksSixAm above.
+  expect(await awaitRecord(id, 5000)).not.toBeNull();
 
   const conn = await openConnection(id);
   // Row 18 is the last row of an 18-row pane -- the help bar, well past the

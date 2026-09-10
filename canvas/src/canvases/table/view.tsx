@@ -52,6 +52,52 @@ function computeWidth(col: TableColumn, rows: Array<Record<string, string>>): nu
   return Math.max(1, Math.min(MAX_AUTO_WIDTH, longest));
 }
 
+/**
+ * MAX_AUTO_WIDTH caps any ONE auto-sized column, but nothing capped the SUM
+ * of every column's width against the actual terminal -- an explicit
+ * `width` is never capped at all, and even auto-sized columns can add up
+ * past the terminal once there are enough of them (six columns at the
+ * 40-column auto-cap is already 240, comfortably wider than most terminals).
+ * The header row and every data row repeat the same column widths, so this
+ * is the identical "one row assumed, more than one row rendered" overflow
+ * fitCell already exists to prevent for a single cell -- just triggered by
+ * the ROW'S total width instead of any individual cell's. Reproduced: 6
+ * columns of width 20 in a 40-column terminal (36-column inner width)
+ * rendered the header and every data row wrapped onto 2 physical lines
+ * instead of 1.
+ *
+ * Shrinks every column proportionally down to `budget` display columns
+ * total, flooring each at 1 (a column narrower than that cannot render at
+ * all), then hands out whatever's left over one column at a time -- widest
+ * original column first, since that's where the most content is being cut
+ * and where an extra column back is most useful -- until the total matches
+ * exactly. If `budget` is itself smaller than one column per column (more
+ * columns than available width), every column is already floored at 1 and
+ * the row still overflows -- an unavoidable floor, not a bug this can
+ * paper over.
+ */
+function shrinkWidthsToFit(widths: number[], budget: number): number[] {
+  const total = widths.reduce((sum, w) => sum + w, 0);
+  if (total <= budget || widths.length === 0) return widths;
+  const scale = budget / total;
+  const shrunk = widths.map((w) => Math.max(1, Math.floor(w * scale)));
+  let used = shrunk.reduce((sum, w) => sum + w, 0);
+  let leftover = budget - used;
+  if (leftover > 0) {
+    const byOriginalWidthDesc = widths
+      .map((w, i) => ({ i, w }))
+      .sort((a, b) => b.w - a.w);
+    for (const { i } of byOriginalWidthDesc) {
+      if (leftover <= 0) break;
+      if (shrunk[i]! < widths[i]!) {
+        shrunk[i]! += 1;
+        leftover -= 1;
+      }
+    }
+  }
+  return shrunk;
+}
+
 // Measured in display columns, not UTF-16 code units. `.length` was wrong
 // three ways -- a CJK ideograph is one code unit and two columns, an astral
 // emoji is two units and two columns, and a ZWJ family emoji is eleven
@@ -87,7 +133,19 @@ export function TableView({
   terminalWidth = 80,
   focused,
 }: TableViewProps): React.JSX.Element {
-  const widths = useMemo(() => columns.map((c) => computeWidth(c, rows)), [columns, rows]);
+  // Computed here (rather than down where the footer's own innerWidth used
+  // to be the only consumer) because the column-width cap below needs it
+  // too, and both must measure the identical inner width the row actually
+  // renders into.
+  const innerWidth = Math.max(1, terminalWidth - HORIZONTAL_CHROME);
+  const widths = useMemo(() => {
+    const raw = columns.map((c) => computeWidth(c, rows));
+    // Each column's cell is followed by one trailing space (see the header
+    // and body rows below), so the row costs `raw.length` columns beyond
+    // the widths themselves.
+    const budget = Math.max(columns.length, innerWidth - columns.length);
+    return shrinkWidthsToFit(raw, budget);
+  }, [columns, rows, innerWidth]);
 
   // Audited against the same stale-ref-in-useInput bug class fixed in
   // diff/view.tsx, picker/view.tsx and form/view.tsx (see their cursorRef/
@@ -131,7 +189,6 @@ export function TableView({
   // would produce and re-derives `visibleCount` from that. See
   // picker/view.tsx's identical two-pass treatment for why one extra pass
   // is enough in practice.
-  const innerWidth = Math.max(1, terminalWidth - HORIZONTAL_CHROME);
   let footerRows = wrappedLineCount(FOOTER_HINT, innerWidth);
   let footerOverflow = Math.max(0, footerRows - 1);
   let visibleCount = Math.max(1, budget - HEADER_OVERHEAD_ROWS - footerOverflow);

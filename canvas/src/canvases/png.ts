@@ -166,16 +166,25 @@ export function decodePng(bytes: Uint8Array): DecodedImage {
     offset += chunk.byteLength;
   }
 
+  const stride = width * channels;
+  // Every scanline carries one leading filter-type byte. Computed BEFORE
+  // inflating -- not just before the post-inflate size check below -- and
+  // passed as `maxOutputLength`, so a compressed IDAT engineered to inflate
+  // to far more than this header could ever need (a "zlib bomb": a tiny
+  // compressed payload that decompresses to gigabytes) is rejected by zlib
+  // itself as soon as it exceeds this bound, instead of first being fully
+  // inflated into an unbounded allocation. The MAX_PIXELS check above already
+  // bounds `expected` to a sane ceiling, so this can never itself demand an
+  // absurd allocation.
+  const expected = (stride + 1) * height;
+
   let raw: Uint8Array;
   try {
-    raw = new Uint8Array(inflateSync(joined));
+    raw = new Uint8Array(inflateSync(joined, { maxOutputLength: expected }));
   } catch (e) {
     throw new PngDecodeError(`PNG image data could not be decompressed: ${(e as Error).message}`);
   }
 
-  const stride = width * channels;
-  // Every scanline carries one leading filter-type byte.
-  const expected = (stride + 1) * height;
   if (raw.byteLength < expected) {
     throw new PngDecodeError(
       `truncated PNG image data: ${raw.byteLength} bytes, expected ${expected}`

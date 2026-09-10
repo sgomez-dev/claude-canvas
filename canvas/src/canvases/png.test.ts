@@ -158,3 +158,27 @@ test("refuses image data shorter than the header's dimensions require", () => {
   ]);
   expect(() => decodePng(bad)).toThrow(/truncated PNG image data/);
 });
+
+// A "zlib bomb": a tiny compressed IDAT that inflates to far more than a
+// 2x2 header could ever need. All-zero data compresses at roughly 1000:1,
+// so 20 MB of zeros (a few KB compressed) is already ~1.1 million times more
+// than the 18 bytes this header requires -- enough to prove the bound is
+// enforced without needing gigabytes in a test run. Before the fix, this
+// call to inflateSync had no maxOutputLength and would inflate the entire
+// payload before the post-inflate size check ever ran.
+test("refuses a compressed payload that would inflate to far more than the header requires, without allocating it", () => {
+  const huge = deflateSync(new Uint8Array(20 * 1024 * 1024)); // 20 MB of zeros
+  const bomb = join([
+    SIGNATURE,
+    ihdr(2, 2, 6),
+    chunk("IDAT", new Uint8Array(huge)),
+    chunk("IEND", new Uint8Array(0)),
+  ]);
+  const before = process.memoryUsage().rss;
+  expect(() => decodePng(bomb)).toThrow(/could not be decompressed/);
+  const after = process.memoryUsage().rss;
+  // Generous margin -- this just proves the decoder didn't materialise the
+  // full ~20 MB inflated buffer (let alone the 6 GB an unbounded version of
+  // this attack was independently measured to allocate).
+  expect(after - before).toBeLessThan(15 * 1024 * 1024);
+});

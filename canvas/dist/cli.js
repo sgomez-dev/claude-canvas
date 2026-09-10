@@ -2557,7 +2557,7 @@ function isGraphicsTier(value) {
 function detectGraphics(env) {
   const program = env.TERM_PROGRAM ?? "";
   const term = env.TERM ?? "";
-  if (term.length === 0 || term === "dumb")
+  if ((term.length === 0 || term === "dumb") && env.WT_SESSION === undefined)
     return "none";
   if (env.KITTY_WINDOW_ID !== undefined || term === "xterm-kitty")
     return "kitty";
@@ -28383,6 +28383,13 @@ function flatten2(nodes, collapsed) {
   walk(nodes, 0, []);
   return out;
 }
+function positionPrefix4(total, cursor, visibleCount) {
+  if (total <= visibleCount)
+    return "";
+  const start = Math.floor(cursor / visibleCount) * visibleCount;
+  const visibleLen = Math.min(visibleCount, total - start);
+  return `${start + 1}-${start + visibleLen} of ${total}  `;
+}
 function initialCollapsed(nodes) {
   const out = new Set;
   const walk = (list) => {
@@ -28465,8 +28472,14 @@ function TreeView({
         onSubmit({ selectedId: row.node.id, path: row.path });
     }
   }, { isActive: focused });
-  const footerOverflow = Math.max(0, wrappedLineCount(FOOTER_HINT4, Math.max(1, columns - HORIZONTAL_CHROME5)) - 1);
-  const visibleCount = Math.max(1, budget - CHROME_ROWS4 - footerOverflow - (prompt ? 1 : 0));
+  const innerWidth = Math.max(1, columns - HORIZONTAL_CHROME5);
+  let footerRows = wrappedLineCount(FOOTER_HINT4, innerWidth);
+  let footerOverflow = Math.max(0, footerRows - 1);
+  let visibleCount = Math.max(1, budget - CHROME_ROWS4 - footerOverflow - (prompt ? 1 : 0));
+  const actualFooter = positionPrefix4(rows.length, clamped, visibleCount) + FOOTER_HINT4;
+  footerRows = wrappedLineCount(actualFooter, innerWidth);
+  footerOverflow = Math.max(0, footerRows - 1);
+  visibleCount = Math.max(1, budget - CHROME_ROWS4 - footerOverflow - (prompt ? 1 : 0));
   const windowStart = rows.length <= visibleCount ? 0 : Math.floor(clamped / visibleCount) * visibleCount;
   const windowRows = rows.slice(windowStart, windowStart + visibleCount);
   return /* @__PURE__ */ jsx_dev_runtime22.jsxDEV(Box_default, {
@@ -28503,7 +28516,7 @@ function TreeView({
         children: /* @__PURE__ */ jsx_dev_runtime22.jsxDEV(Text, {
           dimColor: true,
           children: [
-            rows.length > visibleCount ? `${windowStart + 1}-${windowStart + windowRows.length} of ${rows.length}  ` : "",
+            positionPrefix4(rows.length, clamped, visibleCount),
             FOOTER_HINT4
           ]
         }, undefined, true, undefined, this)
@@ -28756,7 +28769,7 @@ function Dashboard({
         const rows = heights[i];
         return /* @__PURE__ */ jsx_dev_runtime23.jsxDEV(Box_default, {
           flexDirection: "column",
-          children: renderRegion(region, rows, focused, handleSubmit)
+          children: renderRegion(region, rows, stdout?.columns ?? 80, focused, handleSubmit)
         }, region.id, false, undefined, this);
       }),
       /* @__PURE__ */ jsx_dev_runtime23.jsxDEV(Box_default, {
@@ -28772,7 +28785,7 @@ function Dashboard({
     ]
   }, generation, true, undefined, this);
 }
-function renderRegion(region, rows, focused, onSubmit) {
+function renderRegion(region, rows, columns, focused, onSubmit) {
   const submit = (result) => onSubmit(region.id, result);
   switch (region.kind) {
     case "picker": {
@@ -28812,6 +28825,7 @@ function renderRegion(region, rows, focused, onSubmit) {
         nodes,
         title: region.title,
         budget: rows,
+        columns,
         focused,
         onSubmit: submit
       }, undefined, false, undefined, this);
@@ -28995,6 +29009,9 @@ var init_halfblock_view = __esm(async () => {
   jsx_dev_runtime24 = __toESM(require_jsx_dev_runtime(), 1);
 });
 
+// canvas/src/canvases/image/types.ts
+var FOOTER_HINT5 = "Esc: close";
+
 // canvas/src/canvases/image/view.tsx
 function ImageView({
   image,
@@ -29033,7 +29050,7 @@ function ImageView({
     ]
   }, undefined, true, undefined, this);
 }
-var jsx_dev_runtime25, HORIZONTAL_CHROME6 = 4, BASE_CHROME_ROWS = 3, FOOTER_HINT5 = "Esc: close";
+var jsx_dev_runtime25, HORIZONTAL_CHROME6 = 4, BASE_CHROME_ROWS = 3;
 var init_view6 = __esm(async () => {
   init_halfblocks();
   init_width();
@@ -29045,6 +29062,18 @@ var init_view6 = __esm(async () => {
 });
 
 // canvas/src/canvases/graphics/kitty.ts
+function imageIdFor(canvasId) {
+  let hash = 2166136261;
+  for (let i = 0;i < canvasId.length; i++) {
+    hash ^= canvasId.charCodeAt(i);
+    hash = Math.imul(hash, 16777619);
+  }
+  const unsigned = hash >>> 0;
+  return unsigned === 0 ? 1 : unsigned;
+}
+function encodeKittyClear(imageId) {
+  return `\x1B_Ga=d,d=i,i=${imageId},q=2\x1B\\`;
+}
 function encodeKitty(png, placement) {
   const payload = Buffer.from(png).toString("base64");
   const chunks = [];
@@ -29053,7 +29082,7 @@ function encodeKitty(png, placement) {
   }
   if (chunks.length === 0)
     chunks.push("");
-  const control = `a=T,f=100,q=2,C=1,c=${placement.columns},r=${placement.rows}`;
+  const control = `a=T,f=100,q=2,C=1,c=${placement.columns},r=${placement.rows},i=${placement.imageId}`;
   return chunks.map((chunk, i) => {
     const last = i === chunks.length - 1;
     const head = i === 0 ? `${control},m=${last ? 0 : 1}` : `m=${last ? 0 : 1}`;
@@ -29115,6 +29144,9 @@ function boxRange(box) {
   return { channel, extent };
 }
 function medianCut(rgb, maxColours = MAX_COLOURS) {
+  if (maxColours > 256) {
+    throw new Error(`medianCut: maxColours must be at most 256 (the palette-index lookup is a Uint8Array), got ${maxColours}`);
+  }
   const histogram = new Map;
   for (let i = 0;i < rgb.length; i += 3) {
     const key = rgb[i] << 16 | rgb[i + 1] << 8 | rgb[i + 2];
@@ -29290,7 +29322,7 @@ function paintBytes(req) {
   const escapes = imageEscapes(req);
   if (escapes.length === 0)
     return "";
-  const clear = req.tier === "kitty" ? forTerminal([KITTY_CLEAR], req.env) : "";
+  const clear = req.tier === "kitty" ? forTerminal([encodeKittyClear(req.imageId)], req.env) : "";
   const position = `\x1B[${req.originRow};${req.originColumn}H`;
   return `\x1B7${clear}${position}${forTerminal(escapes, req.env)}\x1B8`;
 }
@@ -29298,7 +29330,7 @@ function imageEscapes(req) {
   const placement = { columns: req.columns, rows: req.rows };
   switch (req.tier) {
     case "kitty":
-      return encodeKitty(req.png, placement);
+      return encodeKitty(req.png, { ...placement, imageId: req.imageId });
     case "iterm2":
       return encodeITerm2(req.png, placement);
     case "sixel":
@@ -29311,7 +29343,6 @@ function imageEscapes(req) {
 function usesProtocol(tier) {
   return tier === "kitty" || tier === "iterm2" || tier === "sixel";
 }
-var KITTY_CLEAR = "\x1B_Ga=d,d=A,q=2\x1B\\";
 var init_paint = __esm(() => {
   init_sixel();
   init_resample();
@@ -29326,10 +29357,11 @@ function GraphicsImageView({
   background,
   budget,
   terminalWidth,
-  cell
+  cell,
+  imageId
 }) {
   const { stdout } = use_stdout_default();
-  const footerText = `${image.width}\xD7${image.height}  ${tier}  ${FOOTER_HINT6}`;
+  const footerText = `${image.width}\xD7${image.height}  ${tier}  ${FOOTER_HINT5}`;
   const footerOverflow = Math.max(0, wrappedLineCount(footerText, terminalWidth) - 1);
   const titleRows = title !== undefined ? 1 : 0;
   const availableRows = Math.max(1, budget - titleRows - 1 - footerOverflow);
@@ -29346,6 +29378,7 @@ function GraphicsImageView({
       originColumn: 1,
       background,
       cell,
+      imageId,
       env: process.env
     });
     if (bytes.length > 0)
@@ -29369,7 +29402,7 @@ function GraphicsImageView({
     ]
   }, undefined, true, undefined, this);
 }
-var import_react46, jsx_dev_runtime26, FOOTER_HINT6 = "Esc: close";
+var import_react46, jsx_dev_runtime26;
 var init_graphics_view = __esm(async () => {
   init_halfblocks();
   init_paint();
@@ -29527,14 +29560,14 @@ function decodePng(bytes) {
     joined.set(chunk, offset);
     offset += chunk.byteLength;
   }
+  const stride = width * channels;
+  const expected = (stride + 1) * height;
   let raw;
   try {
-    raw = new Uint8Array(inflateSync(joined));
+    raw = new Uint8Array(inflateSync(joined, { maxOutputLength: expected }));
   } catch (e) {
     throw new PngDecodeError(`PNG image data could not be decompressed: ${e.message}`);
   }
-  const stride = width * channels;
-  const expected = (stride + 1) * height;
   if (raw.byteLength < expected) {
     throw new PngDecodeError(`truncated PNG image data: ${raw.byteLength} bytes, expected ${expected}`);
   }
@@ -29606,6 +29639,7 @@ function Image({
   const { exit } = use_app_default();
   const { stdout } = use_stdout_default();
   const [config, setConfig] = import_react47.useState(initialConfig);
+  const imageId = import_react47.useMemo(() => imageIdFor(id), [id]);
   const { source, title, background, error } = import_react47.useMemo(() => validateImage(config), [config]);
   const environment = import_react47.useMemo(() => {
     try {
@@ -29617,7 +29651,7 @@ function Image({
     } catch (e) {
       return {
         tier: "halfblocks",
-        cell: { width: 8, height: 16 },
+        cell: CELL_PIXELS,
         error: e instanceof Error ? e.message : String(e)
       };
     }
@@ -29635,6 +29669,8 @@ function Image({
     (async () => {
       try {
         const bytes = source.kind === "data" ? source.bytes : await Bun.file(source.path).bytes();
+        if (cancelled)
+          return;
         const decoded = decodePng(bytes);
         if (!cancelled) {
           setPng(bytes);
@@ -29712,7 +29748,8 @@ function Image({
       background,
       budget: stdout?.rows ?? 24,
       terminalWidth: stdout?.columns ?? 80,
-      cell: environment.cell
+      cell: environment.cell,
+      imageId
     }, undefined, false, undefined, this);
   }
   return /* @__PURE__ */ jsx_dev_runtime27.jsxDEV(ImageView, {

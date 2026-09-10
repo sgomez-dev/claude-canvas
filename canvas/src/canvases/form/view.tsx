@@ -1,6 +1,11 @@
 import React, { useReducer, useRef, useState } from "react";
 import { Box, Text, useInput } from "ink";
-import { displayWidth, truncateToWidthFromEnd, wrappedLineCount } from "../width";
+import {
+  displayWidth,
+  truncateToWidthFromEnd,
+  truncateWithEllipsis,
+  wrappedLineCount,
+} from "../width";
 import type { FormField, FormResult } from "./types";
 
 export interface FormViewProps {
@@ -366,6 +371,24 @@ export function FormView({
         const hasError = errors.has(f.id) && isMissing(f, value);
         const labelColor = hasError ? "red" : isFocused ? "cyan" : undefined;
         const requiredMark = "required" in f && f.required ? " *" : "";
+        const errorMark = hasError ? "  <- required" : "";
+        // ROWS_PER_FIELD assumes this label row is exactly one terminal
+        // row -- true only if `f.label` never wraps. A long field label
+        // wraps onto 2+ rows at a narrow width, which shifts every field
+        // after it down and, worse, desyncs the label from its own value
+        // row (reproduced: a 72-character required label at 30 columns
+        // wrapped onto 4 rows, pushing the field's value line and every
+        // field after it out of place). Truncated here instead, same
+        // principle as table's cell truncation: the fixed prefix (cursor
+        // gutter) and suffix (the required asterisk, the error marker) are
+        // subtracted from the available width first, since neither is
+        // truncatable, and both are already known for this specific row.
+        const labelPrefixWidth = 2; // "> " / "  "
+        const labelBudget = Math.max(
+          1,
+          innerWidth - labelPrefixWidth - displayWidth(requiredMark) - displayWidth(errorMark)
+        );
+        const shownLabel = truncateWithEllipsis(f.label, labelBudget);
         return (
           <Box key={f.id} flexDirection="column">
             {/* A missing required field carries a text marker, not just a
@@ -376,9 +399,9 @@ export function FormView({
                 fields are missing. */}
             <Text color={labelColor}>
               {isFocused ? "> " : "  "}
-              {f.label}
+              {shownLabel}
               {requiredMark}
-              {hasError ? "  <- required" : ""}
+              {errorMark}
             </Text>
             <Box marginLeft={2}>
               {f.type === "checkbox" ? (

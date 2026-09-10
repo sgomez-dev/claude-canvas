@@ -15,8 +15,10 @@ import {
   type ActionIO,
 } from "./cli";
 import { getScenario, listScenarios } from "./scenarios/registry";
-import { writeRecord, deleteRecord, newToken } from "./runtime/registry";
+import { writeRecord, readRecord, deleteRecord, newToken } from "./runtime/registry";
 import { configPath } from "./runtime/paths";
+import { startCanvasServer } from "./runtime/server";
+import { getValue } from "./runtime/client";
 
 // A fake ActionIO that records what would have gone to stdout and what exit
 // code would have been used, instead of ever calling the real process.exit
@@ -185,6 +187,132 @@ test("spawn rejects malformed --config JSON before ever writing configPath, with
     } catch {
       // already absent, which is the expected/passing case
     }
+  }
+});
+
+// --- reuse detection (Phase 2) --------------------------------------------
+//
+// Documented as deferred since Phase 1 (2026-09-07-canvas-foundations-design.md,
+// "Reuse detection is NOT implemented in Phase 1"): spawning twice with the
+// same --id used to silently overwrite the first canvas's registry record
+// with the second's, even though the first pane was still open and its
+// process still alive -- orphaning it, unreachable via wait/get/close, for
+// the rest of its process lifetime. Reproduced directly (outside this suite)
+// by writing a record, writing a second one for the same id, and observing
+// the first record's port/token vanish from the registry while its pid was
+// still alive throughout.
+//
+// These tests exercise the fix at the level of the actual `runSpawn`
+// export, the same function real `spawn` invocations call, using a real
+// `startCanvasServer` + `writeRecord` to stand in for "a canvas is already
+// running" -- the same technique runtime/integration.test.ts uses for a real
+// live canvas without needing an actual terminal host (this suite runs in
+// CI, on all three OSes, none of which have tmux or Windows Terminal
+// available). The refusal must happen before `detectHost()`/`host.open()`
+// are ever reached, so this is deterministic regardless of what host (if
+// any) the machine running the test happens to have.
+
+test("spawn refuses to reuse --id when a live canvas already holds it, and leaves its record untouched", async () => {
+  const id = "cli-test-spawn-reuse-live";
+  // Cleared for the same reason as the two tests below: the refusal must
+  // fire before detectHost()/host.open() are ever reached, so clearing
+  // these guarantees this test never depends on -- or accidentally drives --
+  // whatever real terminal host (if any) happens to be available on the
+  // machine running it.
+  const savedWt = process.env.WT_SESSION;
+  const savedTmux = process.env.TMUX;
+  delete process.env.WT_SESSION;
+  delete process.env.TMUX;
+  const server = await startCanvasServer({
+    onMessage(msg, reply) {
+      if (msg.type === "get") reply({ type: "value", key: msg.key, data: "still-here" });
+    },
+  });
+  try {
+    const original = {
+      id, kind: "document", scenario: "display",
+      port: server.port, token: server.token, pid: process.pid,
+      startedAt: new Date().toISOString(), host: "test",
+    };
+    await writeRecord(original);
+
+    const { io, lines, exits } = captureIO();
+    await runSpawn("document", { id }, io);
+
+    // Refused, not a silent success.
+    expect(exits).toEqual([1]);
+    const parsed = JSON.parse(lines[0] ?? "");
+    expect(parsed.status).toBe("error");
+    expect(parsed.message).toContain(id);
+    expect(parsed.message).toContain("already running");
+    expect(parsed.message).toContain(String(process.pid));
+
+    // The original record must be completely untouched: same port, same
+    // token, same pid -- still the exact canvas that was already running,
+    // not silently replaced.
+    const stillThere = await readRecord(id);
+    expect(stillThere).toEqual(original);
+
+    // And still genuinely reachable over IPC, exactly as before the refused
+    // spawn attempt -- not just a registry file that happens to look right.
+    expect(await getValue(id, "anything")).toBe("still-here");
+  } finally {
+    await deleteRecord(id);
+    server.stop();
+    if (savedWt === undefined) delete process.env.WT_SESSION; else process.env.WT_SESSION = savedWt;
+    if (savedTmux === undefined) delete process.env.TMUX; else process.env.TMUX = savedTmux;
+  }
+});
+
+test("spawn proceeds normally (past the liveness check) when no record exists for --id", async () => {
+  // Force detectHost() to fail deterministically regardless of what host
+  // the machine running this test happens to have available (this sandbox,
+  // for instance, has WT_SESSION set) -- the point of this test is only that
+  // execution gets PAST the new liveness check, not that a real pane opens.
+  const savedWt = process.env.WT_SESSION;
+  const savedTmux = process.env.TMUX;
+  delete process.env.WT_SESSION;
+  delete process.env.TMUX;
+  try {
+    const { io, lines, exits } = captureIO();
+    await runSpawn("document", { id: "cli-test-spawn-reuse-absent" }, io);
+    expect(exits).toEqual([1]);
+    const parsed = JSON.parse(lines[0] ?? "");
+    expect(parsed.status).toBe("error");
+    // Reaches detectHost()'s own error, not the "already running" refusal --
+    // proof the absent-record case was never blocked by the new check.
+    expect(parsed.message).toContain("No canvas host available");
+    expect(parsed.message).not.toContain("already running");
+  } finally {
+    if (savedWt === undefined) delete process.env.WT_SESSION; else process.env.WT_SESSION = savedWt;
+    if (savedTmux === undefined) delete process.env.TMUX; else process.env.TMUX = savedTmux;
+  }
+});
+
+test("spawn proceeds normally (past the liveness check) when the existing record's process is dead", async () => {
+  const id = "cli-test-spawn-reuse-dead";
+  // pid 0x7FFFFFFE will not exist on any platform in practice -- the same
+  // convention runtime/registry.test.ts uses for a dead-process record.
+  await writeRecord({
+    id, kind: "document", scenario: "display", port: 1234, token: newToken(),
+    pid: 0x7ffffffe, startedAt: new Date().toISOString(), host: "test",
+  });
+  const savedWt = process.env.WT_SESSION;
+  const savedTmux = process.env.TMUX;
+  delete process.env.WT_SESSION;
+  delete process.env.TMUX;
+  try {
+    const { io, lines, exits } = captureIO();
+    await runSpawn("document", { id }, io);
+    expect(exits).toEqual([1]);
+    const parsed = JSON.parse(lines[0] ?? "");
+    expect(parsed.status).toBe("error");
+    expect(parsed.message).toContain("No canvas host available");
+    expect(parsed.message).not.toContain("already running");
+  } finally {
+    if (savedWt === undefined) delete process.env.WT_SESSION; else process.env.WT_SESSION = savedWt;
+    if (savedTmux === undefined) delete process.env.TMUX; else process.env.TMUX = savedTmux;
+    await deleteRecord(id);
   }
 });
 

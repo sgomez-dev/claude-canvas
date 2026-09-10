@@ -24547,6 +24547,18 @@ var init_meeting_picker_view = __esm(async () => {
 });
 
 // canvas/src/scenarios/types.ts
+function calendarHourRangeError(scenarioName, startHour, endHour) {
+  if (!Number.isInteger(startHour) || startHour < 0 || startHour > 23) {
+    return `calendar config: scenario '${scenarioName}' needs 'startHour' to be an integer from 0 to 23`;
+  }
+  if (!Number.isInteger(endHour) || endHour < 1 || endHour > 24) {
+    return `calendar config: scenario '${scenarioName}' needs 'endHour' to be an integer from 1 to 24`;
+  }
+  if (startHour >= endHour) {
+    return `calendar config: scenario '${scenarioName}' needs 'startHour' to be strictly less than 'endHour'`;
+  }
+  return null;
+}
 function meetingPickerConfigError(config) {
   if (!("calendars" in config) || !Array.isArray(config.calendars) || config.calendars.length === 0) {
     return "calendar config: scenario 'meeting-picker' needs a non-empty 'calendars' array";
@@ -24558,16 +24570,12 @@ function meetingPickerConfigError(config) {
   }
   const startHour = "startHour" in config && config.startHour !== undefined ? config.startHour : DEFAULT_START_HOUR;
   const endHour = "endHour" in config && config.endHour !== undefined ? config.endHour : DEFAULT_END_HOUR;
-  if (!Number.isInteger(startHour) || startHour < 0 || startHour > 23) {
-    return "calendar config: scenario 'meeting-picker' needs 'startHour' to be an integer from 0 to 23";
-  }
-  if (!Number.isInteger(endHour) || endHour < 1 || endHour > 24) {
-    return "calendar config: scenario 'meeting-picker' needs 'endHour' to be an integer from 1 to 24";
-  }
-  if (startHour >= endHour) {
-    return "calendar config: scenario 'meeting-picker' needs 'startHour' to be strictly less than 'endHour'";
-  }
-  return null;
+  return calendarHourRangeError("meeting-picker", startHour, endHour);
+}
+function displayConfigError(config) {
+  const startHour = config.startHour !== undefined ? config.startHour : DEFAULT_START_HOUR;
+  const endHour = config.endHour !== undefined ? config.endHour : DEFAULT_END_HOUR;
+  return calendarHourRangeError("display", startHour, endHour);
 }
 function isMeetingPickerConfig(config) {
   return meetingPickerConfigError(config) === null;
@@ -24876,6 +24884,15 @@ function Calendar({ id, config, enabled = false, scenario = "display" }) {
       id,
       config: pickerConfig,
       enabled
+    }, undefined, false, undefined, this);
+  }
+  const displayError = config ? displayConfigError(config) : null;
+  if (displayError) {
+    return /* @__PURE__ */ jsx_dev_runtime2.jsxDEV(CalendarConfigError, {
+      id,
+      scenario,
+      enabled,
+      message: displayError
     }, undefined, false, undefined, this);
   }
   return /* @__PURE__ */ jsx_dev_runtime2.jsxDEV(CalendarDisplay, {

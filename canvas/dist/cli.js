@@ -30435,6 +30435,10 @@ async function runSpawn(kind, opts, io = defaultIO) {
     assertIdent("kind", kind);
     assertKnownKind(kind);
     const scenario = resolveScenario(kind, opts.scenario);
+    const existing = await readRecord(id);
+    if (existing && isAlive(existing.pid)) {
+      throw new Error(`Canvas ${id} is already running (pid ${existing.pid}). Close it first with \`canvas close ${id}\`, or use a different --id.`);
+    }
     const argv = buildShowArgv(kind, id, scenario, resolveGraphics(process.env));
     if (opts.config) {
       try {

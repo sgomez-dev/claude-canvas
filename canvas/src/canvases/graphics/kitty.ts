@@ -21,6 +21,49 @@ export interface KittyPlacement {
   columns: number;
   /** Cell rows the image should occupy. */
   rows: number;
+  /**
+   * This canvas instance's own kitty image id (`i=`), scoping the placement
+   * to it. Without one, a delete has nothing to target except "every
+   * placement on the whole terminal" -- see `encodeKittyClear`.
+   */
+  imageId: number;
+}
+
+/**
+ * Derives a stable, non-zero 32-bit kitty image id from a canvas's own
+ * (string) id.
+ *
+ * Kitty's `i=` is a plain integer, so two canvases painting side by side --
+ * a supported flow: two `image` panes open at once, each showing a
+ * different picture -- need two DIFFERENT ids, or a delete meant to clear
+ * one repaint also wipes the other (see `encodeKittyClear`). Hashing the
+ * canvas's own id keeps the number stable across repaints of the SAME
+ * instance while (with overwhelming probability, for the small number of
+ * canvases ever open at once) differing between instances, with no extra
+ * coordination needed between them. FNV-1a, chosen only for being small,
+ * dependency-free and well distributed -- there is nothing cryptographic
+ * about this id.
+ */
+export function imageIdFor(canvasId: string): number {
+  let hash = 0x811c9dc5; // FNV-1a 32-bit offset basis
+  for (let i = 0; i < canvasId.length; i++) {
+    hash ^= canvasId.charCodeAt(i);
+    hash = Math.imul(hash, 0x01000193); // FNV-1a 32-bit prime
+  }
+  const unsigned = hash >>> 0;
+  // 0 is not a valid kitty image id; vanishingly unlikely, but a real id
+  // beats a silently invalid one if the hash ever lands there.
+  return unsigned === 0 ? 1 : unsigned;
+}
+
+/**
+ * The escape that deletes exactly ONE canvas's own kitty placement (`a=d`
+ * with `d=i,i=<id>`) -- scoped, unlike kitty's "delete every placement on
+ * the terminal" directive (`d=A`), which a second image canvas open
+ * alongside this one would otherwise have no protection from.
+ */
+export function encodeKittyClear(imageId: number): string {
+  return `\x1b_Ga=d,d=i,i=${imageId},q=2\x1b\\`;
 }
 
 /**
@@ -42,6 +85,9 @@ export interface KittyPlacement {
  *   believes it has already drawn.
  * - `c`/`r` scale the image into a cell box, so the caller does the fitting
  *   in cells and the terminal does the resampling at full resolution.
+ * - `i` scopes this placement to the caller's own kitty image id, so its
+ *   later delete (`encodeKittyClear`) can target only THIS placement rather
+ *   than every image on the terminal. See `imageIdFor`.
  */
 export function encodeKitty(png: Uint8Array, placement: KittyPlacement): string[] {
   const payload = Buffer.from(png).toString("base64");
@@ -55,7 +101,7 @@ export function encodeKitty(png: Uint8Array, placement: KittyPlacement): string[
   if (chunks.length === 0) chunks.push("");
 
   const control =
-    `a=T,f=100,q=2,C=1,c=${placement.columns},r=${placement.rows}`;
+    `a=T,f=100,q=2,C=1,c=${placement.columns},r=${placement.rows},i=${placement.imageId}`;
 
   // Returns the escapes SEPARATELY rather than pre-joined, because tmux
   // passthrough has to wrap each one in its own DCS: a single DCS carrying

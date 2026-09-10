@@ -146,3 +146,71 @@ test("a pushed config repaints the protocol image", async () => {
     await deleteRecord(id);
   }
 });
+
+/** Extracts every kitty control block (the part before `;<payload>`) from a stream. */
+function kittyControls(s: string): string[] {
+  const out: string[] = [];
+  const re = /\x1b_G([^;]*);/g;
+  for (let m = re.exec(s); m !== null; m = re.exec(s)) out.push(m[1]!);
+  return out;
+}
+
+// Two `image` canvases open side by side (a supported flow -- two dashboard
+// panes each showing a different picture) each get their own kitty image id,
+// and a repaint on one must delete only that canvas's own placement, never
+// the OTHER canvas's, and never kitty's "delete everything on the terminal"
+// directive (`d=A`). Before this fix, `KITTY_CLEAR` was a single unscoped
+// `a=d,d=A` constant shared by every instance, so canvas A repainting on its
+// own state change would wipe canvas B's image too.
+test("two kitty canvases open at once never delete each other's placement", async () => {
+  const idA = "tier-kitty-a";
+  const idB = "tier-kitty-b";
+  process.env.CANVAS_GRAPHICS = "kitty";
+  const a = renderCanvas(<Image id={idA} config={{ data: png64(8, 8) }} enabled={true} />, {
+    columns: 40,
+    rows: 12,
+  });
+  const b = renderCanvas(<Image id={idB} config={{ data: png64(8, 8) }} enabled={true} />, {
+    columns: 40,
+    rows: 12,
+  });
+  try {
+    await a.settle();
+    await b.settle();
+    expect(await awaitRecord(idA, 5000)).not.toBeNull();
+    expect(await awaitRecord(idB, 5000)).not.toBeNull();
+    await settleUntil(a, () => a.frames.join("").includes("\x1b_G"));
+    await settleUntil(b, () => b.frames.join("").includes("\x1b_G"));
+
+    const idsA = kittyControls(a.frames.join(""))
+      .map((c) => /(?:^|,)i=(\d+)/.exec(c)?.[1])
+      .filter((x): x is string => x !== undefined);
+    const idsB = kittyControls(b.frames.join(""))
+      .map((c) => /(?:^|,)i=(\d+)/.exec(c)?.[1])
+      .filter((x): x is string => x !== undefined);
+    expect(idsA.length).toBeGreaterThan(0);
+    expect(idsB.length).toBeGreaterThan(0);
+    // Each canvas is internally consistent about its own id...
+    expect(new Set(idsA).size).toBe(1);
+    expect(new Set(idsB).size).toBe(1);
+    // ...and the two canvases never share one.
+    expect(idsA[0]).not.toBe(idsB[0]);
+
+    // Repaint A (a pushed config triggers the same clear-then-redraw a
+    // state-driven repaint does) and confirm its clear references only its
+    // own id -- never B's id, and never the unscoped "delete all".
+    await pushUpdate(idA, { data: png64(20, 10) });
+    await settleUntil(a, () => a.frames.join("").includes("20×10"));
+    for (let i = 0; i < 5; i++) await a.settle();
+
+    const aStream = a.frames.join("");
+    expect(aStream).toContain(`a=d,d=i,i=${idsA[0]}`);
+    expect(aStream).not.toContain(`i=${idsB[0]}`);
+    expect(aStream).not.toContain("d=A");
+  } finally {
+    a.dispose();
+    b.dispose();
+    await deleteRecord(idA);
+    await deleteRecord(idB);
+  }
+});

@@ -8,7 +8,7 @@ const image: DecodedImage = {
   height: 2,
   pixels: new Uint8Array([255, 0, 0, 255, 0, 255, 0, 255, 0, 0, 255, 255, 9, 9, 9, 255]),
 };
-const base = { png, image, columns: 8, rows: 4, originRow: 2, originColumn: 1 };
+const base = { png, image, columns: 8, rows: 4, originRow: 2, originColumn: 1, imageId: 42 };
 
 test("the tiers with no protocol emit nothing at all", () => {
   for (const tier of ["halfblocks", "none"] as const) {
@@ -40,16 +40,34 @@ test("the cursor is saved, positioned and restored", () => {
 });
 
 // Its placements persist independently of the text grid, so a repaint would
-// stack on the previous image rather than replace it.
-test("kitty deletes previous placements before drawing, and only kitty", () => {
-  expect(paintBytes({ ...base, tier: "kitty", env: {} as never })).toContain("a=d,d=A");
+// stack on the previous image rather than replace it. Scoped to this
+// canvas's own id (`d=i,i=<id>`), NOT `d=A` ("delete every placement on the
+// terminal") -- a second image canvas open alongside this one must not have
+// its own placement wiped by this one's repaint.
+test("kitty deletes only its own previous placement before drawing, and only kitty", () => {
+  expect(paintBytes({ ...base, tier: "kitty", env: {} as never })).toContain("a=d,d=i,i=42");
+  expect(paintBytes({ ...base, tier: "kitty", env: {} as never })).not.toContain("d=A");
   expect(paintBytes({ ...base, tier: "iterm2", env: {} as never })).not.toContain("a=d");
   expect(paintBytes({ ...base, tier: "sixel", env: {} as never })).not.toContain("a=d");
 });
 
 test("the delete comes before the positioning, not after", () => {
   const out = paintBytes({ ...base, tier: "kitty", env: {} as never });
-  expect(out.indexOf("a=d,d=A")).toBeLessThan(out.indexOf("\x1b[2;1H"));
+  expect(out.indexOf("a=d,d=i,i=42")).toBeLessThan(out.indexOf("\x1b[2;1H"));
+});
+
+// Two canvases painting side by side must never share an id: one's repaint
+// (which clears then redraws its own placement) must not touch the other's.
+test("two kitty canvases with different ids never reference each other's placement", () => {
+  const left = paintBytes({ ...base, tier: "kitty", imageId: 1, env: {} as never });
+  const right = paintBytes({ ...base, tier: "kitty", imageId: 2, env: {} as never });
+  expect(left).toContain("i=1");
+  expect(left).not.toContain("i=2");
+  expect(right).toContain("i=2");
+  expect(right).not.toContain("d=i,i=1");
+  // Neither ever falls back to the unscoped "delete everything" directive.
+  expect(left).not.toContain("d=A");
+  expect(right).not.toContain("d=A");
 });
 
 // Only the image escape needs wrapping. The cursor moves are ordinary CSI

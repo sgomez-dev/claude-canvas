@@ -1,6 +1,6 @@
 import type { GraphicsTier } from "../../host/graphics";
 import type { DecodedImage } from "../png";
-import { encodeKitty } from "./kitty";
+import { encodeKitty, encodeKittyClear } from "./kitty";
 import { encodeITerm2 } from "./iterm2";
 import { encodeSixel, CELL_PIXELS } from "./sixel";
 import { forTerminal } from "./passthrough";
@@ -20,11 +20,18 @@ export interface PaintRequest {
   originColumn: number;
   background?: RGB;
   cell?: { width: number; height: number };
+  /**
+   * This canvas instance's own kitty image id (see `imageIdFor`). Only kitty
+   * uses it -- iTerm2 and Sixel draw into the text grid, which Ink's own
+   * redraw already clears, so they have no placement to scope. Required
+   * regardless of tier so a caller cannot forget it for the one tier that
+   * needs it: an omitted id here previously meant every kitty repaint
+   * deleted every placement on the whole terminal, not just this canvas's
+   * own (see `encodeKittyClear`).
+   */
+  imageId: number;
   env: NodeJS.ProcessEnv;
 }
-
-/** Deletes every kitty placement, so a repaint replaces rather than stacks. */
-const KITTY_CLEAR = "\x1b_Ga=d,d=A,q=2\x1b\\";
 
 /**
  * The bytes that paint an image at a position, or `""` for a tier that has
@@ -50,7 +57,7 @@ export function paintBytes(req: PaintRequest): string {
   const escapes = imageEscapes(req);
   if (escapes.length === 0) return "";
 
-  const clear = req.tier === "kitty" ? forTerminal([KITTY_CLEAR], req.env) : "";
+  const clear = req.tier === "kitty" ? forTerminal([encodeKittyClear(req.imageId)], req.env) : "";
   const position = `\x1b[${req.originRow};${req.originColumn}H`;
   // \x1b7 / \x1b8 rather than CSI s / CSI u: the DEC forms are what every
   // terminal in this project's matrix implements, including Windows
@@ -62,7 +69,7 @@ function imageEscapes(req: PaintRequest): string[] {
   const placement = { columns: req.columns, rows: req.rows };
   switch (req.tier) {
     case "kitty":
-      return encodeKitty(req.png, placement);
+      return encodeKitty(req.png, { ...placement, imageId: req.imageId });
     case "iterm2":
       return encodeITerm2(req.png, placement);
     case "sixel":

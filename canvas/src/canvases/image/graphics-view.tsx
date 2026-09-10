@@ -6,6 +6,7 @@ import { wrappedLineCount } from "../width";
 import type { GraphicsTier } from "../../host/graphics";
 import type { RGB } from "../graphics/resample";
 import type { DecodedImage } from "../png";
+import { FOOTER_HINT } from "./types";
 
 export interface GraphicsImageViewProps {
   image: DecodedImage;
@@ -17,9 +18,14 @@ export interface GraphicsImageViewProps {
   budget: number;
   terminalWidth: number;
   cell: { width: number; height: number };
+  /**
+   * This canvas instance's own kitty image id (see `imageIdFor` in
+   * `graphics/kitty.ts`). Only kitty's placement/delete pair is scoped by
+   * it, but it is required regardless of tier so switching tiers is never
+   * the thing that silently drops the scoping.
+   */
+  imageId: number;
 }
-
-const FOOTER_HINT = "Esc: close";
 
 /**
  * Reserves rows for an image and paints it with a terminal protocol.
@@ -47,6 +53,7 @@ export function GraphicsImageView({
   budget,
   terminalWidth,
   cell,
+  imageId,
 }: GraphicsImageViewProps): React.JSX.Element {
   const { stdout } = useStdout();
 
@@ -75,6 +82,7 @@ export function GraphicsImageView({
       originColumn: 1,
       background,
       cell,
+      imageId,
       env: process.env,
     });
     if (bytes.length > 0) stdout?.write(bytes);

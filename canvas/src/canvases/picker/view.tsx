@@ -1,6 +1,6 @@
 import React, { useRef, useState } from "react";
 import { Box, Text, useInput } from "ink";
-import { wrappedLineCount } from "../width";
+import { truncateWithEllipsis, wrappedLineCount } from "../width";
 import type { PickerOption, PickerResult } from "./types";
 
 export interface PickerViewProps {
@@ -190,16 +190,38 @@ export function PickerView({
   // layout -- two passes closes the gap the single-pass version had.
   const footerHint = mode === "multi" ? MULTI_FOOTER_HINT : SINGLE_FOOTER_HINT;
   const innerWidth = Math.max(1, columns - HORIZONTAL_CHROME);
+  // The prompt is a single, one-time descriptive line rendered above the
+  // options -- distinct from the footer, but it can wrap onto multiple rows
+  // at a narrow width exactly the same way the footer does. This used to be
+  // a flat `(prompt ? 1 : 0)`, which under-reserved whenever the prompt
+  // string itself was long enough to wrap -- the same class of overflow the
+  // footer was already fixed for, just left unfixed here. Measured with the
+  // same `wrappedLineCount` helper as the footer, at the same `innerWidth`.
+  const promptRows = prompt ? wrappedLineCount(prompt, innerWidth) : 0;
   let footerRows = wrappedLineCount(footerHint, innerWidth);
   let footerOverflow = Math.max(0, footerRows - 1);
-  let visibleCount = Math.max(1, rows - CHROME_ROWS - footerOverflow - (prompt ? 1 : 0));
+  let visibleCount = Math.max(1, rows - CHROME_ROWS - footerOverflow - promptRows);
   const actualFooter = positionPrefix(options.length, cursor, visibleCount) + footerHint;
   footerRows = wrappedLineCount(actualFooter, innerWidth);
   footerOverflow = Math.max(0, footerRows - 1);
-  visibleCount = Math.max(1, rows - CHROME_ROWS - footerOverflow - (prompt ? 1 : 0));
+  visibleCount = Math.max(1, rows - CHROME_ROWS - footerOverflow - promptRows);
   const windowStart =
     options.length <= visibleCount ? 0 : Math.floor(cursor / visibleCount) * visibleCount;
   const visibleOptions = options.slice(windowStart, windowStart + visibleCount);
+  // Every option row is assumed by the windowing math above to cost exactly
+  // one terminal row -- true only if its rendered text never wraps. A long
+  // label (a realistic branch name, say) wraps onto 2+ rows at a narrow
+  // width, and because this repeats per visible option, one long label
+  // silently blows the row budget by however many extra lines it wraps
+  // onto (reproduced: 30 options with ~45-char labels, budget 12, 50
+  // columns rendered 18 rows). Rather than teach the windowing math to
+  // account for a variable per-row height, truncate the row's text to
+  // guarantee it always fits in one row -- the same principle
+  // table/view.tsx's `fitCell` already applies to cell values, generalized
+  // here via `truncateWithEllipsis`. The single-select prefix ("> "/"  ") is
+  // 2 columns; multi-select's adds a checkbox ("[x] "/"[ ] "), 4 more.
+  const optionPrefixWidth = mode === "multi" ? 6 : 2;
+  const optionTextWidth = Math.max(1, innerWidth - optionPrefixWidth);
 
   return (
     <Box flexDirection="column" borderStyle="round" borderColor={focused ? "cyan" : "gray"} paddingX={1}>
@@ -228,6 +250,8 @@ export function PickerView({
             : isCursor
               ? "> "
               : "  ";
+        const rawText = opt.label + (opt.description ? ` — ${opt.description}` : "");
+        const text = truncateWithEllipsis(rawText, optionTextWidth);
         return (
           <Text
             key={opt.id}
@@ -235,8 +259,7 @@ export function PickerView({
             dimColor={opt.disabled}
           >
             {prefix}
-            {opt.label}
-            {opt.description ? ` — ${opt.description}` : ""}
+            {text}
           </Text>
         );
       })}

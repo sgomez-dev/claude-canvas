@@ -192,6 +192,24 @@ export function padToWidth(text: string, columns: number): string {
 }
 
 /**
+ * Truncates text to at most `columns` display columns, appending an
+ * ellipsis when truncation actually occurs -- so a cut label reads as CUT,
+ * not as simply short. Generalizes table/view.tsx's `fitCell` truncation
+ * (truncate to `columns - 1` and append "…", leaving room for the marker)
+ * for the per-item content rows of the other composable views: picker's
+ * option label/description, form's field label, diff's file-list entries
+ * and hunk header, tree's node label/badge. Unlike `fitCell` this never
+ * pads -- these callers are truncating free-standing text, not aligning a
+ * table column -- so this is the truncate-only half of that convention,
+ * reusable without also adopting column alignment.
+ */
+export function truncateWithEllipsis(text: string, columns: number): string {
+  if (displayWidth(text) <= columns) return text;
+  if (columns <= 1) return truncateToWidth(text, columns);
+  return truncateToWidth(text, columns - 1) + "…";
+}
+
+/**
  * Truncates to at most `columns` display columns, keeping the TAIL of the
  * string rather than truncateToWidth's head -- for the case where the
  * "interesting" content is at the end, such as a cursor that only ever

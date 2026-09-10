@@ -4,6 +4,7 @@ import { HalfBlockImage } from "../halfblock-view";
 import { fitToCells, type RGB } from "../halfblocks";
 import { wrappedLineCount } from "../width";
 import type { DecodedImage } from "../png";
+import { FOOTER_HINT } from "./types";
 
 export interface ImageViewProps {
   image: DecodedImage;
@@ -19,7 +20,6 @@ const HORIZONTAL_CHROME = 4;
 // Rows the frame spends whatever the image is: top border, bottom border,
 // and the footer line. A title, when present, costs one more.
 const BASE_CHROME_ROWS = 3;
-const FOOTER_HINT = "Esc: close";
 
 /**
  * Renders a decoded image scaled to fit the rows it was given.

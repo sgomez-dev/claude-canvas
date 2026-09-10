@@ -97,6 +97,16 @@ function boxRange(box: Box): { channel: 0 | 1 | 2; extent: number } {
  * happens for an image with fewer distinct colours than registers.
  */
 export function medianCut(rgb: Uint8Array, maxColours = MAX_COLOURS): RGB[] {
+  // `nearestIndexes` feeds every resulting palette index into a `Uint8Array`
+  // lookup cube (`cube[...] = best`), which can only represent 0-255. Only
+  // ever called with 256 in practice, but a future caller passing more would
+  // otherwise silently WRAP (256 becomes 0, 257 becomes 1, ...) rather than
+  // erroring -- corrupting the palette instead of failing loudly.
+  if (maxColours > 256) {
+    throw new Error(
+      `medianCut: maxColours must be at most 256 (the palette-index lookup is a Uint8Array), got ${maxColours}`
+    );
+  }
   const histogram = new Map<number, number>();
   for (let i = 0; i < rgb.length; i += 3) {
     const key = (rgb[i]! << 16) | (rgb[i + 1]! << 8) | rgb[i + 2]!;

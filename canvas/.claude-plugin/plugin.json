@@ -1,6 +1,6 @@
 {
   "name": "canvas",
-  "description": "Interactive terminal panes Claude can open beside the conversation and read answers back from: pickers, forms, tables, diff review, file trees, dashboards, calendars and documents",
+  "description": "Interactive terminal panes Claude can open beside the conversation and read answers back from: pickers, forms, tables, diff review, file trees, dashboards, calendars, documents and images",
   "version": "0.2.0",
   "author": {
     "name": "Santiago Gomez de la Torre Romero",

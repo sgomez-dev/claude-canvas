@@ -4,7 +4,7 @@ Interactive terminal TUI components for Claude Code.
 
 ## Overview
 
-Canvas provides spawnable terminal displays -- four generic primitives (`picker`, `form`, `table`, `diff`) plus three domain canvases (`calendar`, `document`, `flight`) -- with real-time IPC communication. Claude can spawn these TUIs in a tmux split pane or a Windows Terminal pane and receive user selections.
+Canvas provides spawnable terminal displays -- four generic primitives (`picker`, `form`, `table`, `diff`) plus domain canvases (`calendar`, `document`, `flight`, `image`) -- with real-time IPC communication. Claude can spawn these TUIs in a tmux split pane or a Windows Terminal pane and receive user selections.
 
 ## Canvas Types
 
@@ -13,6 +13,7 @@ Canvas provides spawnable terminal displays -- four generic primitives (`picker`
 | `calendar` | Display events, pick meeting times |
 | `document` | View/edit markdown documents |
 | `flight` | Compare flights and select seats |
+| `image` | Show a PNG in a pane, scaled to fit -- view-only |
 | `diff` | Review a unified diff hunk-by-hunk |
 | `picker` | Choose one or more options from a list |
 | `form` | Fill in structured fields and submit them as one result |
@@ -94,6 +95,7 @@ Every command prints one JSON object on stdout. `wait` returns one of
 - `calendar` - Calendar display and meeting picker
 - `document` - Markdown rendering and text selection
 - `flight` - Flight comparison and seatmaps
+- `image` - Show a PNG in a pane, scaled to fit
 - `diff` - Diff review, per-hunk approve/reject
 - `picker` - Single/multi-select option picker
 - `form` - Structured fields with validation

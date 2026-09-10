@@ -103,6 +103,17 @@ test("an image with few colours yields a palette no larger than it needs", () =>
   expect(medianCut(rgb, 256)).toHaveLength(1);
 });
 
+// nearestIndexes feeds every resulting palette index into a Uint8Array
+// lookup cube, which can only represent 0-255. A maxColours above 256 would
+// otherwise silently wrap (256 -> 0, 257 -> 1, ...) instead of failing
+// loudly, corrupting the palette rather than erroring.
+test("maxColours above 256 is rejected, not silently wrapped", () => {
+  const rgb = resampleRGB(gradient(120, 120), 120, 120);
+  expect(() => medianCut(rgb, 257)).toThrow(/at most 256/);
+  // 256 itself -- the only value ever used in practice -- still works.
+  expect(medianCut(rgb, 256)).toHaveLength(256);
+});
+
 test("the palette entries are the average of the colours they cover", () => {
   // Two far-apart colours, equal counts: two registers, one each.
   const px = new Uint8Array(4 * 4);

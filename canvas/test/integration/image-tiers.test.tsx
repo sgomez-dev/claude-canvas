@@ -110,27 +110,50 @@ test("the quadrants tier renders block text, and differs from halfblocks", async
 // Detection cannot know which glyphs a font carries, so the default is a
 // deliberate choice. Pinned because flipping it is a visible change for
 // every user without an image protocol.
-test("an unset override detects quadrants, not halfblocks", async () => {
-  delete process.env.CANVAS_GRAPHICS;
-  const auto = renderCanvas(<Image id="tier-default" config={CONFIG} enabled={false} />, {
-    columns: 40,
-    rows: 12,
-  });
-  await settleUntil(auto, (f) => f.includes("Tiered"));
-  const autoFrame = inkFrame(auto);
-  auto.dispose();
+//
+// TERM and TERM_PROGRAM are set explicitly rather than inherited: this test
+// failed on all three CI platforms while passing locally, because
+// detectGraphics reads them and CI runners do not have the developer's
+// terminal. Environment this test depends on is environment this test has
+// to state -- the same lesson as TZ, colour and locale in test/setup.ts.
+test("with no override, a plain terminal detects quadrants", async () => {
+  const saved = {
+    graphics: process.env.CANVAS_GRAPHICS,
+    term: process.env.TERM,
+    program: process.env.TERM_PROGRAM,
+  };
+  try {
+    delete process.env.CANVAS_GRAPHICS;
+    process.env.TERM = "xterm-256color";
+    process.env.TERM_PROGRAM = "Apple_Terminal";
 
-  process.env.CANVAS_GRAPHICS = "quadrants";
-  const forced = renderCanvas(<Image id="tier-forced" config={CONFIG} enabled={false} />, {
-    columns: 40,
-    rows: 12,
-  });
-  await settleUntil(forced, (f) => f.includes("Tiered"));
-  const forcedFrame = inkFrame(forced);
-  forced.dispose();
+    const auto = renderCanvas(<Image id="tier-default" config={CONFIG} enabled={false} />, {
+      columns: 40,
+      rows: 12,
+    });
+    await settleUntil(auto, (f) => f.includes("Tiered"));
+    const autoFrame = inkFrame(auto);
+    auto.dispose();
 
-  expect(autoFrame).not.toBe("");
-  expect(autoFrame).toBe(forcedFrame);
+    process.env.CANVAS_GRAPHICS = "quadrants";
+    const forced = renderCanvas(<Image id="tier-forced" config={CONFIG} enabled={false} />, {
+      columns: 40,
+      rows: 12,
+    });
+    await settleUntil(forced, (f) => f.includes("Tiered"));
+    const forcedFrame = inkFrame(forced);
+    forced.dispose();
+
+    expect(autoFrame).not.toBe("");
+    expect(autoFrame).toBe(forcedFrame);
+  } finally {
+    if (saved.graphics === undefined) delete process.env.CANVAS_GRAPHICS;
+    else process.env.CANVAS_GRAPHICS = saved.graphics;
+    if (saved.term === undefined) delete process.env.TERM;
+    else process.env.TERM = saved.term;
+    if (saved.program === undefined) delete process.env.TERM_PROGRAM;
+    else process.env.TERM_PROGRAM = saved.program;
+  }
 });
 
 // The baseline tier must emit no protocol escape at all. A stray one would

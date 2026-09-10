@@ -851,6 +851,47 @@ smoke case that silently changes which renderer it exercises is not testing
 what its marker claims. 18 smoke cases, 0 fail, both block tiers now covered
 in a real Apple Terminal pane.
 
+### CI went red on the quadrants commit: one mine, one not
+
+**Mine, found and fixed.** `an unset override detects quadrants` deleted
+`CANVAS_GRAPHICS` and expected the detected default -- but `detectGraphics`
+reads `TERM` and `TERM_PROGRAM`, and a CI runner has neither of the
+developer's. It now sets both explicitly and restores them in a `finally`.
+The same lesson `test/setup.ts` already records three times over: environment
+a test depends on is environment the test has to state. Reproduced locally
+with `TERM=dumb`, which also exposed that nine colour/snapshot tests are
+sensitive to `TERM` despite `FORCE_COLOR` being pinned -- noted, not chased.
+
+**Not mine, and NOT reproduced.** `a negative startHour is rejected as a
+config error` failed with `no canvas mpc-hours-…` from `openConnection`,
+meaning the record vanished between `awaitRecord` finding it and
+`readRecord` reading it. This exact failure took CI down once before, on
+`9f9c3c5`, and was answered by two commits (`0141c91`, `47a99f9`) that added
+`expect(await awaitRecord(...)).not.toBeNull()` before connecting. That
+improves the *message* but cannot prevent the record from disappearing
+afterwards, so the underlying race was never addressed.
+
+Attempted reproduction, so the next person does not start from zero: three
+sequential full-suite runs and four concurrent ones, 598 pass 0 fail every
+time. Not reproducible here.
+
+A plausible mechanism, found by reading rather than by measurement and
+therefore **unconfirmed**: `listRecords` prunes a `.json` whose `readRecord`
+returns null, on the stated assumption that "no write is in flight here".
+The `.tmp` branch immediately above it was age-gated for exactly that
+reason -- "a temp file can also be genuinely mid-write right now... deleting
+THAT out from under its writer is its own bug" -- and the `.json` branch
+carries the same assumption with no such gate. If anything sweeps while a
+record is momentarily unreadable, it deletes a live canvas's record.
+
+Deliberately not changed: that is a product behaviour change resting on a
+hypothesis nobody has reproduced, and the honest sequence is reproduce,
+then fix. The timing-independent API for these tests is `waitForOutcome`,
+which checks the record first and consumes it -- "what makes the documented
+spawn → wait flow correct regardless of timing" -- and is probably what
+those config-error tests should use instead of `openConnection` plus
+`nextOutcome`.
+
 ### Next
 
 Nothing in the image pipeline. The open follow-ups are unchanged and none

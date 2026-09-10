@@ -2,7 +2,8 @@
 
 **This document replaces and supersedes `docs/superpowers/2026-09-09-main-merge-review-progress.md`'s
 prior version (which covered Area 1 only). It now covers the full
-4-area review effort through Area 4's fix wave.**
+5-area review effort, post-review debt closure, and Phase 4's
+publishing tooling.**
 
 ## Context (unchanged from the original)
 
@@ -24,6 +25,7 @@ every claim rather than trusting it.
 | 2. Four primitives | ✅ done | ✅ done (found 1 Critical + gaps) | ✅ 1 surgical patch | **FULLY COMPLETE** |
 | 3. Registry/CLI/calendar | ✅ done | ✅ done (found 2 Critical + gaps) | ✅ 2 surgical patches | **FULLY COMPLETE** |
 | 4. Phase 3/dashboard/build | ✅ done | ✅ done (found 1 coverage gap) | ✅ 1 test patch | **FULLY COMPLETE** |
+| 5. Image canvas / graphics | ✅ done | ✅ done (found 1 Critical + gaps) | ✅ 2 surgical patches | **FULLY COMPLETE** |
 
 **Workflow note:** mid-session the user switched this effort from
 feature branches to trunk-based development — every fix wave, patch,
@@ -346,3 +348,103 @@ rather than an endless chase — and take any concern the project owner
 raises about their own actual environment (this session's Windows
 Terminal concern) as a specific, high-priority thing to verify, not a
 generic worry to note and move past.
+
+---
+
+## Post-review debt closure (2026-09-10)
+
+Before starting Phase 4 (publishing), per explicit user instruction
+("vamos primero con las deudas, que son lo más importante antes de
+publicar"), two items of known technical debt were closed — identified
+by re-reading `docs/roadmap.md` directly plus this document's own Area
+5 ledger, not from memory:
+
+1. **Reuse detection (Phase 1-era debt, deferred since the original
+   design doc, never built).** `runSpawn` unconditionally opened a new
+   pane and silently overwrote an existing registry record for the
+   same `--id`, even with a live pid — orphaning the first pane's
+   port/token permanently. Fixed by refusing cleanly (not attempting
+   ambiguous "reuse") when `readRecord(id)` + `isAlive(pid)` show a
+   live record already exists, pointing the caller at `canvas close`
+   or a different `--id`. Commits `163a420`..`bfb69b0`.
+2. **The footer/content-measurement structural bug** parked at the end
+   of Area 5's re-review (its own NEW-2) — a third generation of
+   "measure only the footer, not the content rows or prompt row" in
+   the composable-view family. Fixed structurally: prompt lines now
+   measured via `wrappedLineCount` (matching the already-correct
+   footer pattern) in `picker`/`tree`; per-item content rows (option
+   labels, node labels, field labels, file-list/hunk-header lines)
+   truncated via a new shared `truncateWithEllipsis` helper,
+   generalizing `table`'s own pre-existing `fitCell` convention. Bonus
+   fix found along the way: `table`'s summed column width is now
+   capped against the terminal, not just each column individually.
+   Commits `bcf478f`..`8d564b9`.
+
+A third item surfaced by the user's own follow-up question ("que falta
+para que sea lo único que falta") — `calendar display`'s
+`startHour`/`endHour` were parseable but never validated, unlike every
+other numeric config field in the project — was closed the same way:
+commits `7c008f6`/`92cdb79`/`9f9c3c5`. This surfaced a real (if minor)
+CI-hardening issue: a macOS-only CI failure on the new test traced to
+a pre-existing, twice-duplicated pattern (`awaitRecord`'s return value
+discarded before an unconditional `openConnection` call) already
+present, unfixed, in a sibling test file that had been green for a
+while — fixed across all 4 files it was found in, not just the one
+that failed, commits `0141c91`/`47a99f9`.
+
+## Plugin permission recommendation (2026-09-10)
+
+Before Phase 4, per the user's own request for a permissions
+recommendation: `.claude/settings.json` added at the repo root with a
+narrowly-scoped Bash allow rule for this repo's own canvas CLI
+invocation pattern, plus documentation for other users installing the
+plugin elsewhere (`canvas/README.md` substantive, `SKILL.md` and
+`commands/canvas.md` one-line pointers). Commit `a9b2f7f`.
+
+## Phase 4 (publishing tooling) — COMPLETE
+
+`docs/roadmap.md`'s "reuse conventions from claude-skills" directive
+was investigated against the actual referenced repo rather than
+assumed: `claude-skills` is architecturally a different kind of
+project (plain markdown slash-commands installed via `install.sh`)
+versus claude-canvas (a real TypeScript plugin, already installable
+via the standard Claude Code marketplace flow) — the user confirmed
+adopting only the underlying ideas, not the literal install mechanism.
+Separately confirmed (per the user's attribution concern) that
+`plugin.json`/`marketplace.json` already correctly list
+Santiago/sgomez-dev as author/owner, with David Siegel's original
+upstream copyright correctly and separately retained in
+LICENSE/README's Credits section — nothing needed changing there.
+
+5 commits (`12f9af8`..`ec018a1`) on `main`:
+- `scripts/lint-permissions.ts` + `scripts/lint-shared.ts` — cross-checks
+  `.claude/settings.json`'s allow rules against every documented CLI
+  invocation in `canvas/skills/*/SKILL.md` + `canvas/commands/*.md`,
+  plus a pruned dangerous-shell-pattern safety scan. Differentially
+  proven by reintroducing the exact shipped "missing run" permission
+  bug caught earlier in this effort.
+- `scripts/lint-skills.ts` — SKILL.md frontmatter/description-length
+  validation plus a bidirectional cross-check against `cli.ts`'s real
+  `KIND_DEFAULT_SCENARIO` list, directly targeting this project's own
+  repeated stale-doc-drift history.
+- `scripts/check-versions.ts` — found and fixed a real pre-existing
+  drift (root + `canvas/package.json` stuck at `0.1.0` while
+  `plugin.json`/`marketplace.json` were already at `0.2.0`).
+- All 3 wired into `package.json` scripts and 3 new CI steps.
+- `CONTRIBUTING.md` written for this repo's actual architecture (not
+  copied from `claude-skills`) — restates the shell/view/validator
+  split and the "Verifying a fix" discipline, quotes this project's own
+  real commit-message conventions.
+
+## TRUE FINAL STATE (2026-09-10)
+
+Everything identified across this entire multi-day effort is closed,
+on `main`, CI green, independently verified at every step: the
+original 4-area unreviewed-merge review, the follow-on image-canvas
+review (Area 5), 3 post-review debt items, the plugin permission
+recommendation, and Phase 4's publishing tooling. The process question
+this document has flagged (Phase 3's thin roadmap pre-authorization,
+repeated for Phase 3 sub-project 3) remains open for the project
+owner's judgment. Nothing else known-and-tracked remains before the
+actual marketplace publish step, which is the project owner's own
+action outside of code.

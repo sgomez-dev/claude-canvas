@@ -246,19 +246,26 @@ function renderRegion(
           mode={mode}
           title={region.title}
           rows={rows}
+          columns={columns}
           focused={focused}
           onSubmit={submit}
         />
       );
     }
     case "table": {
-      const { columns, rows: dataRows } = validateTable(region.config as never);
+      // `columns` here would shadow the outer `columns` parameter (the
+      // real terminal width) with the table's own column DEFINITIONS
+      // (TableColumn[]) -- an unrelated value with the same name. Renamed
+      // to `tableColumns` so wiring the terminal width through below can't
+      // silently bind to the wrong one.
+      const { columns: tableColumns, rows: dataRows } = validateTable(region.config as never);
       return (
         <TableView
-          columns={columns}
+          columns={tableColumns}
           rows={dataRows}
           title={region.title}
           budget={rows}
+          terminalWidth={columns}
           focused={focused}
         />
       );
@@ -270,6 +277,7 @@ function renderRegion(
           fields={fields}
           title={region.title}
           budget={rows}
+          columns={columns}
           focused={focused}
           onSubmit={submit}
         />
@@ -295,6 +303,7 @@ function renderRegion(
           files={files}
           title={region.title}
           budget={rows}
+          columns={columns}
           focused={focused}
           onSubmit={submit}
         />

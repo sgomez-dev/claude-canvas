@@ -117,12 +117,21 @@ export function Image({
     // for a result about to be thrown away. Checking first skips the decode
     // entirely instead of merely discarding its output.
     //
-    // Tested: see "a superseded read is abandoned before the expensive
-    // decode, not merely before the render" in image.test.tsx. The earlier
-    // claim here that this was "structurally untestable" was wrong -- the
-    // reachable yield point is the async file read above, not `decodePng`'s
-    // synchronicity; pushing a second, smaller config while a large image's
-    // read is still in flight reproduces the race directly.
+    // Tested: see "a superseded read's bytes never reach decodePng, not
+    // merely its result" in canvas/test/integration/image.test.tsx (this
+    // repo has two files named image.test.tsx -- the other, under
+    // test/snapshots/, covers unrelated rendering cases). That test wraps
+    // `decodePng` via `mock.module` and asserts on its own call arguments,
+    // not just the final rendered frame -- an earlier regression test in
+    // the same file ("a config pushed while a large image is still loading
+    // does not lose to a stale, late-arriving read") only ever checked the
+    // frame, which the weaker post-decode `if (!cancelled)` guard below was
+    // already enough to guarantee; reverting just this earlier check did
+    // not make it fail. The earlier claim here that this was "structurally
+    // untestable" was also wrong -- the reachable yield point is the async
+    // file read above, not `decodePng`'s synchronicity; pushing a second,
+    // smaller config while a large image's read is still in flight
+    // reproduces the race directly.
     let cancelled = false;
     setImage(null);
     setPng(null);

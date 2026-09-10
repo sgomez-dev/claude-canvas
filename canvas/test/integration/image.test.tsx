@@ -1,4 +1,4 @@
-import { test, expect, afterEach } from "bun:test";
+import { test, expect, afterEach, afterAll, mock } from "bun:test";
 import React from "react";
 import { randomBytes } from "node:crypto";
 import { tmpdir } from "node:os";
@@ -9,10 +9,46 @@ import { awaitRecord, deleteRecord } from "../../src/runtime/registry";
 import { openConnection, pushUpdate } from "../../src/runtime/client";
 import { nextOutcome, settleUntil } from "../harness/ipc";
 import { encode, pattern } from "../harness/png";
+import * as realPng from "../../src/canvases/png";
 
 const ids: string[] = [];
 afterEach(async () => {
   for (const id of ids.splice(0)) await deleteRecord(id);
+});
+
+// Wraps the real decodePng so the race test below can see whether it was
+// ever CALLED for a superseded read's bytes, not just whether its result
+// ever reached the screen -- the two are different claims, and the
+// pre-existing test only ever checked the second. `...realPng` keeps every
+// other export (and decodePng's own real behavior, via delegation) intact,
+// so every other test in this file still sees a fully working decoder.
+//
+// The real function is captured into a plain local BEFORE `mock.module`
+// runs, not read back through `realPng.decodePng` inside the wrapper: the
+// `realPng` namespace import is a LIVE binding, so once the module is
+// mocked, `realPng.decodePng` resolves to the wrapper itself -- calling it
+// from inside its own body recurses forever (reproduced directly: every
+// call logged, in an unbroken loop, until the process was killed).
+// `originalDecodePng` is a plain variable, not a live binding, so it keeps
+// pointing at the pre-mock function regardless of what the module record
+// is later overridden to.
+const originalDecodePng = realPng.decodePng;
+
+// `mock.module` has no direct "unmock"; `bun test` runs every matched file
+// in one process, so leaving this override in place would leak the
+// call-tracking wrapper into whichever test file happens to run next. The
+// `afterAll` below re-mocks with the untouched `realPng` reference captured
+// above, restoring the original behavior for the rest of the run.
+let decodePngCalls: Uint8Array[] = [];
+mock.module("../../src/canvases/png", () => ({
+  ...realPng,
+  decodePng: (bytes: Uint8Array) => {
+    decodePngCalls.push(bytes);
+    return originalDecodePng(bytes);
+  },
+}));
+afterAll(() => {
+  mock.module("../../src/canvases/png", () => realPng);
 });
 
 function png64(width: number, height: number): string {
@@ -185,6 +221,91 @@ test("a config pushed while a large image is still loading does not lose to a st
     expect(frame).not.toContain(`${width}×${height}`);
     r.dispose();
   } finally {
+    await Bun.file(bigPath).delete?.().catch(() => {});
+  }
+}, 15000);
+
+// The regression test above only ever asserted on the FINAL rendered frame.
+// That is not evidence the `cancelled` check runs before `decodePng` --
+// image.tsx's `if (!cancelled) { setPng(...); setImage(...); }` guard
+// (present even before that check was moved earlier) is already sufficient
+// to keep a stale decode's RESULT off screen, regardless of whether the
+// decode itself ran. Reverting just the ordering fix (moving `cancelled`
+// back to run only after `decodePng`, leaving everything else as-is) and
+// running the whole suite produces zero failures -- confirmed directly
+// against this codebase, not assumed -- because nothing before this test
+// checked whether the expensive decode was actually skipped, only whether
+// its output was.
+//
+// This test checks the thing that actually matters: that a superseded
+// read's bytes never reach `decodePng` at all, not merely that they are
+// discarded after it. It uses the `decodePng` wrapper installed by
+// `mock.module` above, which records every call's bytes while still
+// delegating to the real decoder so the canvas renders normally.
+test("a superseded read's bytes never reach decodePng, not merely its result", async () => {
+  decodePngCalls = [];
+
+  const width = 500;
+  const height = 400;
+  const bigBytes = encode(width, height, 4, randomBytes(width * height * 4), 0);
+  const bigPath = join(tmpdir(), `image-decode-race-${Date.now()}-${Math.random().toString(36).slice(2)}.png`);
+  await Bun.write(bigPath, bigBytes);
+  const smallBytes = encode(20, 10, 4, pattern(20, 10, 4), 0);
+
+  // The pre-existing race test above only "presumably" catches the read
+  // still in flight (its own comment hedges this) -- whether it actually
+  // does depends on this file's real disk-read latency outracing
+  // `pushUpdate`'s real IPC round-trip, which is exactly the kind of
+  // environment-dependent timing this project's CLAUDE.md warns against
+  // trusting ("flaky failures vary, deterministic bugs don't"). That test
+  // only needs the FINAL frame to be right, so the race being lopsided
+  // doesn't hurt it -- but this test needs to know whether `decodePng` was
+  // ever called for the superseded bytes, which the outcome depends on
+  // entirely. So `Bun.file` is patched here, for this one test only, to add
+  // a deterministic delay before THIS path's `.bytes()` resolves -- long
+  // enough that `pushUpdate`'s round-trip (and the resulting cleanup/
+  // cancellation) reliably completes first, regardless of host disk speed.
+  const realBunFile = Bun.file;
+  (Bun as unknown as { file: typeof Bun.file }).file = ((path: Parameters<typeof Bun.file>[0], opts?: Parameters<typeof Bun.file>[1]) => {
+    const ref = realBunFile(path, opts);
+    if (typeof path !== "string" || path !== bigPath) return ref;
+    return {
+      ...ref,
+      bytes: async () => {
+        await new Promise((resolve) => setTimeout(resolve, 200));
+        return ref.bytes();
+      },
+    } as ReturnType<typeof Bun.file>;
+  }) as typeof Bun.file;
+
+  const id = "ipc-image-decode-race-" + Date.now();
+  try {
+    const r = await mount(<Image id={id} config={{ path: bigPath }} enabled={true} />, id);
+
+    // Pushed immediately, well before the artificially delayed read above
+    // resolves.
+    await pushUpdate(id, { data: Buffer.from(smallBytes).toString("base64"), title: "the final answer" });
+
+    const frame = await settleUntil(r, (f) => f.includes("20×10"), 5000);
+    expect(frame).toContain("20×10");
+    r.dispose();
+
+    // Give the delayed big-image read time to resolve and reach (or, once
+    // fixed, be skipped before reaching) decodePng, so a regression here
+    // isn't hidden by the assertions below running too early.
+    await new Promise((resolve) => setTimeout(resolve, 400));
+
+    // decodePng must have run for the small (superseding) image's bytes --
+    // the canvas visibly rendered it, so it obviously decoded it -- and
+    // must NEVER have run for the big (superseded) image's bytes, which is
+    // the actual claim the ordering fix makes and the prior test never
+    // checked.
+    const decodedBig = decodePngCalls.some((b) => b.length === bigBytes.length);
+    expect(decodedBig).toBe(false);
+    expect(decodePngCalls.length).toBeGreaterThanOrEqual(1);
+    expect(decodePngCalls.every((b) => b.length === smallBytes.length)).toBe(true);
+  } finally {
+    (Bun as unknown as { file: typeof Bun.file }).file = realBunFile;
     await Bun.file(bigPath).delete?.().catch(() => {});
   }
 }, 15000);

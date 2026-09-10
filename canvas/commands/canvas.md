@@ -163,6 +163,9 @@ a canvas, close it with `close <id>` (never kill the process — see
 - Must be running inside a tmux session (tmux 3.1+) or Windows Terminal
 - Terminal should support mouse input for interactive scenarios
 
+To avoid a permission prompt on every CLI invocation, see "Skip the
+permission prompt on every invocation" in the plugin's `README.md`.
+
 ## Skills Reference
 
 Read these skills for detailed configuration options:

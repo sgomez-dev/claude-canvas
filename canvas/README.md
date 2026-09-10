@@ -33,6 +33,23 @@ claude --plugin-dir /path/to/claude-canvas/canvas
 /plugin install canvas@claude-canvas
 ```
 
+### Skip the permission prompt on every invocation
+
+A plugin has no permission mechanism of its own, so without an allow rule,
+Claude Code prompts before every `bun run ${CLAUDE_PLUGIN_ROOT}/dist/cli.js`
+call. To pre-authorize just this CLI, add to your project's
+`.claude/settings.json` (or `~/.claude/settings.json` for all projects):
+
+```json
+{
+  "permissions": {
+    "allow": [
+      "Bash(bun run ${CLAUDE_PLUGIN_ROOT}/dist/cli.js:*)"
+    ]
+  }
+}
+```
+
 ## Two entry points
 
 - **`dist/cli.js`** — the shipped bundle, and what the skills tell Claude to

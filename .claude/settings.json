@@ -1,0 +1,7 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(bun run ${CLAUDE_PLUGIN_ROOT}/dist/cli.js:*)"
+    ]
+  }
+}

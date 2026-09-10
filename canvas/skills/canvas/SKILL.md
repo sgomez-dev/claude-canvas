@@ -166,6 +166,9 @@ reachable, so a `wait` issued immediately after it will not answer
 - **Terminal with mouse support**: For click-based interactions
 - **Bun**: Runtime for executing canvas commands
 
+To avoid a permission prompt on every CLI invocation, see "Skip the
+permission prompt on every invocation" in the plugin's `README.md`.
+
 ## Skills Reference
 
 | Skill | Purpose |

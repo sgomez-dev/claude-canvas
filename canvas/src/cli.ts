@@ -9,7 +9,7 @@ import {
   waitForOutcome,
   DEFAULT_WAIT_MS,
 } from "./runtime/client";
-import { awaitRecord, listRecords, type CanvasRecord } from "./runtime/registry";
+import { awaitRecord, isAlive, listRecords, readRecord, type CanvasRecord } from "./runtime/registry";
 import { getScenario, listScenarios } from "./scenarios/registry";
 import { baseCapabilities, detectHost } from "./host";
 import { resolveGraphics } from "./host/graphics";
@@ -226,6 +226,43 @@ export async function runSpawn(kind: string, opts: SpawnOpts, io: ActionIO = def
     assertIdent("kind", kind);
     assertKnownKind(kind);
     const scenario = resolveScenario(kind, opts.scenario);
+
+    // Reuse detection, deferred since Phase 1 (see the design doc's "Reuse
+    // detection is NOT implemented in Phase 1" section): spawning twice with
+    // the same --id used to silently overwrite the first canvas's registry
+    // record with the second's, even though the first pane was still open
+    // and its process still alive. Nothing else references that record's
+    // port/token, so the first canvas became a zombie -- unreachable via
+    // `wait`/`get`/`close` for the rest of its process lifetime, even though
+    // the pane itself never closed. Reproduced directly: write a record,
+    // "spawn" again with the same id, and the record silently pointed at a
+    // different port/token while the first pid was still very much alive.
+    //
+    // Refusing is deliberate, not a stand-in for a "reuse" that was never
+    // built: the caller may be asking for a different --scenario or --config
+    // than what the already-running canvas has, and silently returning
+    // success for a canvas that doesn't match what was just requested would
+    // be exactly the kind of surprising, hard-to-debug behavior this project
+    // has fought elsewhere. Refusing also fixes the orphaning bug by
+    // construction -- the existing live record is simply never touched, so
+    // it remains reachable exactly as before.
+    //
+    // `readRecord` already deletes a record whose pid is dead (see its own
+    // isAlive check), so a dead-process record from a crashed canvas is
+    // pruned right here and this falls through to the normal path below --
+    // but the isAlive check is re-done explicitly rather than trusted
+    // implicitly, because readRecord also returns non-null for a record that
+    // carries `lastError` or a persisted `outcome` even when its pid is
+    // long dead (by design, so a failed/finished canvas stays discoverable
+    // via `list`/`get`) -- neither of those is "still genuinely running".
+    const existing = await readRecord(id);
+    if (existing && isAlive(existing.pid)) {
+      throw new Error(
+        `Canvas ${id} is already running (pid ${existing.pid}). ` +
+          `Close it first with \`canvas close ${id}\`, or use a different --id.`
+      );
+    }
+
     const argv = buildShowArgv(kind, id, scenario, resolveGraphics(process.env));
     if (opts.config) {
       // Validate before writing: a malformed --config must never reach

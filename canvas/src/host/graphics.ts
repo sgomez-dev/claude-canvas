@@ -42,8 +42,15 @@ export function detectGraphics(env: NodeJS.ProcessEnv): GraphicsTier {
   const program = env.TERM_PROGRAM ?? "";
   const term = env.TERM ?? "";
 
-  // No terminal at all: nothing can be painted, not even blocks.
-  if (term.length === 0 || term === "dumb") return "none";
+  // No terminal at all: nothing can be painted, not even blocks. Windows
+  // Terminal is exempted from this bailout: `TERM` is a POSIX convention,
+  // and native Windows shells (PowerShell, cmd.exe) never set it at all --
+  // with or without Windows Terminal hosting them. `WT_SESSION` is checked
+  // independently below and is the one signal that survives that gap, so an
+  // empty/absent `TERM` must not short-circuit past it. (The `mouse`
+  // capability in host/types.ts hit the same gap and takes the same
+  // approach: check the Windows-specific signal independently of TERM.)
+  if ((term.length === 0 || term === "dumb") && env.WT_SESSION === undefined) return "none";
 
   // --- Kitty's own protocol, which is better than Sixel where both exist.
   // Ghostty implements it and refuses Sixel, so it belongs here too.
@@ -69,7 +76,10 @@ export function detectGraphics(env: NodeJS.ProcessEnv): GraphicsTier {
   // from older builds (which do not). Treated as capable because 1.22
   // shipped in 2024 and the alternative penalises every current install for
   // the sake of stale ones -- an old Windows Terminal will show garbage and
-  // needs `CANVAS_GRAPHICS=halfblocks`, which is documented.
+  // needs `CANVAS_GRAPHICS=halfblocks`, which is documented. Checked here,
+  // not folded into the empty-TERM bailout above, precisely because that
+  // bailout must not fire for `WT_SESSION` sessions with no `TERM` (native
+  // PowerShell/cmd.exe inside Windows Terminal never set `TERM` at all).
   if (env.WT_SESSION !== undefined) return "sixel";
 
   // --- Known to have NO protocol, listed explicitly so the reasoning is

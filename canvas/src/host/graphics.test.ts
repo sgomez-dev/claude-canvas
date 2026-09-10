@@ -35,6 +35,23 @@ test("WezTerm, foot and Windows Terminal get sixel", () => {
   expect(detectGraphics(plain({ WT_SESSION: "abc" }))).toBe("sixel");
 });
 
+// THE real-world case: native PowerShell or cmd.exe running inside Windows
+// Terminal. `TERM` is a POSIX convention -- these shells never set it, with
+// or without Windows Terminal hosting them. Every other test in this file
+// that exercises WT_SESSION goes through the `plain()` helper, which injects
+// `TERM: "xterm-256color"` -- masking exactly this case, since the
+// WT_SESSION branch was reachable only when TERM already had *something* in
+// it. This test constructs the environment raw, with WT_SESSION set and NO
+// TERM at all, to pin the actual maintainer-machine scenario.
+test("Windows Terminal is detected even with no TERM set at all (native PowerShell/cmd.exe)", () => {
+  expect(detectGraphics({ WT_SESSION: "abc" })).toBe("sixel");
+  // TERM=dumb alongside WT_SESSION: the Windows-specific signal still wins.
+  expect(detectGraphics({ WT_SESSION: "abc", TERM: "dumb" })).toBe("sixel");
+  // Without WT_SESSION, an empty/absent TERM is still correctly "none".
+  expect(detectGraphics({})).toBe("none");
+  expect(detectGraphics({ TERM: "dumb" })).toBe("none");
+});
+
 // THE trap. Apple Terminal sets TERM=xterm-256color and supports no image
 // protocol at all; so do plenty of other emulators, and xterm's own Sixel
 // support is patch-dependent and a compile-time option. Inferring sixel

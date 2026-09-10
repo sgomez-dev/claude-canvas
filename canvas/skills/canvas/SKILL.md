@@ -39,6 +39,11 @@ Canvas provides interactive terminal displays (TUIs) that Claude can spawn and c
 | Canvas | Purpose | Scenarios |
 |--------|---------|-----------|
 | `calendar` | Display calendars, pick meeting times | `display`, `meeting-picker` |
+
+**`calendar` needs its scenario chosen deliberately.** The default,
+`display`, is view-only: it navigates weeks and returns nothing. If the
+user has to *choose* a time, pass `--scenario meeting-picker` and a
+`calendars` array, or they get a week they can only look at.
 | `document` | View/edit markdown documents | `display`, `edit`, `email-preview` |
 | `flight` | Flight comparison and seat selection | `booking` |
 | `diff` | Review a unified diff hunk-by-hunk | `review` |

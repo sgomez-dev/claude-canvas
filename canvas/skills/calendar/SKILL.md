@@ -9,20 +9,44 @@ description: |
 
 Display calendar views and enable interactive meeting time selection.
 
+## Which scenario, and read this before choosing
+
+Two scenarios, and picking the wrong one is the mistake this canvas
+actually produces in practice: someone asks to schedule something, gets
+`display`, and finds a week they can look at and nothing they can click.
+
+| The user needs to... | Scenario | Config it requires |
+|---|---|---|
+| **Choose** a time — schedule, find a slot, when is everyone free | `meeting-picker` | a non-empty `calendars` array |
+| **See** events — show me my week, what's on Tuesday | `display` (the default) | `events`, or nothing |
+
+`display` is **view-only**. It cannot select a time and it cannot create an
+event: the arrow keys change week and that is all. If the answer you need
+back is a time, it is the wrong scenario, and `spawn calendar` with no
+`--scenario` gives you it.
+
+**Neither scenario writes anywhere.** `meeting-picker` hands back
+`{startTime, endTime, duration}` for the slot the person picked; putting
+that into a real calendar is your job afterwards, outside this canvas. So
+"block off 2-4pm on Friday" is a `meeting-picker` (or a confirmation), not
+a canvas that edits a calendar.
+
 ## Example Prompts
 
 Try asking Claude:
 
-- "Schedule a 30-minute meeting with Alice and Bob sometime next week"
-- "Find a time when the engineering team is all free on Tuesday"
-- "Show me my calendar for this week"
-- "When is everyone available for a 1-hour planning session?"
-- "Block off 2-4pm on Friday for focused work"
+- "Schedule a 30-minute meeting with Alice and Bob sometime next week" — `meeting-picker`
+- "Find a time when the engineering team is all free on Tuesday" — `meeting-picker`
+- "When is everyone available for a 1-hour planning session?" — `meeting-picker`
+- "Show me my calendar for this week" — `display`
+- "What's on Thursday?" — `display`
 
 ## Scenarios
 
 ### `display` (default)
-View-only calendar display. User can navigate weeks but cannot select times.
+View-only calendar display. User can navigate weeks but cannot select times,
+and cannot create events. If you need a time back, use `meeting-picker`
+instead -- see the table at the top.
 
 ```bash
 bun run ${CLAUDE_PLUGIN_ROOT}/dist/cli.js show calendar --scenario display --config-file cfg.json

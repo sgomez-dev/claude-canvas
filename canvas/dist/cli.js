@@ -30547,6 +30547,10 @@ function listScenarios(canvasKind) {
 // canvas/src/cli.ts
 init_host();
 init_graphics();
+// canvas/package.json
+var version = "0.2.1";
+
+// canvas/src/cli.ts
 var KIND_DEFAULT_SCENARIO = new Map([
   ["calendar", "display"],
   ["document", "display"],
@@ -30675,7 +30679,7 @@ async function runSpawn(kind, opts, io = defaultIO) {
     io.exit(1);
   }
 }
-program.name("claude-canvas").version("1.0.0");
+program.name("claude-canvas").version(version);
 program.command("show <kind>").option("--id <id>").option("--scenario <name>").option("--config-file <path>").option("--offline", "render without opening a server (used by tests)").option("--graphics <tier>", "image tier the controller detected for this terminal").action((kind, opts) => runShow(kind, opts));
 program.command("spawn <kind>").option("--id <id>").option("--scenario <name>").option("--config <json>").action((kind, opts) => runSpawn(kind, opts));
 program.command("wait <id>").option("--timeout <seconds>").action(async (id, opts) => {

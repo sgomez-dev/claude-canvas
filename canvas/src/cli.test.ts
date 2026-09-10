@@ -478,3 +478,16 @@ test("show rejects a misspelled --graphics rather than silently painting blocks"
     else process.env.CANVAS_GRAPHICS = before;
   }
 });
+
+// `--version` reported "1.0.0" while all four version-declaring files agreed
+// on 0.2.x: a release that never existed. check-versions could not see it,
+// because it compares JSON manifests and that was a string literal in code.
+// It now derives from the manifest, and this asserts the observable result
+// rather than the source text -- a grep for a semver literal would pass the
+// day someone builds the string from two halves.
+test("--version reports the version the manifest declares", () => {
+  const manifest = require("../package.json") as { version: string };
+  const run = Bun.spawnSync([process.execPath, "run", `${import.meta.dir}/cli.ts`, "--version"]);
+  expect(run.exitCode).toBe(0);
+  expect(new TextDecoder().decode(run.stdout).trim()).toBe(manifest.version);
+});

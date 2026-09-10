@@ -1,7 +1,7 @@
 {
   "name": "canvas",
   "description": "Interactive terminal panes Claude can open beside the conversation and read answers back from: pickers, forms, tables, diff review, file trees, dashboards, calendars, documents and images",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "author": {
     "name": "Santiago Gómez de la Torre Romero",
     "email": "santiago.gomez@evenbytes.com"

@@ -9,6 +9,13 @@
  * enforced they agree, and by the time this script was written they'd
  * already drifted: both package.json files sat at 0.1.0 while the plugin
  * manifest and marketplace listing -- the user/publish-facing versions --
+ * A fifth version used to exist and is now gone: cli.ts wrote "1.0.0" into
+ * commander's `.version()` as a literal, so `--version` reported a release
+ * that never happened and nothing here could see it. It imports the manifest
+ * instead, which makes that particular drift structurally impossible rather
+ * than merely detectable, and canvas/src/cli.test.ts asserts the observable
+ * output.
+ *
  * had moved on to 0.2.0. The plugin manifest and marketplace version are
  * treated as the source of truth here (they're what a `/plugin install`
  * and the marketplace listing actually show a user), so a disagreement is

@@ -12,7 +12,7 @@
       "name": "canvas",
       "source": "./canvas",
       "description": "Interactive terminal panes Claude can open beside the conversation and read answers back from: pickers, forms, tables, diff review, file trees, dashboards, calendars and documents",
-      "version": "0.2.0",
+      "version": "0.2.1",
       "strict": false
     }
   ]

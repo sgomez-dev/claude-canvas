@@ -13,6 +13,7 @@ import { awaitRecord, isAlive, listRecords, readRecord, type CanvasRecord } from
 import { getScenario, listScenarios } from "./scenarios/registry";
 import { baseCapabilities, detectHost } from "./host";
 import { resolveGraphics } from "./host/graphics";
+import { version as PLUGIN_VERSION } from "../package.json";
 
 type Writer = (s: string) => boolean;
 
@@ -309,7 +310,13 @@ export async function runSpawn(kind: string, opts: SpawnOpts, io: ActionIO = def
   }
 }
 
-program.name("claude-canvas").version("1.0.0");
+// Read from the manifest rather than written out here. It said "1.0.0" while
+// every other version-declaring file in the repo agreed on 0.2.x, so
+// `--version` was reporting a release that never existed -- and
+// check-versions could not catch it, because it only compares the four JSON
+// files and this was a string literal in code. Importing it makes the drift
+// structurally impossible instead of merely detectable.
+program.name("claude-canvas").version(PLUGIN_VERSION);
 
 program
   .command("show <kind>")

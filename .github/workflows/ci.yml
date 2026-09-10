@@ -30,6 +30,30 @@ jobs:
       - name: Typecheck
         run: bun x tsc --noEmit
 
+      # This repo shipped a real bug once: the permissions.allow rule for the
+      # canvas CLI was missing the word "run", so it silently matched none of
+      # the `bun run .../cli.js ...` invocations documented in
+      # canvas/skills and canvas/commands. This re-derives coverage on every
+      # run instead of trusting that the rule still matches.
+      - name: Documented CLI invocations are covered by settings.json
+        run: bun run lint:permissions
+
+      # SKILL.md docs have drifted out of sync with the code they describe
+      # more than once (stale keybindings, a stale onGet claim, an
+      # advertised-but-removed feature). This catches the cheap, mechanical
+      # slice of that: every canvas kind cli.ts implements has a skill doc,
+      # and every skill doc names a kind that still exists.
+      - name: Skill docs match implemented canvas kinds
+        run: bun run lint:skills
+
+      # package.json (root and canvas/), the plugin manifest, and the
+      # marketplace listing each carry a version number; nothing enforced
+      # they agree, and they drifted (both package.json files sat at 0.1.0
+      # while the user-facing plugin manifest and marketplace listing had
+      # already moved to 0.2.0).
+      - name: Version numbers are in sync
+        run: bun run check:versions
+
       # canvas/dist/cli.js is a build artifact in version control, because a
       # plugin install is a git clone with no node_modules and the skills have
       # to run something that needs none. The cost is that it can go stale

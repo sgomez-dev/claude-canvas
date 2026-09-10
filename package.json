@@ -12,7 +12,10 @@
     "spawn": "bun run canvas/src/cli.ts spawn",
     "build": "bun run scripts/build.ts",
     "build:check": "bun run scripts/check-bundle.ts",
-    "check:standalone": "bun run scripts/check-standalone.ts"
+    "check:standalone": "bun run scripts/check-standalone.ts",
+    "check:versions": "bun run scripts/check-versions.ts",
+    "lint:permissions": "bun run scripts/lint-permissions.ts",
+    "lint:skills": "bun run scripts/lint-skills.ts"
   },
   "devDependencies": {
     "@types/bun": "latest",

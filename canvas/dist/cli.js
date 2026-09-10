@@ -23546,6 +23546,13 @@ function padToWidth(text, columns) {
   const w = displayWidth(text);
   return w >= columns ? text : text + " ".repeat(columns - w);
 }
+function truncateWithEllipsis(text, columns) {
+  if (displayWidth(text) <= columns)
+    return text;
+  if (columns <= 1)
+    return truncateToWidth(text, columns);
+  return truncateToWidth(text, columns - 1) + "\u2026";
+}
 function truncateToWidthFromEnd(text, columns) {
   if (columns <= 0)
     return "";
@@ -27021,6 +27028,7 @@ function DiffView({
   maxLineOffsetRef.current = maxLineOffset;
   const clampedLineOffset = Math.min(lineOffset, maxLineOffset);
   const visibleLines = hunkLines.slice(clampedLineOffset, clampedLineOffset + hunkRows);
+  const nestedInnerWidth = Math.max(1, columns - NESTED_HORIZONTAL_CHROME);
   return /* @__PURE__ */ jsx_dev_runtime14.jsxDEV(Box_default, {
     flexDirection: "column",
     children: [
@@ -27043,15 +27051,14 @@ function DiffView({
             const decided = f.hunks.filter((h) => decisions.has(h.id)).length;
             const marker = f.binary ? "[binary]" : `${decided}/${total} decided`;
             const isCurrentFile = currentRef?.fileIndex === fileIndex && focused;
+            const rawEntry = `${f.newPath} (${f.status}) ${marker}`;
+            const entryBudget = Math.max(1, nestedInnerWidth - 2);
+            const entryText = truncateWithEllipsis(rawEntry, entryBudget);
             return /* @__PURE__ */ jsx_dev_runtime14.jsxDEV(Text, {
               color: isCurrentFile ? "cyan" : undefined,
               children: [
                 isCurrentFile ? "> " : "  ",
-                f.newPath,
-                " (",
-                f.status,
-                ") ",
-                marker
+                entryText
               ]
             }, f.newPath, true, undefined, this);
           })
@@ -27063,13 +27070,18 @@ function DiffView({
         paddingX: 1,
         marginTop: 1,
         children: [
-          /* @__PURE__ */ jsx_dev_runtime14.jsxDEV(Text, {
-            dimColor: true,
-            children: [
-              currentHunk.header,
-              hunkLines.length > hunkRows ? `  [lines ${clampedLineOffset + 1}-${clampedLineOffset + visibleLines.length} of ${hunkLines.length}]` : ""
-            ]
-          }, undefined, true, undefined, this),
+          (() => {
+            const suffix = hunkLines.length > hunkRows ? `  [lines ${clampedLineOffset + 1}-${clampedLineOffset + visibleLines.length} of ${hunkLines.length}]` : "";
+            const headerBudget = Math.max(1, nestedInnerWidth - displayWidth(suffix));
+            const header = truncateWithEllipsis(currentHunk.header, headerBudget);
+            return /* @__PURE__ */ jsx_dev_runtime14.jsxDEV(Text, {
+              dimColor: true,
+              children: [
+                header,
+                suffix
+              ]
+            }, undefined, true, undefined, this);
+          })(),
           visibleLines.map((line, i) => /* @__PURE__ */ jsx_dev_runtime14.jsxDEV(Text, {
             color: line.type === "add" ? "green" : line.type === "remove" ? "red" : undefined,
             children: [
@@ -27106,7 +27118,7 @@ function DiffView({
     ]
   }, undefined, true, undefined, this);
 }
-var import_react35, jsx_dev_runtime14, CHROME_ROWS = 10, MAX_FILE_ROWS = 5, HORIZONTAL_CHROME = 0, FOOTER_HINT = "a/r: approve/reject  \u2191/\u2193: hunk  PgUp/PgDn: scroll  Enter: submit  Esc: cancel", NO_HUNKS_FOOTER_HINT = "Enter: submit  Esc: cancel";
+var import_react35, jsx_dev_runtime14, CHROME_ROWS = 10, MAX_FILE_ROWS = 5, HORIZONTAL_CHROME = 0, NESTED_HORIZONTAL_CHROME = 4, FOOTER_HINT = "a/r: approve/reject  \u2191/\u2193: hunk  PgUp/PgDn: scroll  Enter: submit  Esc: cancel", NO_HUNKS_FOOTER_HINT = "Enter: submit  Esc: cancel";
 var init_view = __esm(async () => {
   init_width();
   await init_build2();
@@ -27472,15 +27484,18 @@ function PickerView({
   }, { isActive: focused });
   const footerHint = mode === "multi" ? MULTI_FOOTER_HINT : SINGLE_FOOTER_HINT;
   const innerWidth = Math.max(1, columns - HORIZONTAL_CHROME2);
+  const promptRows = prompt ? wrappedLineCount(prompt, innerWidth) : 0;
   let footerRows = wrappedLineCount(footerHint, innerWidth);
   let footerOverflow = Math.max(0, footerRows - 1);
-  let visibleCount = Math.max(1, rows - CHROME_ROWS2 - footerOverflow - (prompt ? 1 : 0));
+  let visibleCount = Math.max(1, rows - CHROME_ROWS2 - footerOverflow - promptRows);
   const actualFooter = positionPrefix(options.length, cursor, visibleCount) + footerHint;
   footerRows = wrappedLineCount(actualFooter, innerWidth);
   footerOverflow = Math.max(0, footerRows - 1);
-  visibleCount = Math.max(1, rows - CHROME_ROWS2 - footerOverflow - (prompt ? 1 : 0));
+  visibleCount = Math.max(1, rows - CHROME_ROWS2 - footerOverflow - promptRows);
   const windowStart = options.length <= visibleCount ? 0 : Math.floor(cursor / visibleCount) * visibleCount;
   const visibleOptions = options.slice(windowStart, windowStart + visibleCount);
+  const optionPrefixWidth = mode === "multi" ? 6 : 2;
+  const optionTextWidth = Math.max(1, innerWidth - optionPrefixWidth);
   return /* @__PURE__ */ jsx_dev_runtime16.jsxDEV(Box_default, {
     flexDirection: "column",
     borderStyle: "round",
@@ -27500,13 +27515,14 @@ function PickerView({
         const isCursor = i === cursor && focused;
         const isChecked = mode === "multi" && checked.has(opt.id);
         const prefix = mode === "multi" ? `${isCursor ? "> " : "  "}${isChecked ? "[x] " : "[ ] "}` : isCursor ? "> " : "  ";
+        const rawText = opt.label + (opt.description ? ` \u2014 ${opt.description}` : "");
+        const text = truncateWithEllipsis(rawText, optionTextWidth);
         return /* @__PURE__ */ jsx_dev_runtime16.jsxDEV(Text, {
           color: opt.disabled ? undefined : isCursor ? "cyan" : undefined,
           dimColor: opt.disabled,
           children: [
             prefix,
-            opt.label,
-            opt.description ? ` \u2014 ${opt.description}` : ""
+            text
           ]
         }, opt.id, true, undefined, this);
       }),
@@ -27872,6 +27888,10 @@ function FormView({
         const hasError = errors.has(f.id) && isMissing(f, value);
         const labelColor = hasError ? "red" : isFocused ? "cyan" : undefined;
         const requiredMark = "required" in f && f.required ? " *" : "";
+        const errorMark = hasError ? "  <- required" : "";
+        const labelPrefixWidth = 2;
+        const labelBudget = Math.max(1, innerWidth - labelPrefixWidth - displayWidth(requiredMark) - displayWidth(errorMark));
+        const shownLabel = truncateWithEllipsis(f.label, labelBudget);
         return /* @__PURE__ */ jsx_dev_runtime18.jsxDEV(Box_default, {
           flexDirection: "column",
           children: [
@@ -27879,9 +27899,9 @@ function FormView({
               color: labelColor,
               children: [
                 isFocused ? "> " : "  ",
-                f.label,
+                shownLabel,
                 requiredMark,
-                hasError ? "  <- required" : ""
+                errorMark
               ]
             }, undefined, true, undefined, this),
             /* @__PURE__ */ jsx_dev_runtime18.jsxDEV(Box_default, {
@@ -28124,6 +28144,27 @@ function computeWidth(col, rows) {
   }
   return Math.max(1, Math.min(MAX_AUTO_WIDTH, longest));
 }
+function shrinkWidthsToFit(widths, budget) {
+  const total = widths.reduce((sum, w) => sum + w, 0);
+  if (total <= budget || widths.length === 0)
+    return widths;
+  const scale = budget / total;
+  const shrunk = widths.map((w) => Math.max(1, Math.floor(w * scale)));
+  let used = shrunk.reduce((sum, w) => sum + w, 0);
+  let leftover = budget - used;
+  if (leftover > 0) {
+    const byOriginalWidthDesc = widths.map((w, i) => ({ i, w })).sort((a, b) => b.w - a.w);
+    for (const { i } of byOriginalWidthDesc) {
+      if (leftover <= 0)
+        break;
+      if (shrunk[i] < widths[i]) {
+        shrunk[i] += 1;
+        leftover -= 1;
+      }
+    }
+  }
+  return shrunk;
+}
 function fitCell(content, width) {
   if (displayWidth(content) > width) {
     if (width <= 1)
@@ -28140,9 +28181,13 @@ function TableView({
   terminalWidth = 80,
   focused
 }) {
-  const widths = import_react41.useMemo(() => columns.map((c) => computeWidth(c, rows)), [columns, rows]);
-  const [scrollOffset, setScrollOffset] = import_react41.useState(0);
   const innerWidth = Math.max(1, terminalWidth - HORIZONTAL_CHROME4);
+  const widths = import_react41.useMemo(() => {
+    const raw = columns.map((c) => computeWidth(c, rows));
+    const budget = Math.max(columns.length, innerWidth - columns.length);
+    return shrinkWidthsToFit(raw, budget);
+  }, [columns, rows, innerWidth]);
+  const [scrollOffset, setScrollOffset] = import_react41.useState(0);
   let footerRows = wrappedLineCount(FOOTER_HINT3, innerWidth);
   let footerOverflow = Math.max(0, footerRows - 1);
   let visibleCount = Math.max(1, budget - HEADER_OVERHEAD_ROWS - footerOverflow);
@@ -28473,13 +28518,14 @@ function TreeView({
     }
   }, { isActive: focused });
   const innerWidth = Math.max(1, columns - HORIZONTAL_CHROME5);
+  const promptRows = prompt ? wrappedLineCount(prompt, innerWidth) : 0;
   let footerRows = wrappedLineCount(FOOTER_HINT4, innerWidth);
   let footerOverflow = Math.max(0, footerRows - 1);
-  let visibleCount = Math.max(1, budget - CHROME_ROWS4 - footerOverflow - (prompt ? 1 : 0));
+  let visibleCount = Math.max(1, budget - CHROME_ROWS4 - footerOverflow - promptRows);
   const actualFooter = positionPrefix4(rows.length, clamped, visibleCount) + FOOTER_HINT4;
   footerRows = wrappedLineCount(actualFooter, innerWidth);
   footerOverflow = Math.max(0, footerRows - 1);
-  visibleCount = Math.max(1, budget - CHROME_ROWS4 - footerOverflow - (prompt ? 1 : 0));
+  visibleCount = Math.max(1, budget - CHROME_ROWS4 - footerOverflow - promptRows);
   const windowStart = rows.length <= visibleCount ? 0 : Math.floor(clamped / visibleCount) * visibleCount;
   const windowRows = rows.slice(windowStart, windowStart + visibleCount);
   return /* @__PURE__ */ jsx_dev_runtime22.jsxDEV(Box_default, {
@@ -28500,14 +28546,17 @@ function TreeView({
         const i = windowStart + visibleIndex;
         const isCursor = i === clamped && focused;
         const marker = row.hasChildren ? collapsed.has(row.node.id) ? "\u25B8 " : "\u25BE " : "  ";
+        const fixedPrefixWidth = 2 + row.depth * 2 + 2;
+        const labelBudget = Math.max(1, innerWidth - fixedPrefixWidth);
+        const rawText = row.node.label + (row.node.badge ? ` ${row.node.badge}` : "");
+        const text = truncateWithEllipsis(rawText, labelBudget);
         return /* @__PURE__ */ jsx_dev_runtime22.jsxDEV(Text, {
           color: isCursor ? "cyan" : undefined,
           children: [
             isCursor ? "> " : "  ",
             "  ".repeat(row.depth),
             marker,
-            row.node.label,
-            row.node.badge ? ` ${row.node.badge}` : ""
+            text
           ]
         }, row.node.id, true, undefined, this);
       }),

@@ -28795,17 +28795,19 @@ function renderRegion(region, rows, columns, focused, onSubmit) {
         mode,
         title: region.title,
         rows,
+        columns,
         focused,
         onSubmit: submit
       }, undefined, false, undefined, this);
     }
     case "table": {
-      const { columns, rows: dataRows } = validateTable(region.config);
+      const { columns: tableColumns, rows: dataRows } = validateTable(region.config);
       return /* @__PURE__ */ jsx_dev_runtime23.jsxDEV(TableView, {
-        columns,
+        columns: tableColumns,
         rows: dataRows,
         title: region.title,
         budget: rows,
+        terminalWidth: columns,
         focused
       }, undefined, false, undefined, this);
     }
@@ -28815,6 +28817,7 @@ function renderRegion(region, rows, columns, focused, onSubmit) {
         fields,
         title: region.title,
         budget: rows,
+        columns,
         focused,
         onSubmit: submit
       }, undefined, false, undefined, this);
@@ -28836,6 +28839,7 @@ function renderRegion(region, rows, columns, focused, onSubmit) {
         files,
         title: region.title,
         budget: rows,
+        columns,
         focused,
         onSubmit: submit
       }, undefined, false, undefined, this);

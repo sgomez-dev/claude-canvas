@@ -241,3 +241,108 @@ Historical note on what the original plan said to do here:
    every step — don't accept an implementer's or reviewer's own
    characterization without checking `gh run list`, commit messages,
    and (for anything load-bearing) the actual diff.
+
+## Addendum (2026-09-10): a fifth area — the image canvas — was reviewed and closed the same way
+
+After this document's original "Area 4 complete, all four areas
+closed" milestone, a session (not the one that wrote the rest of this
+document) picked up the resume-here pointer, correctly closed Area 4's
+scoped re-review (found one real gap: no dashboard test exercised a
+`form` or `diff` region, closed with 5 sabotage-verified tests), and
+then went further: closed a marketplace-blocking plugin manifest, and
+built an entire new subsystem — a dependency-free PNG decoder, a
+half-block terminal renderer, and kitty/iTerm2/Sixel/tmux-passthrough
+graphics encoders, wired into a new `image` canvas kind end to end
+(Phase 3 sub-project 3, per this project's roadmap). That authoring
+pass was itself unusually rigorous — commit messages show genuine
+"sabotage-checked" tests (deliberately reverting a fix to confirm the
+test catches it) and verification against independent oracles (it
+found a real bug in its own Sixel encoder by diffing output against
+`libsixel`'s decoder).
+
+But it had never had an independent second-pass review either — the
+exact root-cause pattern this whole document exists to record, however
+careful the authoring pass looked. The user (this project's maintainer,
+who develops on Windows) specifically flagged a concern before the
+review even started: "me preocupa que se pueda usar en Mac también" —
+inverted from the usual worry, since this new work had clearly been
+tested hands-on on Apple Terminal (macOS) and never mentioned Windows
+Terminal anywhere in its own ledger. That specific instinct was
+correct: the review's one Critical finding was a Windows Terminal
+detection bug reproduced directly on the maintainer's own machine.
+
+**Area 5 (image canvas / graphics subsystem) — now COMPLETE, same
+process as Areas 1-4 (review → fix wave → scoped re-review → one
+adjudicated patch round):**
+
+- **Critical, found and fixed:** `detectGraphics` classified a fully
+  capable Windows Terminal running native PowerShell/cmd.exe as having
+  "no terminal at all," because its `TERM`-empty bailout ran before the
+  `WT_SESSION`-based Windows Terminal check — and native Windows shells
+  never set `TERM` (a POSIX convention), with or without Windows
+  Terminal hosting them. This made a whole already-reasoned code branch
+  dead on the maintainer's actual default shell, and had Claude being
+  told the terminal could paint nothing. Images still rendered, by an
+  unpinned accidental fallthrough. Fixed by exempting `WT_SESSION` from
+  the bailout rather than reordering the function, verified end-to-end
+  through the real CLI on the maintainer's own machine, with a new test
+  constructing the exact no-`TERM` environment (the existing test
+  helper that would have caught this was itself injecting `TERM` and
+  masking the bug).
+- **Important, found and fixed (first patch round):** a PNG "zlib bomb"
+  (a small file whose compressed data decompresses to gigabytes,
+  because the decompression call had no output-size bound); a stale/
+  superseded image config still ran a slow synchronous decode to
+  completion before being discarded, blocking the IPC server and
+  Escape handling; the kitty graphics protocol's "clear" command
+  deleted every image on the whole terminal rather than just its own
+  canvas's, so two image canvases side by side would blank each other;
+  `tree`'s viewport-overflow fix didn't measure its own actual rendered
+  content and the `columns` prop it needed was never passed by
+  `dashboard.tsx` in production.
+- **Important, found and fixed (second patch round, after the
+  fix wave's own honest self-disclosure of an unaudited question):**
+  the "does `tree`'s missing-`columns` bug also affect `picker`/
+  `table`/`form`/`diff`?" question the first fix wave explicitly
+  flagged as out-of-scope-for-them turned out to be exactly where the
+  real remaining defect was — all four DO have the identical gap,
+  reproduced through the real `Dashboard` component: an ordinary
+  table+picker split pane at 50×24 pushed the dashboard's own
+  "Home/End: region  Esc: close" hint — the only on-screen way to
+  switch focus or exit — two rows off screen. A prior fix wave's own
+  regression test for the image-decode-ordering fix was also found to
+  be non-discriminating (reverting the actual fix left the test green).
+  Both closed, verified via the real `Dashboard` at multiple widths and
+  a `decodePng`-call-count instrumentation respectively.
+- **Explicitly parked, not chased further:** the same "measure only the
+  footer, not the content rows or prompt row" wrap-budget gap now
+  exists as roughly a third generation of essentially the same bug
+  shape in `picker`/`tree`'s own budget math — real, but pre-existing
+  (predates this whole image-canvas effort), shared across the entire
+  composable-view family, and needs a structural fix (deriving the
+  budget from a real wrap-measurement over EVERY row a view renders,
+  not just its footer) rather than another one-off patch. Recorded here
+  for whoever picks it up next.
+
+Final state: 550 tests, `tsc --noEmit` clean, CI green on all three
+platforms, all commits directly on `main` (trunk-based — no branch was
+created for this area), independently verified at every step by the
+controlling session (CI status, commit authorship, absence of
+attribution trailers, and for the highest-stakes fixes, the actual
+diff read directly — never accepted on an implementer's or reviewer's
+own report alone, consistent with every other area in this document).
+
+**All five areas — the original four-area unreviewed-merge review plus
+this follow-on image-canvas review — are now fully closed.** The
+process question this document has flagged twice now (Phase 3's thin
+roadmap pre-authorization, and now Phase 3 sub-project 3 built the same
+way) remains open for the project owner's judgment — not resolved by
+any of the code fixes in this document, and not something a future
+session should decide unilaterally if further unreviewed work surfaces
+the same way again. The pattern that closed all five areas is worth
+repeating verbatim if it does: review independently, fix what's found,
+re-review the fix, adjudicate what's left with an explicit ruling
+rather than an endless chase — and take any concern the project owner
+raises about their own actual environment (this session's Windows
+Terminal concern) as a specific, high-priority thing to verify, not a
+generic worry to note and move past.

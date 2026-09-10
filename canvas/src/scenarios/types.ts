@@ -112,6 +112,29 @@ export type CalendarScenarioConfig = BaseCalendarConfig | MeetingPickerConfig;
 //   error at all; fractional values produce fractional loop bounds
 //   internally. `endHour: 24` (midnight, end of day) is allowed on purpose
 //   -- exclusive upper bound, so 24 never itself becomes a bookable slot.
+// Shared startHour/endHour validation for every calendar scenario that
+// accepts these two fields (currently 'meeting-picker' and 'display'), so
+// the integer/range/ordering rules live in exactly one place rather than
+// being copied into each scenario's own config-error function and drifting
+// apart. `scenarioName` only changes which scenario the reported message
+// names -- the checks themselves are identical for both callers, and both
+// evaluate them against the field's EFFECTIVE value (the config's own value
+// if present, otherwise the shared historical default), so a partial
+// override like `{startHour: 23}` is checked against the other field's real
+// effective value, not just its own raw presence.
+function calendarHourRangeError(scenarioName: string, startHour: number, endHour: number): string | null {
+  if (!Number.isInteger(startHour) || startHour < 0 || startHour > 23) {
+    return `calendar config: scenario '${scenarioName}' needs 'startHour' to be an integer from 0 to 23`;
+  }
+  if (!Number.isInteger(endHour) || endHour < 1 || endHour > 24) {
+    return `calendar config: scenario '${scenarioName}' needs 'endHour' to be an integer from 1 to 24`;
+  }
+  if (startHour >= endHour) {
+    return `calendar config: scenario '${scenarioName}' needs 'startHour' to be strictly less than 'endHour'`;
+  }
+  return null;
+}
+
 export function meetingPickerConfigError(config: CalendarScenarioConfig): string | null {
   if (!("calendars" in config) || !Array.isArray(config.calendars) || config.calendars.length === 0) {
     return "calendar config: scenario 'meeting-picker' needs a non-empty 'calendars' array";
@@ -123,16 +146,26 @@ export function meetingPickerConfigError(config: CalendarScenarioConfig): string
   }
   const startHour = "startHour" in config && config.startHour !== undefined ? config.startHour : DEFAULT_START_HOUR;
   const endHour = "endHour" in config && config.endHour !== undefined ? config.endHour : DEFAULT_END_HOUR;
-  if (!Number.isInteger(startHour) || startHour < 0 || startHour > 23) {
-    return "calendar config: scenario 'meeting-picker' needs 'startHour' to be an integer from 0 to 23";
-  }
-  if (!Number.isInteger(endHour) || endHour < 1 || endHour > 24) {
-    return "calendar config: scenario 'meeting-picker' needs 'endHour' to be an integer from 1 to 24";
-  }
-  if (startHour >= endHour) {
-    return "calendar config: scenario 'meeting-picker' needs 'startHour' to be strictly less than 'endHour'";
-  }
-  return null;
+  return calendarHourRangeError("meeting-picker", startHour, endHour);
+}
+
+// Validates the 'display' scenario's config. Its shape (BaseCalendarConfig)
+// has no 'calendars' or 'slotGranularity' -- only 'events'/'startHour'/
+// 'endHour' -- so this only needs the startHour/endHour checks, delegated
+// to the same calendarHourRangeError meetingPickerConfigError uses above.
+//
+// Before this existed, calendar.tsx's display scenario read
+// `config?.startHour ?? START_HOUR` / `config?.endHour ?? END_HOUR` with no
+// validation at all: an inverted, equal, negative, or fractional pair
+// silently produced a broken grid (zero or negative `totalSlots`, garbled
+// hour labels from a non-integer hour) with no error ever reported to the
+// controller. meeting-picker already closed this exact gap for itself;
+// display is lower severity (view-only, no booking action to silently
+// record a wrong time) but the same category of gap.
+export function displayConfigError(config: BaseCalendarConfig): string | null {
+  const startHour = config.startHour !== undefined ? config.startHour : DEFAULT_START_HOUR;
+  const endHour = config.endHour !== undefined ? config.endHour : DEFAULT_END_HOUR;
+  return calendarHourRangeError("display", startHour, endHour);
 }
 
 // Type guard for meeting picker config. See meetingPickerConfigError above

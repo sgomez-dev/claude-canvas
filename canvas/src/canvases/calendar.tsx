@@ -4,6 +4,7 @@ import { MeetingPickerView } from "./calendar/scenarios/meeting-picker-view";
 import {
   isMeetingPickerConfig,
   meetingPickerConfigError,
+  displayConfigError,
   DEFAULT_START_HOUR,
   DEFAULT_END_HOUR,
   type MeetingPickerConfig,
@@ -443,6 +444,25 @@ export function Calendar({ id, config, enabled = false, scenario = "display" }: 
       endHour: config.endHour ?? DEFAULT_END_HOUR,
     };
     return <MeetingPickerView id={id} config={pickerConfig} enabled={enabled} />;
+  }
+
+  // Same gap meeting-picker had before the check above: 'display' read
+  // config?.startHour/endHour with no validation at all, so an inverted,
+  // equal, negative, or fractional pair silently produced a broken grid
+  // (zero/negative totalSlots, garbled hour labels) with no error ever
+  // reported. Validated here, before CalendarDisplay mounts, so a bad value
+  // never reaches the totalSlots/slotHeights math -- same "validate before
+  // render" placement as the meeting-picker check above.
+  const displayError = config ? displayConfigError(config) : null;
+  if (displayError) {
+    return (
+      <CalendarConfigError
+        id={id}
+        scenario={scenario}
+        enabled={enabled}
+        message={displayError}
+      />
+    );
   }
 
   return <CalendarDisplay id={id} config={config} enabled={enabled} scenario={scenario} />;

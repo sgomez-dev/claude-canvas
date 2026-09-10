@@ -1,6 +1,6 @@
 import React, { useMemo, useRef, useState } from "react";
 import { Box, Text, useInput } from "ink";
-import { wrappedLineCount } from "../width";
+import { truncateWithEllipsis, wrappedLineCount } from "../width";
 import type { TreeNode, TreeResult } from "./types";
 
 export interface TreeViewProps {
@@ -192,13 +192,20 @@ export function TreeView({
   // footer string that candidate would produce and re-derives `visibleCount`
   // from that.
   const innerWidth = Math.max(1, columns - HORIZONTAL_CHROME);
+  // The prompt is a single, one-time descriptive line rendered above the
+  // rows -- distinct from the footer, but it can wrap onto multiple rows at
+  // a narrow width exactly the same way the footer does. This used to be a
+  // flat `(prompt ? 1 : 0)`, which under-reserved whenever the prompt string
+  // itself was long enough to wrap. Measured with the same
+  // `wrappedLineCount` helper as the footer, at the same `innerWidth`.
+  const promptRows = prompt ? wrappedLineCount(prompt, innerWidth) : 0;
   let footerRows = wrappedLineCount(FOOTER_HINT, innerWidth);
   let footerOverflow = Math.max(0, footerRows - 1);
-  let visibleCount = Math.max(1, budget - CHROME_ROWS - footerOverflow - (prompt ? 1 : 0));
+  let visibleCount = Math.max(1, budget - CHROME_ROWS - footerOverflow - promptRows);
   const actualFooter = positionPrefix(rows.length, clamped, visibleCount) + FOOTER_HINT;
   footerRows = wrappedLineCount(actualFooter, innerWidth);
   footerOverflow = Math.max(0, footerRows - 1);
-  visibleCount = Math.max(1, budget - CHROME_ROWS - footerOverflow - (prompt ? 1 : 0));
+  visibleCount = Math.max(1, budget - CHROME_ROWS - footerOverflow - promptRows);
   const windowStart =
     rows.length <= visibleCount ? 0 : Math.floor(clamped / visibleCount) * visibleCount;
   const windowRows = rows.slice(windowStart, windowStart + visibleCount);
@@ -218,13 +225,27 @@ export function TreeView({
         // terminal still shows what is collapsed -- the lesson picker's
         // cursor gutter and form's required marker both had to learn.
         const marker = row.hasChildren ? (collapsed.has(row.node.id) ? "▸ " : "▾ ") : "  ";
+        // The windowing math above assumes every visible row costs exactly
+        // one terminal row -- true only if the rendered text never wraps. A
+        // long node label (a realistic file path) wraps onto 2+ rows at a
+        // narrow width, and since this repeats per visible row, one long
+        // label silently blows the row budget by however many extra lines it
+        // wraps onto -- reproduced through the real Dashboard composing a
+        // tree region with realistic nested file-tree labels at 36x16.
+        // Truncated here instead, the same principle table/view.tsx's
+        // `fitCell` already applies to cell values: the fixed prefix
+        // (cursor gutter, depth indent, fold marker) is subtracted from the
+        // available width first, since none of that is truncatable.
+        const fixedPrefixWidth = 2 /* cursor gutter */ + row.depth * 2 /* indent */ + 2 /* marker */;
+        const labelBudget = Math.max(1, innerWidth - fixedPrefixWidth);
+        const rawText = row.node.label + (row.node.badge ? ` ${row.node.badge}` : "");
+        const text = truncateWithEllipsis(rawText, labelBudget);
         return (
           <Text key={row.node.id} color={isCursor ? "cyan" : undefined}>
             {isCursor ? "> " : "  "}
             {"  ".repeat(row.depth)}
             {marker}
-            {row.node.label}
-            {row.node.badge ? ` ${row.node.badge}` : ""}
+            {text}
           </Text>
         );
       })}

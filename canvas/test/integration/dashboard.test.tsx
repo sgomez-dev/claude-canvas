@@ -319,3 +319,40 @@ test("a tree region reports the node picked, with its path", async () => {
   conn.close();
   r.dispose();
 });
+
+// tree/view.test.tsx pins the measurement fix (`TreeView` given a real
+// `columns` prop directly). This is the OTHER half: `dashboard.tsx`'s
+// tree-region rendering is the only production call site for `TreeView` --
+// there is no standalone `tree` canvas -- and it used to never pass
+// `columns` through at all, silently defaulting to the 80-column fallback
+// regardless of the real terminal. At a real narrow terminal that meant the
+// footer-wrap reservation was computed for the WRONG (assumed 80-column)
+// width, so the fix never actually engaged in production even once it was
+// correct in isolation. A single flexible tree region with no explicit
+// `rows` gets the dashboard's whole budget (rows - CHROME_ROWS(3)), so a
+// 15-row terminal gives it a budget of 12 -- the exact case that overflowed.
+test("a tree region does not overflow its budget at a real narrow terminal width", async () => {
+  const id = "dash-it-tree-narrow";
+  ids.push(id);
+  const nodes = Array.from({ length: 30 }, (_, i) => ({ id: `n${i + 1}`, label: `Node ${i + 1}` }));
+  for (const columns of [50, 30]) {
+    const r = renderCanvas(
+      <Dashboard
+        id={`${id}-${columns}`}
+        config={{ regions: [{ id: "files", kind: "tree", config: { nodes } }] }}
+        enabled={true}
+      />,
+      { columns, rows: 15 }
+    );
+    ids.push(`${id}-${columns}`);
+    const frame = await r.settle();
+    const plain = frame.replace(/\x1b\[[0-9;]*m/g, "");
+    const renderedLines = plain.split("\n").filter((l) => l.length > 0).length;
+    // Title (1) + the tree region's own box (budget 12) + the dashboard's
+    // own footer (1) = 14 at most, comfortably inside the 15-row terminal --
+    // an overflow here would mean `columns` never reached `TreeView` for
+    // real, not merely that the isolated unit fix was correct.
+    expect(renderedLines).toBeLessThanOrEqual(15);
+    r.dispose();
+  }
+});

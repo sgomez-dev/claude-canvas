@@ -206,7 +206,7 @@ export function Dashboard({
         const rows = heights[i]!;
         return (
           <Box key={region.id} flexDirection="column">
-            {renderRegion(region, rows, focused, handleSubmit)}
+            {renderRegion(region, rows, stdout?.columns ?? 80, focused, handleSubmit)}
           </Box>
         );
       })}
@@ -232,6 +232,7 @@ export function Dashboard({
 function renderRegion(
   region: DashboardRegion,
   rows: number,
+  columns: number,
   focused: boolean,
   onSubmit: (regionId: string, result: unknown) => void
 ): React.JSX.Element {
@@ -281,6 +282,7 @@ function renderRegion(
           nodes={nodes}
           title={region.title}
           budget={rows}
+          columns={columns}
           focused={focused}
           onSubmit={submit}
         />

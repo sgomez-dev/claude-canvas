@@ -54,6 +54,20 @@ function flatten(nodes: TreeNode[], collapsed: ReadonlySet<string>): Row[] {
   return out;
 }
 
+/**
+ * The dynamic position-indicator prefix the footer actually renders (e.g.
+ * "12-19 of 40  "), or "" when the list fits without windowing at all --
+ * mirrors picker/view.tsx's `positionPrefix`, which is the reference for
+ * this pattern: the row-budget math has to measure the string that will
+ * actually appear, not just the static hint.
+ */
+function positionPrefix(total: number, cursor: number, visibleCount: number): string {
+  if (total <= visibleCount) return "";
+  const start = Math.floor(cursor / visibleCount) * visibleCount;
+  const visibleLen = Math.min(visibleCount, total - start);
+  return `${start + 1}-${start + visibleLen} of ${total}  `;
+}
+
 function initialCollapsed(nodes: TreeNode[]): Set<string> {
   const out = new Set<string>();
   const walk = (list: TreeNode[]): void => {
@@ -164,14 +178,27 @@ export function TreeView({
   // CHROME_ROWS's flat "one line of hint" assumption does not account for --
   // the same overflow the other four views were given a budget for, which
   // this one never received because it was written after that wave.
-  const footerOverflow = Math.max(
-    0,
-    wrappedLineCount(FOOTER_HINT, Math.max(1, columns - HORIZONTAL_CHROME)) - 1
-  );
-  const visibleCount = Math.max(
-    1,
-    budget - CHROME_ROWS - footerOverflow - (prompt ? 1 : 0)
-  );
+  //
+  // The footer that actually renders is a dynamic position prefix (e.g.
+  // "12-19 of 40  ") followed by the static hint -- not the hint alone --
+  // and the prefix widens the string enough to push it onto an extra
+  // wrapped row a hint-only measurement never accounts for. Measuring just
+  // FOOTER_HINT reproduced a real overflow at several realistic widths (30
+  // nodes, budget 12, at 60/55/50/30 columns: a 13-line frame for a 12-line
+  // budget). See picker/view.tsx's identical two-pass reasoning: the
+  // prefix's own width depends on `visibleCount`, which this budget
+  // calculation produces, so this runs the estimate twice -- once with just
+  // the hint to get a candidate `visibleCount`, then measures the ACTUAL
+  // footer string that candidate would produce and re-derives `visibleCount`
+  // from that.
+  const innerWidth = Math.max(1, columns - HORIZONTAL_CHROME);
+  let footerRows = wrappedLineCount(FOOTER_HINT, innerWidth);
+  let footerOverflow = Math.max(0, footerRows - 1);
+  let visibleCount = Math.max(1, budget - CHROME_ROWS - footerOverflow - (prompt ? 1 : 0));
+  const actualFooter = positionPrefix(rows.length, clamped, visibleCount) + FOOTER_HINT;
+  footerRows = wrappedLineCount(actualFooter, innerWidth);
+  footerOverflow = Math.max(0, footerRows - 1);
+  visibleCount = Math.max(1, budget - CHROME_ROWS - footerOverflow - (prompt ? 1 : 0));
   const windowStart =
     rows.length <= visibleCount ? 0 : Math.floor(clamped / visibleCount) * visibleCount;
   const windowRows = rows.slice(windowStart, windowStart + visibleCount);
@@ -203,9 +230,7 @@ export function TreeView({
       })}
       <Box marginTop={1}>
         <Text dimColor>
-          {rows.length > visibleCount
-            ? `${windowStart + 1}-${windowStart + windowRows.length} of ${rows.length}  `
-            : ""}
+          {positionPrefix(rows.length, clamped, visibleCount)}
           {FOOTER_HINT}
         </Text>
       </Box>

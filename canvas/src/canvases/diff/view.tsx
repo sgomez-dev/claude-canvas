@@ -1,6 +1,6 @@
 import React, { useMemo, useRef, useState } from "react";
 import { Box, Text, useInput } from "ink";
-import { wrappedLineCount } from "../width";
+import { displayWidth, truncateWithEllipsis, wrappedLineCount } from "../width";
 import type { DiffFile, DiffReviewResult, HunkDecision } from "./types";
 
 export interface DiffViewProps {
@@ -45,6 +45,9 @@ const MAX_FILE_ROWS = 5;
 // nested inside it -- so the footer's available width is the full terminal
 // width, not `columns` minus a border-and-padding allowance.
 const HORIZONTAL_CHROME = 0;
+// Unlike the footer, the file-list and hunk boxes each DO have their own
+// border and paddingX -- one column of each side, same as picker/form/table.
+const NESTED_HORIZONTAL_CHROME = 4;
 // Kept under 80 columns on purpose: at 80 the longer wording wrapped onto a
 // second line, costing a row of the hunk body the viewport exists to protect.
 const FOOTER_HINT =
@@ -265,6 +268,18 @@ export function DiffView({
   const clampedLineOffset = Math.min(lineOffset, maxLineOffset);
   const visibleLines = hunkLines.slice(clampedLineOffset, clampedLineOffset + hunkRows);
 
+  // Both the file-list box and the hunk box assume every entry/header they
+  // render costs exactly one terminal row -- true only if the text never
+  // wraps. A long file path or hunk header (realistic ones routinely run
+  // past 80 columns) wraps onto 2+ rows at a narrow width, and for the file
+  // list this repeats per visible file, so it can blow the row budget the
+  // same way a long picker option or tree label does. Truncated here
+  // instead, same principle as table's `fitCell`: each box's inner width is
+  // `columns - NESTED_HORIZONTAL_CHROME` (its own border + paddingX), and
+  // whatever fixed prefix/suffix that row already renders is subtracted
+  // before truncating the free text.
+  const nestedInnerWidth = Math.max(1, columns - NESTED_HORIZONTAL_CHROME);
+
   return (
     <Box flexDirection="column">
       <Box flexDirection="column" borderStyle="round" borderColor={focused ? "cyan" : "gray"} paddingX={1}>
@@ -284,22 +299,37 @@ export function DiffView({
           // this view unfocused, and the file cursor must not keep showing
           // as live in that state.
           const isCurrentFile = currentRef?.fileIndex === fileIndex && focused;
+          // The cursor gutter ("> "/"  ", 2 columns) is fixed; the rest --
+          // path, status and decision marker -- is what gets truncated, as
+          // one unit, so a long path is cut rather than the whole line
+          // wrapping.
+          const rawEntry = `${f.newPath} (${f.status}) ${marker}`;
+          const entryBudget = Math.max(1, nestedInnerWidth - 2);
+          const entryText = truncateWithEllipsis(rawEntry, entryBudget);
           return (
             <Text key={f.newPath} color={isCurrentFile ? "cyan" : undefined}>
               {isCurrentFile ? "> " : "  "}
-              {f.newPath} ({f.status}) {marker}
+              {entryText}
             </Text>
           );
         })}
       </Box>
       {currentHunk && currentFile ? (
         <Box flexDirection="column" borderStyle="round" paddingX={1} marginTop={1}>
-          <Text dimColor>
-            {currentHunk.header}
-            {hunkLines.length > hunkRows
-              ? `  [lines ${clampedLineOffset + 1}-${clampedLineOffset + visibleLines.length} of ${hunkLines.length}]`
-              : ""}
-          </Text>
+          {(() => {
+            const suffix =
+              hunkLines.length > hunkRows
+                ? `  [lines ${clampedLineOffset + 1}-${clampedLineOffset + visibleLines.length} of ${hunkLines.length}]`
+                : "";
+            const headerBudget = Math.max(1, nestedInnerWidth - displayWidth(suffix));
+            const header = truncateWithEllipsis(currentHunk.header, headerBudget);
+            return (
+              <Text dimColor>
+                {header}
+                {suffix}
+              </Text>
+            );
+          })()}
           {visibleLines.map((line, i) => (
             <Text
               key={clampedLineOffset + i}

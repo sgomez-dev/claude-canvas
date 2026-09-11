@@ -1,5 +1,4 @@
-import type { CalendarEvent } from "./types";
-import { INK_COLORS } from "./colors";
+import { INK_COLORS, type CalendarEvent } from "./types";
 
 /**
  * The events the display scenario shows when a caller gives it none.

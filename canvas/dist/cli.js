@@ -23836,8 +23836,28 @@ function getAmPm(hour) {
 function isSameDay(d1, d2) {
   return d1.getFullYear() === d2.getFullYear() && d1.getMonth() === d2.getMonth() && d1.getDate() === d2.getDate();
 }
-var TEXT_COLORS;
+function isAllDayEvent(event) {
+  if (event.allDay)
+    return true;
+  const start = event.startTime;
+  const end = event.endTime;
+  return start.getHours() === 0 && start.getMinutes() === 0 && end.getHours() === 0 && end.getMinutes() === 0 && end.getTime() - start.getTime() >= 24 * 60 * 60 * 1000;
+}
+function allDayRowCount(events, weekDays) {
+  const allDayEvents = events.filter(isAllDayEvent);
+  if (allDayEvents.length === 0)
+    return 0;
+  let max = 1;
+  for (const day of weekDays) {
+    const count = allDayEvents.filter((e) => isSameDay(e.startTime, day)).length;
+    if (count > max)
+      max = count;
+  }
+  return max;
+}
+var INK_COLORS, TEXT_COLORS;
 var init_types2 = __esm(() => {
+  INK_COLORS = ["yellow", "green", "blue", "magenta", "red", "cyan"];
   TEXT_COLORS = {
     yellow: "black",
     cyan: "black",
@@ -24184,12 +24204,41 @@ function MeetingPickerView({ id, config, enabled = false }) {
   const columnWidth = Math.max(12, Math.floor(availableWidth / 7));
   const slotsPerHour = 60 / slotGranularity;
   const totalSlots = (endHour - startHour) * slotsPerHour;
+  const weekDays = getWeekDays(currentDate);
+  const today = new Date;
+  const slotTime = (slotIndex) => {
+    const d = new Date(weekDays[0]);
+    const minutes = slotIndex * slotGranularity;
+    d.setHours(startHour + Math.floor(minutes / 60), minutes % 60, 0, 0);
+    return d;
+  };
+  const getCursorSlotInfo = import_react31.useCallback(() => {
+    if (cursorDay < 0 || cursorDay >= 7)
+      return null;
+    if (cursorSlot < 0 || cursorSlot >= totalSlots)
+      return null;
+    const day = weekDays[cursorDay];
+    const slotMinutes = cursorSlot * slotGranularity;
+    const startTime = new Date(day);
+    startTime.setHours(startHour + Math.floor(slotMinutes / 60), slotMinutes % 60, 0, 0);
+    const endTime = new Date(startTime);
+    endTime.setMinutes(endTime.getMinutes() + slotGranularity);
+    return { dayIndex: cursorDay, slotIndex: cursorSlot, day, startTime, endTime };
+  }, [cursorDay, cursorSlot, weekDays, totalSlots, slotGranularity, startHour]);
   const legendWidth = Math.max(1, termWidth - 2);
   const legendRows = import_react31.useMemo(() => legendLineCount(calendars, legendWidth), [calendars, legendWidth]);
   const headerHeight = 4 + legendRows;
-  const footerHeight = 2;
-  const availableHeight = Math.max(1, termHeight - headerHeight - footerHeight);
-  const visibleSlotCount = Math.max(1, Math.min(totalSlots, availableHeight));
+  const innerWidth = legendWidth;
+  let footerRows = wrappedLineCount(FOOTER_HINT, innerWidth) + 1;
+  let availableHeight = Math.max(1, termHeight - headerHeight - footerRows);
+  let visibleSlotCount = Math.max(1, Math.min(totalSlots, availableHeight));
+  const footerWindowLabel = totalSlots > visibleSlotCount ? `${formatTime(slotTime(windowStart))}-${formatTime(slotTime(windowStart + visibleSlotCount))}  ` : "";
+  const footerLine1 = footerWindowLabel + FOOTER_HINT;
+  const footerCursorInfo = getCursorSlotInfo();
+  const footerLine2 = footerCursorInfo ? `${formatTime(footerCursorInfo.startTime)} - ${formatTime(footerCursorInfo.endTime)} ${formatWeekday(footerCursorInfo.day)} (busy)` : "";
+  footerRows = countdown !== null && selectedSlot ? wrappedLineCount(COUNTDOWN_HINT, innerWidth) : wrappedLineCount(footerLine1, innerWidth) + (footerLine2 ? wrappedLineCount(footerLine2, innerWidth) : 0);
+  availableHeight = Math.max(1, termHeight - headerHeight - footerRows);
+  visibleSlotCount = Math.max(1, Math.min(totalSlots, availableHeight));
   import_react31.useEffect(() => {
     const next = nextWindowStart(cursorSlotRef.current, windowStartRef.current, totalSlots, visibleSlotCount);
     windowStartRef.current = next;
@@ -24198,8 +24247,6 @@ function MeetingPickerView({ id, config, enabled = false }) {
   const baseSlotHeight = Math.max(1, Math.floor(availableHeight / visibleSlotCount));
   const extraRows = availableHeight - baseSlotHeight * visibleSlotCount;
   const slotHeights = Array.from({ length: visibleSlotCount }, (_, i) => baseSlotHeight + (i < extraRows ? 1 : 0));
-  const weekDays = getWeekDays(currentDate);
-  const today = new Date;
   const busyMap = new Map;
   for (const calendar of calendars) {
     for (const event of calendar.events) {
@@ -24314,19 +24361,6 @@ function MeetingPickerView({ id, config, enabled = false }) {
     onClick: handleMouseClick,
     onMove: handleMouseMove
   });
-  const getCursorSlotInfo = import_react31.useCallback(() => {
-    if (cursorDay < 0 || cursorDay >= 7)
-      return null;
-    if (cursorSlot < 0 || cursorSlot >= totalSlots)
-      return null;
-    const day = weekDays[cursorDay];
-    const slotMinutes = cursorSlot * slotGranularity;
-    const startTime = new Date(day);
-    startTime.setHours(startHour + Math.floor(slotMinutes / 60), slotMinutes % 60, 0, 0);
-    const endTime = new Date(startTime);
-    endTime.setMinutes(endTime.getMinutes() + slotGranularity);
-    return { dayIndex: cursorDay, slotIndex: cursorSlot, day, startTime, endTime };
-  }, [cursorDay, cursorSlot, weekDays, totalSlots, slotGranularity, startHour]);
   use_input_default((input, key) => {
     if (input === "q" || key.escape) {
       if (countdown !== null) {
@@ -24413,12 +24447,6 @@ function MeetingPickerView({ id, config, enabled = false }) {
       setCurrentDate(new Date);
     }
   });
-  const slotTime = (slotIndex) => {
-    const d = new Date(weekDays[0]);
-    const minutes = slotIndex * slotGranularity;
-    d.setHours(startHour + Math.floor(minutes / 60), minutes % 60, 0, 0);
-    return d;
-  };
   const renderTimeColumn = () => {
     const slots = [];
     for (let visibleIndex = 0;visibleIndex < visibleSlotCount; visibleIndex++) {
@@ -24600,14 +24628,14 @@ function MeetingPickerView({ id, config, enabled = false }) {
         flexDirection: "column",
         children: countdown !== null && selectedSlot ? /* @__PURE__ */ jsx_dev_runtime.jsxDEV(Text, {
           color: "gray",
-          children: "Esc to cancel"
+          children: COUNTDOWN_HINT
         }, undefined, false, undefined, this) : /* @__PURE__ */ jsx_dev_runtime.jsxDEV(jsx_dev_runtime.Fragment, {
           children: [
             /* @__PURE__ */ jsx_dev_runtime.jsxDEV(Text, {
               color: "gray",
               children: [
                 totalSlots > visibleSlotCount ? `${formatTime(slotTime(windowStart))}-${formatTime(slotTime(windowStart + visibleSlotCount))}  ` : "",
-                "\u2191\u2193\u2190\u2192 move \u2022 Enter pick \u2022 n/p week \u2022 t today \u2022 q quit"
+                FOOTER_HINT
               ]
             }, undefined, true, undefined, this),
             (() => {
@@ -24634,7 +24662,7 @@ function MeetingPickerView({ id, config, enabled = false }) {
     ]
   }, undefined, true, undefined, this);
 }
-var import_react31, jsx_dev_runtime;
+var import_react31, jsx_dev_runtime, FOOTER_HINT = "\u2191\u2193\u2190\u2192 move \u2022 Enter pick \u2022 n/p week \u2022 t today \u2022 q quit", COUNTDOWN_HINT = "Esc to cancel";
 var init_meeting_picker_view = __esm(async () => {
   init_format();
   init_width();
@@ -24687,88 +24715,6 @@ var init_types3 = __esm(() => {
   VALID_SLOT_GRANULARITIES = [15, 30, 60];
 });
 
-// canvas/src/canvases/calendar/colors.ts
-var INK_COLORS, TEXT_COLORS2;
-var init_colors = __esm(() => {
-  INK_COLORS = ["yellow", "green", "blue", "magenta", "red", "cyan"];
-  TEXT_COLORS2 = {
-    yellow: "black",
-    cyan: "black",
-    green: "white",
-    blue: "white",
-    magenta: "white",
-    red: "white"
-  };
-});
-
-// canvas/src/canvases/calendar/dates.ts
-function isAllDayEvent(event) {
-  if (event.allDay)
-    return true;
-  const start = event.startTime;
-  const end = event.endTime;
-  return start.getHours() === 0 && start.getMinutes() === 0 && end.getHours() === 0 && end.getMinutes() === 0 && end.getTime() - start.getTime() >= 24 * 60 * 60 * 1000;
-}
-function allDayRowCount(events, weekDays) {
-  const allDayEvents = events.filter(isAllDayEvent);
-  if (allDayEvents.length === 0)
-    return 0;
-  let max = 1;
-  for (const day of weekDays) {
-    const count = allDayEvents.filter((e) => isSameDay2(e.startTime, day)).length;
-    if (count > max)
-      max = count;
-  }
-  return max;
-}
-function getWeekDays2(baseDate) {
-  const days = [];
-  const dayOfWeek = baseDate.getDay();
-  const monday = new Date(baseDate);
-  monday.setDate(baseDate.getDate() - dayOfWeek + (dayOfWeek === 0 ? -6 : 1));
-  for (let i = 0;i < 7; i++) {
-    const day = new Date(monday);
-    day.setDate(monday.getDate() + i);
-    days.push(day);
-  }
-  return days;
-}
-function formatDayName2(date) {
-  const days = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
-  return days[date.getDay()];
-}
-function formatDayNumber2(date) {
-  return date.getDate().toString();
-}
-function formatMonthYear2(date) {
-  const months = [
-    "January",
-    "February",
-    "March",
-    "April",
-    "May",
-    "June",
-    "July",
-    "August",
-    "September",
-    "October",
-    "November",
-    "December"
-  ];
-  return `${months[date.getMonth()]} ${date.getFullYear()}`;
-}
-function formatHour2(hour) {
-  if (hour === 0 || hour === 12)
-    return "12";
-  return hour < 12 ? `${hour}` : `${hour - 12}`;
-}
-function getAmPm2(hour) {
-  return hour < 12 ? "am" : "pm";
-}
-function isSameDay2(d1, d2) {
-  return d1.getFullYear() === d2.getFullYear() && d1.getMonth() === d2.getMonth() && d1.getDate() === d2.getDate();
-}
-
 // canvas/src/canvases/calendar/week-grid.tsx
 function DayColumn({
   date,
@@ -24781,7 +24727,7 @@ function DayColumn({
   windowStart,
   visibleSlotCount
 }) {
-  const dayEvents = events.filter((e) => isSameDay2(e.startTime, date) && !isAllDayEvent(e));
+  const dayEvents = events.filter((e) => isSameDay(e.startTime, date) && !isAllDayEvent(e));
   const currentHour = currentTime.getHours();
   const currentMinute = currentTime.getMinutes();
   const currentTimeDecimal = currentHour + currentMinute / 60;
@@ -24813,7 +24759,7 @@ function DayColumn({
           children: "\u2501".repeat(columnWidth - 1)
         }, line, false, undefined, this));
       } else if (slotEvent) {
-        const textColor = isNowLine ? "red" : TEXT_COLORS2[slotEvent.color || "blue"] || "white";
+        const textColor = isNowLine ? "red" : TEXT_COLORS[slotEvent.color || "blue"] || "white";
         lines.push(/* @__PURE__ */ jsx_dev_runtime2.jsxDEV(Text, {
           backgroundColor: slotEvent.color,
           color: textColor,
@@ -24855,7 +24801,7 @@ function DayHeadersRow({ weekDays, today, columnWidth, timeColumnWidth }) {
         }, undefined, false, undefined, this)
       }, undefined, false, undefined, this),
       weekDays.map((day, i) => {
-        const isToday = isSameDay2(day, today);
+        const isToday = isSameDay(day, today);
         return /* @__PURE__ */ jsx_dev_runtime2.jsxDEV(Box_default, {
           width: columnWidth,
           flexDirection: "column",
@@ -24865,7 +24811,7 @@ function DayHeadersRow({ weekDays, today, columnWidth, timeColumnWidth }) {
               width: "100%",
               children: /* @__PURE__ */ jsx_dev_runtime2.jsxDEV(Text, {
                 color: isToday ? "blue" : "gray",
-                children: formatDayName2(day)
+                children: formatDayName(day)
               }, undefined, false, undefined, this)
             }, undefined, false, undefined, this),
             /* @__PURE__ */ jsx_dev_runtime2.jsxDEV(Box_default, {
@@ -24875,10 +24821,10 @@ function DayHeadersRow({ weekDays, today, columnWidth, timeColumnWidth }) {
                 backgroundColor: "blue",
                 color: "white",
                 bold: true,
-                children: ` ${formatDayNumber2(day)} `
+                children: ` ${formatDayNumber(day)} `
               }, undefined, false, undefined, this) : /* @__PURE__ */ jsx_dev_runtime2.jsxDEV(Text, {
                 bold: true,
-                children: formatDayNumber2(day)
+                children: formatDayNumber(day)
               }, undefined, false, undefined, this)
             }, undefined, false, undefined, this)
           ]
@@ -24901,12 +24847,12 @@ function AllDayEventsRow({ weekDays, events, columnWidth, timeColumnWidth }) {
         }, undefined, false, undefined, this)
       }, undefined, false, undefined, this),
       weekDays.map((day, i) => {
-        const dayAllDay = allDayEvents.filter((e) => isSameDay2(e.startTime, day));
+        const dayAllDay = allDayEvents.filter((e) => isSameDay(e.startTime, day));
         return /* @__PURE__ */ jsx_dev_runtime2.jsxDEV(Box_default, {
           width: columnWidth,
           flexDirection: "column",
           children: dayAllDay.length > 0 ? dayAllDay.map((event) => {
-            const textColor = TEXT_COLORS2[event.color || "blue"] || "white";
+            const textColor = TEXT_COLORS[event.color || "blue"] || "white";
             const title = event.title.slice(0, columnWidth - 2);
             return /* @__PURE__ */ jsx_dev_runtime2.jsxDEV(Box_default, {
               height: 1,
@@ -24932,7 +24878,7 @@ function AllDayEventsRow({ weekDays, events, columnWidth, timeColumnWidth }) {
 }
 var jsx_dev_runtime2;
 var init_week_grid = __esm(async () => {
-  init_colors();
+  init_types2();
   await init_build2();
   jsx_dev_runtime2 = __toESM(require_jsx_dev_runtime(), 1);
 });
@@ -24989,7 +24935,7 @@ function getDemoEvents() {
   ];
 }
 var init_demo_events = __esm(() => {
-  init_colors();
+  init_types2();
 });
 
 // canvas/src/canvases/calendar/display-view.tsx
@@ -25033,16 +24979,30 @@ function CalendarDisplayView({ config, focused = true }) {
     startTime: new Date(e.startTime),
     endTime: new Date(e.endTime)
   })) : getDemoEvents();
-  const weekDays = getWeekDays2(currentDate);
+  const weekDays = getWeekDays(currentDate);
   const today = new Date;
+  const slotIndexToTime = (slotIndex) => {
+    const d = new Date(weekDays[0]);
+    const hour = startHour + Math.floor(slotIndex / 2);
+    const minute = slotIndex % 2 * 30;
+    d.setHours(hour, minute, 0, 0);
+    return d;
+  };
   const allDayRows = allDayRowCount(events, weekDays);
   const headerHeight = 5 + allDayRows;
-  const footerHeight = 1;
-  const availableHeight = Math.max(1, termHeight - headerHeight - footerHeight);
+  const innerWidth = Math.max(1, termWidth - 2);
   const totalSlots = (endHour - startHour) * 2;
-  const visibleSlotCount = Math.max(1, Math.min(totalSlots, availableHeight));
-  const maxTimeScroll = Math.max(0, totalSlots - visibleSlotCount);
-  const windowStart = Math.min(Math.max(0, timeScroll), maxTimeScroll);
+  let footerRows = wrappedLineCount(FOOTER_HINT2, innerWidth);
+  let availableHeight = Math.max(1, termHeight - headerHeight - footerRows);
+  let visibleSlotCount = Math.max(1, Math.min(totalSlots, availableHeight));
+  let maxTimeScroll = Math.max(0, totalSlots - visibleSlotCount);
+  let windowStart = Math.min(Math.max(0, timeScroll), maxTimeScroll);
+  const actualFooter = (totalSlots > visibleSlotCount ? `${formatTime(slotIndexToTime(windowStart))}-${formatTime(slotIndexToTime(windowStart + visibleSlotCount))}  ` : "") + FOOTER_HINT2;
+  footerRows = wrappedLineCount(actualFooter, innerWidth);
+  availableHeight = Math.max(1, termHeight - headerHeight - footerRows);
+  visibleSlotCount = Math.max(1, Math.min(totalSlots, availableHeight));
+  maxTimeScroll = Math.max(0, totalSlots - visibleSlotCount);
+  windowStart = Math.min(Math.max(0, timeScroll), maxTimeScroll);
   const baseSlotHeight = Math.max(1, Math.floor(availableHeight / visibleSlotCount));
   const extraRows = availableHeight - baseSlotHeight * visibleSlotCount;
   const slotHeights = Array.from({ length: visibleSlotCount }, (_, i) => baseSlotHeight + (i < extraRows ? 1 : 0));
@@ -25096,7 +25056,7 @@ function CalendarDisplayView({ config, focused = true }) {
       } else if (half === 0 && line === 0) {
         lines.push(/* @__PURE__ */ jsx_dev_runtime3.jsxDEV(Text, {
           color: "gray",
-          children: `${formatHour2(hour)}${getAmPm2(hour)}`.padStart(timeColumnWidth - 1)
+          children: `${formatHour(hour)}${getAmPm(hour)}`.padStart(timeColumnWidth - 1)
         }, line, false, undefined, this));
       } else {
         lines.push(/* @__PURE__ */ jsx_dev_runtime3.jsxDEV(Text, {
@@ -25112,13 +25072,6 @@ function CalendarDisplayView({ config, focused = true }) {
     }, slotIndex, false, undefined, this));
   }
   const hasAllDayEvents = events.some(isAllDayEvent);
-  const slotIndexToTime = (slotIndex) => {
-    const d = new Date(weekDays[0]);
-    const hour = startHour + Math.floor(slotIndex / 2);
-    const minute = slotIndex % 2 * 30;
-    d.setHours(hour, minute, 0, 0);
-    return d;
-  };
   return /* @__PURE__ */ jsx_dev_runtime3.jsxDEV(Box_default, {
     flexDirection: "column",
     width: termWidth,
@@ -25130,7 +25083,7 @@ function CalendarDisplayView({ config, focused = true }) {
         children: /* @__PURE__ */ jsx_dev_runtime3.jsxDEV(Text, {
           bold: true,
           color: "white",
-          children: formatMonthYear2(weekDays[0])
+          children: formatMonthYear(weekDays[0])
         }, undefined, false, undefined, this)
       }, undefined, false, undefined, this),
       /* @__PURE__ */ jsx_dev_runtime3.jsxDEV(DayHeadersRow, {
@@ -25171,16 +25124,18 @@ function CalendarDisplayView({ config, focused = true }) {
           color: "gray",
           children: [
             totalSlots > visibleSlotCount ? `${formatTime(slotIndexToTime(windowStart))}-${formatTime(slotIndexToTime(windowStart + visibleSlotCount))}  ` : "",
-            "\u2191\u2193 scroll  \u2022  \u2190/\u2192 week  \u2022  t today  \u2022  q quit"
+            FOOTER_HINT2
           ]
         }, undefined, true, undefined, this)
       }, undefined, false, undefined, this)
     ]
   }, undefined, true, undefined, this);
 }
-var import_react32, jsx_dev_runtime3, START_HOUR = 6, END_HOUR = 22;
+var import_react32, jsx_dev_runtime3, START_HOUR = 6, END_HOUR = 22, FOOTER_HINT2 = "\u2191\u2193 scroll  \u2022  \u2190/\u2192 week  \u2022  t today  \u2022  q quit";
 var init_display_view = __esm(async () => {
   init_format();
+  init_width();
+  init_types2();
   init_demo_events();
   await __promiseAll([
     init_build2(),
@@ -27175,7 +27130,7 @@ function DiffView({
   const currentRef = flatHunks[cursor];
   const currentFile = currentRef ? files[currentRef.fileIndex] : undefined;
   const currentHunk = currentRef ? currentFile?.hunks[currentRef.hunkIndex] : undefined;
-  const footerHint = flatHunks.length === 0 ? NO_HUNKS_FOOTER_HINT : FOOTER_HINT;
+  const footerHint = flatHunks.length === 0 ? NO_HUNKS_FOOTER_HINT : FOOTER_HINT3;
   const footerRows = wrappedLineCount(footerHint, Math.max(1, columns - HORIZONTAL_CHROME));
   const footerOverflow = Math.max(0, footerRows - 1);
   const budget = Math.max(2, totalBudget - CHROME_ROWS - footerOverflow);
@@ -27273,13 +27228,13 @@ function DiffView({
         marginTop: 1,
         children: /* @__PURE__ */ jsx_dev_runtime16.jsxDEV(Text, {
           dimColor: true,
-          children: flatHunks.length === 0 ? NO_HUNKS_FOOTER_HINT : FOOTER_HINT
+          children: flatHunks.length === 0 ? NO_HUNKS_FOOTER_HINT : FOOTER_HINT3
         }, undefined, false, undefined, this)
       }, undefined, false, undefined, this)
     ]
   }, undefined, true, undefined, this);
 }
-var import_react36, jsx_dev_runtime16, CHROME_ROWS = 10, MAX_FILE_ROWS = 5, HORIZONTAL_CHROME = 0, NESTED_HORIZONTAL_CHROME = 4, FOOTER_HINT = "a/r: approve/reject  \u2191/\u2193: hunk  PgUp/PgDn: scroll  Enter: submit  Esc: cancel", NO_HUNKS_FOOTER_HINT = "Enter: submit  Esc: cancel";
+var import_react36, jsx_dev_runtime16, CHROME_ROWS = 10, MAX_FILE_ROWS = 5, HORIZONTAL_CHROME = 0, NESTED_HORIZONTAL_CHROME = 4, FOOTER_HINT3 = "a/r: approve/reject  \u2191/\u2193: hunk  PgUp/PgDn: scroll  Enter: submit  Esc: cancel", NO_HUNKS_FOOTER_HINT = "Enter: submit  Esc: cancel";
 var init_view = __esm(async () => {
   init_width();
   await init_build2();
@@ -28023,10 +27978,10 @@ function FormView({
     }
   }, { isActive: focused });
   const innerWidth = Math.max(1, columns - HORIZONTAL_CHROME3);
-  let footerRows = wrappedLineCount(FOOTER_HINT2, innerWidth);
+  let footerRows = wrappedLineCount(FOOTER_HINT4, innerWidth);
   let footerOverflow = Math.max(0, footerRows - 1);
   let visibleFields = Math.max(1, Math.floor((budget - CHROME_ROWS3 - footerOverflow) / ROWS_PER_FIELD));
-  const actualFooter = positionPrefix2(fields.length, focusIndex, visibleFields) + FOOTER_HINT2;
+  const actualFooter = positionPrefix2(fields.length, focusIndex, visibleFields) + FOOTER_HINT4;
   footerRows = wrappedLineCount(actualFooter, innerWidth);
   footerOverflow = Math.max(0, footerRows - 1);
   visibleFields = Math.max(1, Math.floor((budget - CHROME_ROWS3 - footerOverflow) / ROWS_PER_FIELD));
@@ -28127,14 +28082,14 @@ function FormView({
           dimColor: true,
           children: [
             fields.length > visibleFields ? `${windowStart + 1}-${windowStart + windowFields.length} of ${fields.length}  ` : "",
-            FOOTER_HINT2
+            FOOTER_HINT4
           ]
         }, undefined, true, undefined, this)
       }, undefined, false, undefined, this)
     ]
   }, undefined, true, undefined, this);
 }
-var import_react40, jsx_dev_runtime20, CHROME_ROWS3 = 7, ROWS_PER_FIELD = 2, HORIZONTAL_CHROME3 = 4, FOOTER_HINT2 = "Tab/Shift+Tab: move  Enter: submit (on the button)  Esc: cancel";
+var import_react40, jsx_dev_runtime20, CHROME_ROWS3 = 7, ROWS_PER_FIELD = 2, HORIZONTAL_CHROME3 = 4, FOOTER_HINT4 = "Tab/Shift+Tab: move  Enter: submit (on the button)  Esc: cancel";
 var init_view3 = __esm(async () => {
   init_width();
   await init_build2();
@@ -28349,10 +28304,10 @@ function TableView({
     return shrinkWidthsToFit(raw, budget);
   }, [columns, rows, innerWidth]);
   const [scrollOffset, setScrollOffset] = import_react42.useState(0);
-  let footerRows = wrappedLineCount(FOOTER_HINT3, innerWidth);
+  let footerRows = wrappedLineCount(FOOTER_HINT5, innerWidth);
   let footerOverflow = Math.max(0, footerRows - 1);
   let visibleCount = Math.max(1, budget - HEADER_OVERHEAD_ROWS - footerOverflow);
-  const actualFooter = positionPrefix3(rows.length, scrollOffset, visibleCount) + FOOTER_HINT3;
+  const actualFooter = positionPrefix3(rows.length, scrollOffset, visibleCount) + FOOTER_HINT5;
   footerRows = wrappedLineCount(actualFooter, innerWidth);
   footerOverflow = Math.max(0, footerRows - 1);
   visibleCount = Math.max(1, budget - HEADER_OVERHEAD_ROWS - footerOverflow);
@@ -28423,14 +28378,14 @@ function TableView({
           dimColor: true,
           children: [
             rows.length > visibleCount ? `rows ${scrollOffset + 1}-${scrollOffset + visibleRows.length} of ${rows.length}  ` : "",
-            FOOTER_HINT3
+            FOOTER_HINT5
           ]
         }, undefined, true, undefined, this)
       }, undefined, false, undefined, this)
     ]
   }, undefined, true, undefined, this);
 }
-var import_react42, jsx_dev_runtime22, MAX_AUTO_WIDTH = 40, HEADER_OVERHEAD_ROWS = 6, HORIZONTAL_CHROME4 = 4, FOOTER_HINT3 = "\u2191/\u2193/PgUp/PgDn: scroll  Esc: close";
+var import_react42, jsx_dev_runtime22, MAX_AUTO_WIDTH = 40, HEADER_OVERHEAD_ROWS = 6, HORIZONTAL_CHROME4 = 4, FOOTER_HINT5 = "\u2191/\u2193/PgUp/PgDn: scroll  Esc: close";
 var init_view4 = __esm(async () => {
   init_width();
   await init_build2();
@@ -28680,10 +28635,10 @@ function TreeView({
   }, { isActive: focused });
   const innerWidth = Math.max(1, columns - HORIZONTAL_CHROME5);
   const promptRows = prompt ? wrappedLineCount(prompt, innerWidth) : 0;
-  let footerRows = wrappedLineCount(FOOTER_HINT4, innerWidth);
+  let footerRows = wrappedLineCount(FOOTER_HINT6, innerWidth);
   let footerOverflow = Math.max(0, footerRows - 1);
   let visibleCount = Math.max(1, budget - CHROME_ROWS4 - footerOverflow - promptRows);
-  const actualFooter = positionPrefix4(rows.length, clamped, visibleCount) + FOOTER_HINT4;
+  const actualFooter = positionPrefix4(rows.length, clamped, visibleCount) + FOOTER_HINT6;
   footerRows = wrappedLineCount(actualFooter, innerWidth);
   footerOverflow = Math.max(0, footerRows - 1);
   visibleCount = Math.max(1, budget - CHROME_ROWS4 - footerOverflow - promptRows);
@@ -28727,14 +28682,14 @@ function TreeView({
           dimColor: true,
           children: [
             positionPrefix4(rows.length, clamped, visibleCount),
-            FOOTER_HINT4
+            FOOTER_HINT6
           ]
         }, undefined, true, undefined, this)
       }, undefined, false, undefined, this)
     ]
   }, undefined, true, undefined, this);
 }
-var import_react44, jsx_dev_runtime24, CHROME_ROWS4 = 5, HORIZONTAL_CHROME5 = 4, FOOTER_HINT4 = "\u2191/\u2193: move  \u2190/\u2192: fold  Enter: pick  Esc: cancel";
+var import_react44, jsx_dev_runtime24, CHROME_ROWS4 = 5, HORIZONTAL_CHROME5 = 4, FOOTER_HINT6 = "\u2191/\u2193: move  \u2190/\u2192: fold  Enter: pick  Esc: cancel";
 var init_view5 = __esm(async () => {
   init_width();
   await init_build2();
@@ -29356,7 +29311,7 @@ var init_quadrant_view = __esm(async () => {
 });
 
 // canvas/src/canvases/image/types.ts
-var FOOTER_HINT5 = "Esc: close";
+var FOOTER_HINT7 = "Esc: close";
 
 // canvas/src/canvases/image/view.tsx
 function ImageView({
@@ -29368,7 +29323,7 @@ function ImageView({
   terminalWidth
 }) {
   const innerWidth = Math.max(1, terminalWidth - HORIZONTAL_CHROME6);
-  const footerText = `${image.width}\xD7${image.height}  ${FOOTER_HINT5}`;
+  const footerText = `${image.width}\xD7${image.height}  ${FOOTER_HINT7}`;
   const footerOverflow = Math.max(0, wrappedLineCount(footerText, innerWidth) - 1);
   const chrome = BASE_CHROME_ROWS + (title !== undefined ? 1 : 0) + footerOverflow;
   const availableRows = Math.max(1, budget - chrome);
@@ -29715,7 +29670,7 @@ function GraphicsImageView({
   imageId
 }) {
   const { stdout } = use_stdout_default();
-  const footerText = `${image.width}\xD7${image.height}  ${tier}  ${FOOTER_HINT5}`;
+  const footerText = `${image.width}\xD7${image.height}  ${tier}  ${FOOTER_HINT7}`;
   const footerOverflow = Math.max(0, wrappedLineCount(footerText, terminalWidth) - 1);
   const titleRows = title !== undefined ? 1 : 0;
   const availableRows = Math.max(1, budget - titleRows - 1 - footerOverflow);

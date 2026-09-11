@@ -1,5 +1,7 @@
 // Shared types for calendar components
 
+import type { MeetingPickerConfig } from "../../scenarios/types";
+
 export interface CalendarEvent {
   id: string;
   title: string;
@@ -7,6 +9,32 @@ export interface CalendarEvent {
   endTime: Date;
   color?: string;
   allDay?: boolean;
+}
+
+// The public config shape for the calendar canvas (both scenarios).
+//
+// Moved here from calendar.tsx: that file imported `CalendarDisplayView` as a
+// VALUE from `./calendar/display-view`, which in turn did `import type
+// { CalendarConfig } from "../calendar"` -- a cycle that was only safe
+// because `verbatimModuleSyntax: true` erases the type-only half of it
+// before either module's runtime code ever has to resolve the other. Living
+// here instead -- the established single source of truth for shared
+// calendar types -- means neither file imports from the other at all.
+export interface CalendarConfig {
+  title?: string;
+  events?: Array<{
+    id: string;
+    title: string;
+    startTime: string;
+    endTime: string;
+    color?: string;
+    allDay?: boolean;
+  }>;
+  // Meeting picker config (when scenario is "meeting-picker")
+  calendars?: MeetingPickerConfig["calendars"];
+  slotGranularity?: MeetingPickerConfig["slotGranularity"];
+  startHour?: number;
+  endHour?: number;
 }
 
 // Color palette with contrasting text colors
@@ -82,4 +110,41 @@ export function isAllDayEvent(event: CalendarEvent): boolean {
     end.getMinutes() === 0 &&
     end.getTime() - start.getTime() >= 24 * 60 * 60 * 1000
   );
+}
+
+// The number of rows AllDayEventsRow will actually render for the currently
+// visible week. AllDayEventsRow renders one Box per event (not one shared
+// row for all of them), so a day with 3 all-day events makes the whole row
+// 3 rows tall, and every other day's column pads out to match (a row-flex
+// container's height is its tallest child).
+//
+// This is 0 only when there is no all-day event ANYWHERE in `events` --
+// mirroring AllDayEventsRow's own `if (allDayEvents.length === 0) return
+// null` check, which is a GLOBAL test, not scoped to the visible week.
+// Once that's true, the row always renders (every visible day gets at
+// least a 1-row-tall cell, blank ones included via its own `: <Box
+// height={1}>` fallback branch) -- so the minimum height is 1 even in the
+// edge case where an all-day event exists in the config but happens to
+// fall outside the currently visible week. Getting this wrong looks
+// identical to the bug this fixes: rendering 3 all-day events landing
+// outside the visible week still reproduced a 1-row under-count and the
+// same footer overlap, caught empirically while verifying this fix.
+//
+// This used to be assumed to always be 0 by a hardcoded `headerHeight`
+// constant that had no all-day-events term at all. A single all-day event
+// already grew the real row by 1 beyond what the constant assumed for the
+// no-events case, and three or more meant the JS-computed `availableHeight`
+// (and therefore `visibleSlotCount`/`slotHeights`) was sized for a grid
+// taller than the space Yoga actually gives the flexGrow grid box once the
+// real all-day row eats into it -- grid content spilled onto the footer row,
+// and with enough events an hour-boundary line got overdrawn entirely.
+export function allDayRowCount(events: CalendarEvent[], weekDays: Date[]): number {
+  const allDayEvents = events.filter(isAllDayEvent);
+  if (allDayEvents.length === 0) return 0;
+  let max = 1;
+  for (const day of weekDays) {
+    const count = allDayEvents.filter((e) => isSameDay(e.startTime, day)).length;
+    if (count > max) max = count;
+  }
+  return max;
 }

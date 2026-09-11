@@ -95,7 +95,7 @@ bun run ${CLAUDE_PLUGIN_ROOT}/dist/cli.js spawn calendar --scenario meeting-pick
 ```typescript
 interface CalendarConfig {
   title?: string;
-  events: CalendarEvent[];
+  events?: CalendarEvent[]; // Omit it (or pass none) and a demo week of sample events renders instead
   startHour?: number;  // First hour of the day shown (default: 6)
   endHour?: number;    // Exclusive upper bound: hours shown run from startHour up to but not
                        // including endHour (default: 22, so the last bookable slot ends at
@@ -108,6 +108,9 @@ interface CalendarEvent {
   startTime: string;  // ISO datetime
   endTime: string;    // ISO datetime
   color?: string;     // blue, green, red, yellow, magenta, cyan
+  allDay?: boolean;    // Renders in its own all-day row above the time grid instead of a
+                       // timed slot. Also inferred automatically for an event spanning exact
+                       // midnight-to-midnight, but this is the explicit way to ask for it.
 }
 ```
 

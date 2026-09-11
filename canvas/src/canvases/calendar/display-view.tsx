@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from "react";
 import { Box, Text, useInput, useStdout } from "ink";
 import { formatTime } from "../format";
+import { wrappedLineCount } from "../width";
 import { AllDayEventsRow, DayColumn, DayHeadersRow } from "./week-grid";
 import {
   allDayRowCount,
@@ -9,14 +10,26 @@ import {
   getAmPm,
   getWeekDays,
   isAllDayEvent,
-} from "./dates";
+  type CalendarConfig,
+  type CalendarEvent,
+} from "./types";
 import { getDemoEvents } from "./demo-events";
-import type { CalendarEvent } from "./types";
-import type { CalendarConfig } from "../calendar";
 
 /** Historical defaults, used when a config declares no hours. */
 const START_HOUR = 6;
 const END_HOUR = 22;
+
+// The footer's static hint text -- measured (via wrappedLineCount below) AND
+// rendered from this one constant, so the two can never drift apart. This
+// used to be a bare literal typed twice: once (implicitly, as "1 row") in a
+// hardcoded `footerHeight = 1`, and again in the JSX. At 58 columns the
+// footer (a dynamic time-range label plus this hint) really needs 2 rows,
+// and the hardcoded "1" under-reserved the budget by one row -- the grid
+// then rendered one row taller than the pane actually had left for it, and
+// the wrapped second line (with "q quit" on it) scrolled off screen. Follows
+// the same wrappedLineCount pattern already established in picker, table,
+// tree, form and diff.
+const FOOTER_HINT = "↑↓ scroll  •  ←/→ week  •  t today  •  q quit";
 
 export interface CalendarDisplayViewProps {
   config?: CalendarConfig;
@@ -103,6 +116,19 @@ export function CalendarDisplayView({ config, focused = true }: CalendarDisplayV
   const weekDays = getWeekDays(currentDate);
   const today = new Date();
 
+  // Wall-clock time for an absolute slot index, for the window-range label
+  // in the footer -- mirrors the meeting picker's own `slotTime` helper.
+  // Defined here (rather than down by the JSX, where it used to live) so the
+  // footer-height measurement below can build the exact string that will be
+  // rendered.
+  const slotIndexToTime = (slotIndex: number): Date => {
+    const d = new Date(weekDays[0]!);
+    const hour = startHour + Math.floor(slotIndex / 2);
+    const minute = (slotIndex % 2) * 30;
+    d.setHours(hour, minute, 0, 0);
+    return d;
+  };
+
   // Vertical budget, and the window of slots that actually fits in it.
   //
   // This used to render EVERY slot unconditionally at a height of
@@ -130,12 +156,38 @@ export function CalendarDisplayView({ config, focused = true }: CalendarDisplayV
   // actually available once the real all-day row ate into it.
   const allDayRows = allDayRowCount(events, weekDays);
   const headerHeight = 5 + allDayRows;
-  const footerHeight = 1; // Help bar
-  const availableHeight = Math.max(1, termHeight - headerHeight - footerHeight);
+
+  // Footer height: the actual rendered row count of the footer text, not a
+  // flat guess. Root Box has paddingX={1}, so the footer's available width
+  // is termWidth minus that 2-column padding.
+  //
+  // The footer that actually renders is a dynamic time-range label (e.g.
+  // "08:00-14:00  ") followed by FOOTER_HINT -- not the hint alone -- and
+  // the label widens the string enough to push it onto an extra wrapped row
+  // the hint-only measurement would miss. The label's own text depends on
+  // `windowStart`/`visibleSlotCount`, which is what this budget calculation
+  // produces, so (matching table.tsx's identical two-pass treatment) this
+  // runs the estimate twice: once with just the hint to get a candidate
+  // window, then measures the ACTUAL footer string that candidate would
+  // produce and re-derives the window from that.
+  const innerWidth = Math.max(1, termWidth - 2);
   const totalSlots = (endHour - startHour) * 2; // 2 slots per hour
-  const visibleSlotCount = Math.max(1, Math.min(totalSlots, availableHeight));
-  const maxTimeScroll = Math.max(0, totalSlots - visibleSlotCount);
-  const windowStart = Math.min(Math.max(0, timeScroll), maxTimeScroll);
+  let footerRows = wrappedLineCount(FOOTER_HINT, innerWidth);
+  let availableHeight = Math.max(1, termHeight - headerHeight - footerRows);
+  let visibleSlotCount = Math.max(1, Math.min(totalSlots, availableHeight));
+  let maxTimeScroll = Math.max(0, totalSlots - visibleSlotCount);
+  let windowStart = Math.min(Math.max(0, timeScroll), maxTimeScroll);
+  const actualFooter =
+    (totalSlots > visibleSlotCount
+      ? `${formatTime(slotIndexToTime(windowStart))}-${formatTime(
+          slotIndexToTime(windowStart + visibleSlotCount)
+        )}  `
+      : "") + FOOTER_HINT;
+  footerRows = wrappedLineCount(actualFooter, innerWidth);
+  availableHeight = Math.max(1, termHeight - headerHeight - footerRows);
+  visibleSlotCount = Math.max(1, Math.min(totalSlots, availableHeight));
+  maxTimeScroll = Math.max(0, totalSlots - visibleSlotCount);
+  windowStart = Math.min(Math.max(0, timeScroll), maxTimeScroll);
   const baseSlotHeight = Math.max(1, Math.floor(availableHeight / visibleSlotCount));
   const extraRows = availableHeight - (baseSlotHeight * visibleSlotCount);
   // Create array of slot heights - first `extraRows` slots get +1 height.
@@ -226,16 +278,6 @@ export function CalendarDisplayView({ config, focused = true }: CalendarDisplayV
   // Check if there are any all-day events
   const hasAllDayEvents = events.some(isAllDayEvent);
 
-  // Wall-clock time for an absolute slot index, for the window-range label
-  // in the footer -- mirrors the meeting picker's own `slotTime` helper.
-  const slotIndexToTime = (slotIndex: number): Date => {
-    const d = new Date(weekDays[0]!);
-    const hour = startHour + Math.floor(slotIndex / 2);
-    const minute = (slotIndex % 2) * 30;
-    d.setHours(hour, minute, 0, 0);
-    return d;
-  };
-
   return (
     <Box flexDirection="column" width={termWidth} height={termHeight} paddingX={1}>
       {/* Title bar */}
@@ -294,7 +336,7 @@ export function CalendarDisplayView({ config, focused = true }: CalendarDisplayV
                 slotIndexToTime(windowStart + visibleSlotCount)
               )}  `
             : ""}
-          {"↑↓ scroll  •  ←/→ week  •  t today  •  q quit"}
+          {FOOTER_HINT}
         </Text>
       </Box>
     </Box>

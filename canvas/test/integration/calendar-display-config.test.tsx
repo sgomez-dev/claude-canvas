@@ -1,10 +1,11 @@
-import { test, expect, afterEach } from "bun:test";
+import { test, expect, afterEach, setSystemTime } from "bun:test";
 import React from "react";
 import { Calendar } from "../../src/canvases/calendar";
 import { renderCanvas, stubRealStdout } from "../harness/render";
 import { openConnection } from "../../src/runtime/client";
 import { awaitRecord, deleteRecord } from "../../src/runtime/registry";
 import { nextOutcome } from "../harness/ipc";
+import { FIXED_CLOCK } from "../fixtures/configs";
 
 // The `display` scenario's `meetingPickerConfigError`-sibling gap: unlike
 // meeting-picker (which validates startHour/endHour via
@@ -88,4 +89,38 @@ test("a normal valid startHour/endHour range like {9, 17} still renders", async 
 
   r.dispose();
   restore();
+});
+
+// The gap this closes: every OTHER fixture in this suite sets
+// startHour/endHour explicitly, so a change to the ACTUAL defaults (SKILL.md
+// promises 6am-22:00) would silently pass the whole existing test suite --
+// nothing exercises what a caller who omits both fields actually gets. `{}`
+// (no startHour, no endHour at all, not even `undefined` values for them)
+// is display.tsx's real "caller declared no hours" case.
+test("with no startHour/endHour override, the documented 6am-10pm default range renders", async () => {
+  // Pinned: the "now" indicator line overwrites whichever hour label it
+  // falls on (see display-view.tsx's nowLinePosition), so an unpinned real
+  // clock landing on 6:xx am would overwrite the very label this test
+  // checks for -- flaky in exactly the way that let the underlying default
+  // go uncovered.
+  setSystemTime(FIXED_CLOCK);
+  try {
+    const id = "cdc-defaults";
+    const { r, restore } = mount(id, {});
+    const frame = await r.settle();
+    expect(frame).not.toContain("calendar config");
+    // The first visible hour label is the default startHour (6), formatted
+    // 12-hour: formatHour(6) -> "6", getAmPm(6) -> "am".
+    expect(frame).toContain("6am");
+    // At 70x18 the historical no-all-day-events header/footer budget leaves
+    // a 12-slot (6-hour) visible window; from a 6am default start that is
+    // "06:00-12:00" -- pinning the actual DEFAULT_START_HOUR value, not
+    // just that some hour label rendered.
+    expect(frame).toContain("06:00-12:00");
+
+    r.dispose();
+    restore();
+  } finally {
+    setSystemTime();
+  }
 });

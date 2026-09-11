@@ -1,9 +1,13 @@
 import React from "react";
 import { Box, Text } from "ink";
-import { formatTime } from "../format";
-import { TEXT_COLORS } from "./colors";
-import { formatDayName, formatDayNumber, isAllDayEvent, isSameDay } from "./dates";
-import type { CalendarEvent } from "./types";
+import {
+  formatDayName,
+  formatDayNumber,
+  isAllDayEvent,
+  isSameDay,
+  TEXT_COLORS,
+  type CalendarEvent,
+} from "./types";
 
 /**
  * The week grid's three presentational pieces: a day's column of slots, the

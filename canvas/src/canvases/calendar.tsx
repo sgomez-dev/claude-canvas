@@ -1,5 +1,5 @@
-import React, { useState, useEffect, useRef } from "react";
-import { Box, Text, useInput, useApp, useStdout } from "ink";
+import React, { useEffect, useRef } from "react";
+import { Box, Text, useInput, useApp } from "ink";
 import { MeetingPickerView } from "./calendar/scenarios/meeting-picker-view";
 import {
   isMeetingPickerConfig,
@@ -10,41 +10,12 @@ import {
   type MeetingPickerConfig,
 } from "../scenarios/types";
 import { useCanvasServer } from "../runtime/use-canvas-server";
-import { formatTime } from "./format";
-// Re-exported because this module's public surface has always included it;
-// the definition now lives in one place instead of being copied here
+// Re-exported because this module's public surface has always included them;
+// the definitions now live in one place instead of being copied here
 // byte-for-byte.
-export type { CalendarEvent } from "./calendar/types";
-import type { CalendarEvent } from "./calendar/types";
-import {
-  allDayRowCount,
-  formatDayName,
-  formatDayNumber,
-  formatHour,
-  formatMonthYear,
-  getAmPm,
-  getWeekDays,
-  isAllDayEvent,
-  isSameDay,
-} from "./calendar/dates";
+export type { CalendarEvent, CalendarConfig } from "./calendar/types";
+import type { CalendarConfig } from "./calendar/types";
 import { CalendarDisplayView } from "./calendar/display-view";
-
-export interface CalendarConfig {
-  title?: string;
-  events?: Array<{
-    id: string;
-    title: string;
-    startTime: string;
-    endTime: string;
-    color?: string;
-    allDay?: boolean;
-  }>;
-  // Meeting picker config (when scenario is "meeting-picker")
-  calendars?: MeetingPickerConfig["calendars"];
-  slotGranularity?: MeetingPickerConfig["slotGranularity"];
-  startHour?: number;
-  endHour?: number;
-}
 
 interface Props {
   id: string;
@@ -52,10 +23,6 @@ interface Props {
   enabled?: boolean;
   scenario?: string;
 }
-
-const START_HOUR = 6;
-const END_HOUR = 22;
-
 
 // Thin router: calls no hooks of its own, so switching scenarios never
 // changes which hooks run for a given mount (a rules-of-hooks violation the

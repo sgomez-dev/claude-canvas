@@ -24,6 +24,19 @@ interface Props {
   enabled?: boolean;
 }
 
+// The footer's two possible static hints -- measured (via wrappedLineCount
+// below) AND rendered from these same constants, so the two can never drift
+// apart. Previously typed as bare literals both in a hardcoded
+// `footerHeight = 2` and again in the JSX, which assumed the footer is
+// always exactly a 2-line block (the move-hint line, plus the cursor-readout
+// line). At narrow widths the move-hint line itself wraps -- reproduced at
+// 64, 60, 58, 52, 34 and 30 columns, where "q quit" fell off the end
+// entirely because the flat "2" under-reserved the real footer height, and
+// the grid was sized for more rows than the pane actually left for it once
+// the footer wrapped.
+const FOOTER_HINT = "↑↓←→ move • Enter pick • n/p week • t today • q quit";
+const COUNTDOWN_HINT = "Esc to cancel";
+
 interface SlotInfo {
   dayIndex: number;
   slotIndex: number;
@@ -241,6 +254,44 @@ export function MeetingPickerView({ id, config, enabled = false }: Props) {
   const slotsPerHour = 60 / slotGranularity;
   const totalSlots = (endHour - startHour) * slotsPerHour;
 
+  const weekDays = getWeekDays(currentDate);
+  const today = new Date();
+
+  // Absolute slot index to its wall-clock time, for the window label.
+  // Defined here (rather than down by the render functions, where it used to
+  // live) so the footer-height measurement below can build the exact string
+  // that will be rendered.
+  const slotTime = (slotIndex: number): Date => {
+    const d = new Date(weekDays[0]!);
+    const minutes = slotIndex * slotGranularity;
+    d.setHours(startHour + Math.floor(minutes / 60), minutes % 60, 0, 0);
+    return d;
+  };
+
+  // Get slot info for the cursor's current position. Defined here (rather
+  // than down by the mouse handlers, where it used to live) for the same
+  // reason as slotTime above -- the footer-height measurement needs it.
+  const getCursorSlotInfo = useCallback((): SlotInfo | null => {
+    if (cursorDay < 0 || cursorDay >= 7) return null;
+    if (cursorSlot < 0 || cursorSlot >= totalSlots) return null;
+
+    // cursorDay is checked to be in [0, 7) above, so weekDays[cursorDay]
+    // always exists.
+    const day = weekDays[cursorDay]!;
+    const slotMinutes = cursorSlot * slotGranularity;
+    const startTime = new Date(day);
+    startTime.setHours(
+      startHour + Math.floor(slotMinutes / 60),
+      slotMinutes % 60,
+      0,
+      0
+    );
+    const endTime = new Date(startTime);
+    endTime.setMinutes(endTime.getMinutes() + slotGranularity);
+
+    return { dayIndex: cursorDay, slotIndex: cursorSlot, day, startTime, endTime };
+  }, [cursorDay, cursorSlot, weekDays, totalSlots, slotGranularity, startHour]);
+
   // Vertical budget, and the window of slots that actually fits in it.
   //
   // This used to render EVERY slot unconditionally at a height of
@@ -269,9 +320,53 @@ export function MeetingPickerView({ id, config, enabled = false }: Props) {
   // paying that cost when neither the calendar list nor the width changed.
   const legendRows = useMemo(() => legendLineCount(calendars, legendWidth), [calendars, legendWidth]);
   const headerHeight = 4 + legendRows;
-  const footerHeight = 2;
-  const availableHeight = Math.max(1, termHeight - headerHeight - footerHeight);
-  const visibleSlotCount = Math.max(1, Math.min(totalSlots, availableHeight));
+
+  // Footer height: the actual rendered row count of the footer, not a flat
+  // guess. This used to be a bare `2`, assuming the footer is always exactly
+  // a 2-line block (the move-hint line, plus the cursor-readout line). At
+  // narrow widths the move-hint line itself wraps -- reproduced at 64, 60,
+  // 58, 52, 34 and 30 columns, where "q quit" fell off the end entirely
+  // because the flat "2" under-reserved the real footer height, so the grid
+  // was sized for more rows than the pane actually left for it once the
+  // footer wrapped.
+  //
+  // Two-pass, the same shape as legendRows above and table.tsx's own
+  // footerRows: the window-range label and the cursor readout both depend on
+  // `visibleSlotCount`/`windowStart`, which is what this calculation itself
+  // produces, so this estimates once with just the static hint to get a
+  // candidate window, then measures the ACTUAL strings that window would
+  // produce and re-derives the window from that. Root Box has paddingX={1},
+  // so the footer's available width is the same `termWidth - 2` as the
+  // legend's.
+  const innerWidth = legendWidth;
+  let footerRows = wrappedLineCount(FOOTER_HINT, innerWidth) + 1; // +1: baseline guess for the cursor-readout line, refined below
+  let availableHeight = Math.max(1, termHeight - headerHeight - footerRows);
+  let visibleSlotCount = Math.max(1, Math.min(totalSlots, availableHeight));
+
+  const footerWindowLabel =
+    totalSlots > visibleSlotCount
+      ? `${formatTime(slotTime(windowStart))}-${formatTime(slotTime(windowStart + visibleSlotCount))}  `
+      : "";
+  const footerLine1 = footerWindowLabel + FOOTER_HINT;
+  const footerCursorInfo = getCursorSlotInfo();
+  // The busy suffix is measured unconditionally -- it only ever makes the
+  // line LONGER, so this can never under-reserve the footer's real height.
+  // It can, in the rare case a free slot's line would otherwise fit exactly
+  // to the column, reserve one row more than strictly necessary. Preferred
+  // over threading the real busyMap lookup (built further down, from
+  // `calendars`) up to this point purely to measure a suffix -- safe in the
+  // direction that matters, since over-reserving trims a row off the grid
+  // while under-reserving loses the footer text.
+  const footerLine2 = footerCursorInfo
+    ? `${formatTime(footerCursorInfo.startTime)} - ${formatTime(footerCursorInfo.endTime)} ${formatWeekday(footerCursorInfo.day)} (busy)`
+    : "";
+  footerRows =
+    countdown !== null && selectedSlot
+      ? wrappedLineCount(COUNTDOWN_HINT, innerWidth)
+      : wrappedLineCount(footerLine1, innerWidth) +
+        (footerLine2 ? wrappedLineCount(footerLine2, innerWidth) : 0);
+  availableHeight = Math.max(1, termHeight - headerHeight - footerRows);
+  visibleSlotCount = Math.max(1, Math.min(totalSlots, availableHeight));
 
   // Reconcile the sticky window against genuine geometry changes only
   // (a terminal resize changing visibleSlotCount, or totalSlots changing).
@@ -294,9 +389,6 @@ export function MeetingPickerView({ id, config, enabled = false }: Props) {
   const slotHeights = Array.from({ length: visibleSlotCount }, (_, i) =>
     baseSlotHeight + (i < extraRows ? 1 : 0)
   );
-
-  const weekDays = getWeekDays(currentDate);
-  const today = new Date();
 
   // Build busy map: Map<"dayIndex-slotIndex", color[]>
   const busyMap = new Map<string, string[]>();
@@ -486,28 +578,6 @@ export function MeetingPickerView({ id, config, enabled = false }: Props) {
     onMove: handleMouseMove,
   });
 
-  // Get slot info for cursor position
-  const getCursorSlotInfo = useCallback((): SlotInfo | null => {
-    if (cursorDay < 0 || cursorDay >= 7) return null;
-    if (cursorSlot < 0 || cursorSlot >= totalSlots) return null;
-
-    // cursorDay is checked to be in [0, 7) above, so weekDays[cursorDay]
-    // always exists.
-    const day = weekDays[cursorDay]!;
-    const slotMinutes = cursorSlot * slotGranularity;
-    const startTime = new Date(day);
-    startTime.setHours(
-      startHour + Math.floor(slotMinutes / 60),
-      slotMinutes % 60,
-      0,
-      0
-    );
-    const endTime = new Date(startTime);
-    endTime.setMinutes(endTime.getMinutes() + slotGranularity);
-
-    return { dayIndex: cursorDay, slotIndex: cursorSlot, day, startTime, endTime };
-  }, [cursorDay, cursorSlot, weekDays, totalSlots, slotGranularity, startHour]);
-
   // Keyboard controls
   useInput((input, key) => {
     if (input === "q" || key.escape) {
@@ -612,14 +682,6 @@ export function MeetingPickerView({ id, config, enabled = false }: Props) {
   });
 
   // Render time column
-  // Absolute slot index to its wall-clock time, for the window label.
-  const slotTime = (slotIndex: number): Date => {
-    const d = new Date(weekDays[0]!);
-    const minutes = slotIndex * slotGranularity;
-    d.setHours(startHour + Math.floor(minutes / 60), minutes % 60, 0, 0);
-    return d;
-  };
-
   const renderTimeColumn = () => {
     const slots: React.JSX.Element[] = [];
     for (let visibleIndex = 0; visibleIndex < visibleSlotCount; visibleIndex++) {
@@ -807,7 +869,7 @@ export function MeetingPickerView({ id, config, enabled = false }: Props) {
       {/* Help bar */}
       <Box flexDirection="column">
         {countdown !== null && selectedSlot ? (
-          <Text color="gray">Esc to cancel</Text>
+          <Text color="gray">{COUNTDOWN_HINT}</Text>
         ) : (
           <>
             {/* Sized to fit 70 columns with the window label prefixed: the
@@ -821,7 +883,7 @@ export function MeetingPickerView({ id, config, enabled = false }: Props) {
                     slotTime(windowStart + visibleSlotCount)
                   )}  `
                 : ""}
-              {"↑↓←→ move • Enter pick • n/p week • t today • q quit"}
+              {FOOTER_HINT}
             </Text>
             {(() => {
               const cursorInfo = getCursorSlotInfo();

@@ -876,3 +876,60 @@ block: `image` is not a dashboard region kind; the four primitives carry an
 inert `sentRef` reset; the dashboard region footer hint still says "Esc:
 cancel" when Escape closes the whole dashboard; and the in-flight read guard
 in `image.tsx` remains correct but untestable from here.
+
+### Undisclosed: the calendar split, and its independent-review fix wave
+
+Not part of this ledger until now, because it never was: commit `4d6633d`
+("fix(graphics): find the real terminal through tmux by looking, not
+asking") also carried a 787-to-189-line split of `calendar.tsx` into five new
+files -- `calendar/colors.ts`, `calendar/dates.ts`, `calendar/demo-events.ts`,
+`calendar/display-view.tsx`, `calendar/week-grid.tsx` -- with zero mention of
+the calendar anywhere in that commit's subject or body, and none of those
+five names appear anywhere else in this ledger or the spec it references.
+The refactor itself was sound in shape (shell/view split, matching sub-project
+1's own pattern), but it landed on `main` unreviewed.
+
+An independent Opus review caught what that unreviewed pass missed, and a
+follow-up session (commit `9f93b70`) fixed it:
+
+- **`colors.ts`/`dates.ts` duplicated symbols that already lived in
+  `calendar/types.ts`.** `INK_COLORS`, `TEXT_COLORS`, `getWeekDays`,
+  `formatDayName`, `formatDayNumber`, `formatMonthYear`, `formatHour`,
+  `getAmPm`, `isSameDay` and `isAllDayEvent` were lifted out of the old
+  `calendar.tsx` into two NEW files instead of into the type module that
+  already held byte-identical copies -- meaning `meeting-picker-view.tsx`
+  (which has always read from `./types`) and `display-view.tsx`/
+  `week-grid.tsx` (reading the new `./dates`/`./colors`) were two scenarios
+  answering to two independent copies of the same helpers. Proven directly:
+  stubbing `formatHour` in `types.ts` on the pre-fix tree left the `display`
+  scenario showing its real hour labels while `meeting-picker` picked up the
+  stub -- confirming the split, not merely asserting it. Fixed by merging
+  both files into `calendar/types.ts` (this project's established
+  single-source-of-truth location for every other canvas kind) and deleting
+  the duplicates; the same stub now changes both scenarios identically.
+- **Two views measured their footer's reserved row budget with a flat
+  constant** (`footerHeight = 1` in `display-view.tsx`, `= 2` in
+  `meeting-picker-view.tsx`) instead of the `wrappedLineCount` pattern this
+  project had already used in picker/table/diff/form/tree for exactly this
+  shape of bug. At a narrow enough width the footer's dynamic window-range
+  label pushes it onto more wrapped rows than the constant assumed.
+  `meeting-picker` visibly lost `"q quit"` at several of the reviewer's
+  measured widths (64/60/58/52 columns, confirmed by reverting the fix and
+  re-running the same test); `display` never actually overflowed its pane at
+  any width -- a second, unrelated, still-open bug in the same file
+  (`headerHeight = 5` over-counts the title row by exactly one, always)
+  happens to cancel the footer's under-count. Both views now measure the
+  real rendered string.
+- Bundled in the same pass: dead code the split left behind in `calendar.tsx`
+  and `week-grid.tsx`; a circular import between `calendar.tsx` and
+  `calendar/display-view.tsx` (safe only by `verbatimModuleSyntax` erasing
+  the type-only half), resolved by moving `CalendarConfig` into
+  `calendar/types.ts`; a missing test for `display`'s actual default hour
+  range; and two `SKILL.md` gaps (`allDay` was undocumented, `events` was
+  documented as required when it is optional).
+
+**Found, not fixed:** the title-line-wrap defect noted above
+(`headerHeight`'s title assumption) predates this refactor entirely and is
+unrelated to either bug this pass closed -- confirmed by reproducing it
+against the ORIGINAL footer-height code too. Left open, the same way this
+ledger's own "found during X, deferred to Y" entries above are.

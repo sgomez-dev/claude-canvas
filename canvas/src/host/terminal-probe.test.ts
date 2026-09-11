@@ -65,6 +65,49 @@ test("a stale TERM_PROGRAM loses to what the process tree actually shows", () =>
   ).toBe("sixel");
 });
 
+// THE second bug this file exists for: TERMINALS entries keyed off `TERM`
+// (kitty, foot) rather than `TERM_PROGRAM`/`WT_SESSION`. `outerTerminalEnv`
+// used to return `{ ...terminal.env, TERM: env.TERM ?? "xterm-256color" }` --
+// an unconditional trailing key that stomped kitty's/foot's own `TERM`
+// marker with the STALE ambient one a tmux server actually carries. The
+// other six TERMINALS rows all key off TERM_PROGRAM/WT_SESSION and so
+// survived the spread untouched; only these two were silently dead,
+// indistinguishable from an unrecognised terminal.
+const KITTY_TREE: ProcessRow[] = [
+  { pid: 81000, ppid: 80999, command: "-zsh" },
+  { pid: 81234, ppid: 81000, command: "tmux" },
+  { pid: 80999, ppid: 1, command: "/usr/bin/kitty" },
+  { pid: 1, ppid: 0, command: "/sbin/launchd" },
+];
+
+const FOOT_TREE: ProcessRow[] = [
+  { pid: 91000, ppid: 90999, command: "bash" },
+  { pid: 91234, ppid: 91000, command: "tmux" },
+  { pid: 90999, ppid: 1, command: "/usr/bin/foot" },
+  { pid: 1, ppid: 0, command: "/sbin/init" },
+];
+
+test("kitty's own TERM marker survives the walk instead of being stomped by the ambient TERM", () => {
+  // The stale ambient TERM a real tmux server carries from whichever client
+  // started it -- deliberately NOT "xterm-kitty", so a passing test can only
+  // mean the terminal's own marker won.
+  const staleEnv = { TMUX: "/tmp/tmux-501/default,1,0", TERM: "tmux-256color" };
+  const s = source("/dev/pts/3", KITTY_TREE, [81000, 81234]);
+  expect(outerTerminalEnv(s, staleEnv)).toEqual({ TERM: "xterm-kitty" });
+  // End to end: the tmux server was started elsewhere (hence the stale
+  // TERM), but the CURRENT attaching terminal is kitty, and the probe must
+  // identify that, not silently fall back to whatever tier "tmux-256color"
+  // happens to still resolve to.
+  expect(resolveGraphics(staleEnv, undefined, s)).toBe("kitty");
+});
+
+test("foot's own TERM marker survives the walk instead of being stomped by the ambient TERM", () => {
+  const staleEnv = { TMUX: "/tmp/tmux-501/default,1,0", TERM: "tmux-256color" };
+  const s = source("/dev/pts/4", FOOT_TREE, [91000, 91234]);
+  expect(outerTerminalEnv(s, staleEnv)).toEqual({ TERM: "foot" });
+  expect(resolveGraphics(staleEnv, undefined, s)).toBe("sixel");
+});
+
 test("every pid on the tty is tried, not only the first one listed", () => {
   // `ps` gives no ordering guarantee, so the terminal may only be reachable
   // from a later row.

@@ -1,7 +1,23 @@
-import { test, expect } from "bun:test";
+import { test, expect, mock } from "bun:test";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { unlink } from "node:fs/promises";
+import * as terminalProbeReal from "./host/terminal-probe";
+import * as hostReal from "./host";
+import type { ProbeSource, ProcessRow } from "./host/terminal-probe";
+
+// Captured as PLAIN locals, not read back through the namespace imports
+// inside a restore factory: both are live bindings, so once a test below
+// has mocked either module, reading `terminalProbeReal.systemProbe` or
+// `hostReal.detectHost` again would resolve to the FAKE just installed --
+// restoring with `{...terminalProbeReal}`/`{...hostReal}` alone would
+// silently reinstall the fake forever, leaking it into every test file that
+// runs after this one in the same process. Captured once, before any test
+// in this file mocks anything, so each always names the true original. Same
+// technique, same reason, as `originalDecodePng` in
+// test/integration/image.test.tsx.
+const realSystemProbe = terminalProbeReal.systemProbe;
+const realDetectHost = hostReal.detectHost;
 import {
   emit,
   resolveWaitTimeout,
@@ -476,6 +492,167 @@ test("show rejects a misspelled --graphics rather than silently painting blocks"
   } finally {
     if (before === undefined) delete process.env.CANVAS_GRAPHICS;
     else process.env.CANVAS_GRAPHICS = before;
+  }
+});
+
+// --- systemProbe wiring (Task review, 2026-09-11) -------------------------
+//
+// Sabotage-confirmed gap: dropping `systemProbe` from either runShow's or
+// runSpawn's `resolveGraphics(process.env, ..., systemProbe)` call left the
+// whole suite (610 tests at the time) green. Every existing test either
+// pins CANVAS_GRAPHICS (which short-circuits before any probe is
+// consulted) or leaves TMUX unset (which skips the probe branch regardless
+// of whether it was wired in) -- so nothing actually exercised the real
+// production call sites, only resolveGraphics called directly with a probe
+// argument the test itself supplied. These two tests mock the REAL
+// systemProbe cli.ts imports, then call runShow/runSpawn exactly as `show`/
+// `spawn` do, so a passing result is proof the wiring survives, not proof
+// resolveGraphics works (graphics.test.ts already covers that).
+
+const WEZTERM_TREE: ProcessRow[] = [
+  { pid: 72795, ppid: 72794, command: "-zsh" },
+  { pid: 73178, ppid: 72795, command: "tmux" },
+  { pid: 72794, ppid: 1, command: "/Applications/WezTerm.app/Contents/MacOS/wezterm-gui" },
+  { pid: 1, ppid: 0, command: "/sbin/launchd" },
+];
+
+const fakeProbe: ProbeSource = {
+  clientTty: () => "/dev/ttys017",
+  processes: () => WEZTERM_TREE,
+  pidsOnTty: () => [72795, 73178],
+};
+
+test("show resolves the probed tier when inside tmux with no override, not just the plain-environment guess", async () => {
+  const saved = {
+    graphics: process.env.CANVAS_GRAPHICS,
+    tmux: process.env.TMUX,
+    term: process.env.TERM,
+    termProgram: process.env.TERM_PROGRAM,
+  };
+  mock.module("./host/terminal-probe", () => ({
+    ...terminalProbeReal,
+    systemProbe: fakeProbe,
+  }));
+  try {
+    delete process.env.CANVAS_GRAPHICS;
+    process.env.TMUX = "/tmp/tmux-501/default,1,0";
+    process.env.TERM = "xterm-256color";
+    delete process.env.TERM_PROGRAM;
+
+    const { io } = captureIO();
+    // A config file that does not exist makes runShow fail AFTER it has
+    // set CANVAS_GRAPHICS -- the same technique "show writes the passed
+    // tier into its own environment" above uses -- which is what this
+    // asserts on. Without the probe wired in, plain detectGraphics(process.env)
+    // would land on "quadrants" here (no TERM_PROGRAM, no other markers), a
+    // different tier from the mocked WezTerm tree's "sixel", making the two
+    // cases unmistakable.
+    await runShow(
+      "picker",
+      { id: "cli-graphics-probe", scenario: "select", configFile: "/nonexistent.json" },
+      io
+    );
+    expect(process.env.CANVAS_GRAPHICS!).toBe("sixel");
+  } finally {
+    mock.module("./host/terminal-probe", () => ({
+      ...terminalProbeReal,
+      systemProbe: realSystemProbe,
+    }));
+    if (saved.graphics === undefined) delete process.env.CANVAS_GRAPHICS;
+    else process.env.CANVAS_GRAPHICS = saved.graphics;
+    if (saved.tmux === undefined) delete process.env.TMUX;
+    else process.env.TMUX = saved.tmux;
+    if (saved.term === undefined) delete process.env.TERM;
+    else process.env.TERM = saved.term;
+    if (saved.termProgram === undefined) delete process.env.TERM_PROGRAM;
+    else process.env.TERM_PROGRAM = saved.termProgram;
+  }
+});
+
+test("spawn resolves the probed tier when inside tmux with no override, and passes it in the spawned process's argv", async () => {
+  const id = "cli-test-spawn-probe";
+  const saved = {
+    graphics: process.env.CANVAS_GRAPHICS,
+    tmux: process.env.TMUX,
+    wt: process.env.WT_SESSION,
+    term: process.env.TERM,
+    termProgram: process.env.TERM_PROGRAM,
+  };
+  let capturedArgv: string[] | undefined;
+  mock.module("./host/terminal-probe", () => ({
+    ...terminalProbeReal,
+    systemProbe: fakeProbe,
+  }));
+  // detectHost()/host.open() are replaced with a fake that never spawns a
+  // real pane (this suite runs in CI on all three OSes, none of which are
+  // guaranteed to have tmux or Windows Terminal), but immediately writes a
+  // registry record -- the same stand-in technique the reuse-detection
+  // tests above use with a real startCanvasServer -- so awaitRecord below
+  // finds it on its very first poll instead of waiting out the full
+  // SPAWN_READY_MS timeout.
+  mock.module("./host", () => ({
+    ...hostReal,
+    detectHost: () => ({
+      name: "fake-probe-host",
+      isAvailable: () => true,
+      capabilities: hostReal.baseCapabilities,
+      buildArgv: (spec: { argv: string[] }) => spec.argv,
+      open: async (spec: { argv: string[] }) => {
+        capturedArgv = spec.argv;
+        await writeRecord({
+          id,
+          kind: "picker",
+          scenario: "select",
+          port: 1,
+          token: newToken(),
+          pid: process.pid,
+          startedAt: new Date().toISOString(),
+          host: "fake-probe-host",
+        });
+        return { host: "fake-probe-host" };
+      },
+    }),
+  }));
+  try {
+    delete process.env.CANVAS_GRAPHICS;
+    process.env.TMUX = "/tmp/tmux-501/default,1,0";
+    delete process.env.WT_SESSION;
+    process.env.TERM = "xterm-256color";
+    delete process.env.TERM_PROGRAM;
+
+    const { io, lines, exits } = captureIO();
+    await runSpawn("picker", { id, scenario: "select" }, io);
+    // Unlike runShow, runSpawn's success path calls neither io.exit nor
+    // emit/io.write with an error -- it just returns, and the real CLI
+    // process exits naturally. Only its catch block calls io.exit(1). A
+    // non-empty `exits` here would mean this hit the catch block instead.
+    expect(exits).toEqual([]);
+    const parsed = JSON.parse(lines[0] ?? "{}");
+    expect(parsed.status).toBe("spawned");
+    // Without the probe wired into runSpawn's resolveGraphics call, plain
+    // detectGraphics(process.env) would resolve "quadrants" here instead
+    // (no TERM_PROGRAM/WT_SESSION set), and this --graphics argument is
+    // exactly what the spawned `show` process trusts (see buildShowArgv).
+    const i = capturedArgv?.indexOf("--graphics") ?? -1;
+    expect(i).toBeGreaterThan(-1);
+    expect(capturedArgv?.[i + 1]).toBe("sixel");
+  } finally {
+    mock.module("./host/terminal-probe", () => ({
+      ...terminalProbeReal,
+      systemProbe: realSystemProbe,
+    }));
+    mock.module("./host", () => ({ ...hostReal, detectHost: realDetectHost }));
+    if (saved.graphics === undefined) delete process.env.CANVAS_GRAPHICS;
+    else process.env.CANVAS_GRAPHICS = saved.graphics;
+    if (saved.tmux === undefined) delete process.env.TMUX;
+    else process.env.TMUX = saved.tmux;
+    if (saved.wt === undefined) delete process.env.WT_SESSION;
+    else process.env.WT_SESSION = saved.wt;
+    if (saved.term === undefined) delete process.env.TERM;
+    else process.env.TERM = saved.term;
+    if (saved.termProgram === undefined) delete process.env.TERM_PROGRAM;
+    else process.env.TERM_PROGRAM = saved.termProgram;
+    await deleteRecord(id);
   }
 });
 

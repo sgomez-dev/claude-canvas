@@ -2578,7 +2578,7 @@ function outerTerminalEnv(source, env) {
     for (let depth = 0;depth < MAX_DEPTH && current !== undefined; depth++) {
       for (const terminal of TERMINALS) {
         if (terminal.match.test(current.command)) {
-          return { ...terminal.env, TERM: env.TERM ?? "xterm-256color" };
+          return { ...terminal.env, TERM: terminal.env.TERM ?? env.TERM ?? "xterm-256color" };
         }
       }
       if (current.ppid <= 1)
@@ -2650,7 +2650,8 @@ function isGraphicsTier(value) {
 function detectGraphics(env) {
   const program = env.TERM_PROGRAM ?? "";
   const term = env.TERM ?? "";
-  if ((term.length === 0 || term === "dumb") && env.WT_SESSION === undefined)
+  const wtSession = env.WT_SESSION ?? "";
+  if ((term.length === 0 || term === "dumb") && wtSession.length === 0)
     return "none";
   if (env.KITTY_WINDOW_ID !== undefined || term === "xterm-kitty")
     return "kitty";
@@ -2662,7 +2663,7 @@ function detectGraphics(env) {
     return "sixel";
   if (term === "foot" || term === "foot-extra")
     return "sixel";
-  if (env.WT_SESSION !== undefined)
+  if (wtSession.length > 0)
     return "sixel";
   return "quadrants";
 }

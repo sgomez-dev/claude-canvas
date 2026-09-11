@@ -129,7 +129,16 @@ test("a misspelled override or argument is rejected, naming the valid tiers", ()
   );
 });
 
-test("isGraphicsTier accepts exactly the five tiers", () => {
+// WT_SESSION="" (present but empty) must be treated the same as absent,
+// consistent with how CANVAS_GRAPHICS="" is treated elsewhere in this file
+// (an empty override is ignored rather than treated as a value). Before this
+// fix, `env.WT_SESSION !== undefined` treated an empty string as "present".
+test("an empty WT_SESSION is treated as absent, not as a Windows Terminal session", () => {
+  expect(detectGraphics({ WT_SESSION: "" })).toBe("none");
+  expect(detectGraphics({ WT_SESSION: "", TERM: "xterm-256color" })).toBe("quadrants");
+});
+
+test("isGraphicsTier accepts exactly the six tiers", () => {
   for (const t of ["kitty", "iterm2", "sixel", "quadrants", "halfblocks", "none"]) {
     expect(isGraphicsTier(t)).toBe(true);
   }

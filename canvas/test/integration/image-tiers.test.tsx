@@ -116,16 +116,27 @@ test("the quadrants tier renders block text, and differs from halfblocks", async
 // detectGraphics reads them and CI runners do not have the developer's
 // terminal. Environment this test depends on is environment this test has
 // to state -- the same lesson as TZ, colour and locale in test/setup.ts.
+//
+// WT_SESSION is deleted here too, belt-and-suspenders alongside the same fix
+// in test/setup.ts: detectGraphics checks it INDEPENDENTLY of TERM/
+// TERM_PROGRAM (see the comment above the bailout in host/graphics.ts), so
+// pinning only those two variables does not stop it from leaking through. A
+// real Windows Terminal session -- or a developer with one open elsewhere
+// whose shell inherited the variable -- made this test detect "sixel"
+// instead of "quadrants" with both of the other two pins in place; confirmed
+// directly, 9 pass/1 fail with WT_SESSION set, 10 pass/0 fail without it.
 test("with no override, a plain terminal detects quadrants", async () => {
   const saved = {
     graphics: process.env.CANVAS_GRAPHICS,
     term: process.env.TERM,
     program: process.env.TERM_PROGRAM,
+    wtSession: process.env.WT_SESSION,
   };
   try {
     delete process.env.CANVAS_GRAPHICS;
     process.env.TERM = "xterm-256color";
     process.env.TERM_PROGRAM = "Apple_Terminal";
+    delete process.env.WT_SESSION;
 
     const auto = renderCanvas(<Image id="tier-default" config={CONFIG} enabled={false} />, {
       columns: 40,
@@ -153,6 +164,8 @@ test("with no override, a plain terminal detects quadrants", async () => {
     else process.env.TERM = saved.term;
     if (saved.program === undefined) delete process.env.TERM_PROGRAM;
     else process.env.TERM_PROGRAM = saved.program;
+    if (saved.wtSession === undefined) delete process.env.WT_SESSION;
+    else process.env.WT_SESSION = saved.wtSession;
   }
 });
 

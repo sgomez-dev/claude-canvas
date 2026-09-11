@@ -106,7 +106,16 @@ export function outerTerminalEnv(
     for (let depth = 0; depth < MAX_DEPTH && current !== undefined; depth++) {
       for (const terminal of TERMINALS) {
         if (terminal.match.test(current.command)) {
-          return { ...terminal.env, TERM: env.TERM ?? "xterm-256color" };
+          // The matched terminal's OWN `TERM` (kitty and foot each carry
+          // one, since they're identified by TERM rather than TERM_PROGRAM)
+          // must win over the real environment's, not be overwritten by it.
+          // This used to be `{ ...terminal.env, TERM: env.TERM ?? ... }`,
+          // an unconditional trailing key that stomped kitty's and foot's
+          // own `TERM` with whatever the ambient (usually stale, tmux-set)
+          // `TERM` happened to be -- silently downgrading both to the
+          // generic fallback tier. See terminal-probe.test.ts for the exact
+          // bug shape this is guarding against.
+          return { ...terminal.env, TERM: terminal.env.TERM ?? env.TERM ?? "xterm-256color" };
         }
       }
       if (current.ppid <= 1) break;

@@ -79,6 +79,18 @@ export function Image({
   // instead of taking the canvas down mid-render with no message.
   const environment = useMemo(() => {
     try {
+      // No `systemProbe` third argument here, unlike the other three
+      // resolveGraphics call sites (host/types.ts, cli.ts's runShow and
+      // runSpawn). Safe only because `runShow` writes CANVAS_GRAPHICS into
+      // this process's own environment BEFORE renderCanvas (and therefore
+      // this component) ever runs -- resolveGraphics returns on that
+      // override before it would otherwise fall to the probe, so the probe
+      // branch is unreachable from here regardless. This canvas has no
+      // other way to be started (see KIND_DEFAULT_SCENARIO/renderCanvas in
+      // cli.ts/canvases/index.tsx), so the invariant holds by construction,
+      // not by luck -- but it is non-obvious from this file alone, hence
+      // this comment rather than wiring the probe through for a branch that
+      // can never execute.
       return {
         tier: resolveGraphics(process.env),
         cell: resolveCellPixels(process.env),
